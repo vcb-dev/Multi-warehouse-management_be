@@ -1,0 +1,84 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import {
+  InviteUserDto,
+  ListUsersQueryDto,
+  PutWarehouseRolesDto,
+  UpdateUserStatusDto,
+} from './rbac.dto';
+import { InvitationService } from './invitation.service';
+import { UserAdminService } from './user-admin.service';
+
+@ApiTags('users')
+@ApiBearerAuth()
+@Controller('users')
+export class UsersController {
+  constructor(
+    private users: UserAdminService,
+    private invitations: InvitationService,
+  ) {}
+
+  /** Dropdown gán đơn — chỉ id + tên, user active. */
+  @Get('assignable')
+  listAssignable(@Query('search') search?: string) {
+    return this.users.listAssignable(search);
+  }
+
+  @Get()
+  @RequirePermission('staff:manage')
+  list(@Query() query: ListUsersQueryDto) {
+    return this.users.list(query);
+  }
+
+  @Get(':id')
+  @RequirePermission('staff:manage')
+  findOne(@Param('id') id: string) {
+    return this.users.findOne(id);
+  }
+
+  @Post('invite')
+  @RequirePermission('staff:manage')
+  invite(@Body() dto: InviteUserDto) {
+    return this.invitations.invite(dto);
+  }
+
+  @Post(':id/resend-invite')
+  @RequirePermission('staff:manage')
+  resend(@Param('id') id: string) {
+    return this.invitations.resend(id);
+  }
+
+  @Patch(':id/status')
+  @RequirePermission('staff:manage')
+  setStatus(@Param('id') id: string, @Body() dto: UpdateUserStatusDto) {
+    return this.users.setStatus(id, dto.is_active);
+  }
+
+  @Put(':id/warehouse-roles')
+  @RequirePermission('staff:manage')
+  putWarehouseRoles(@Param('id') id: string, @Body() dto: PutWarehouseRolesDto) {
+    return this.users.putWarehouseRoles(id, dto);
+  }
+
+  @Delete(':id/warehouse-roles/:warehouseId')
+  @RequirePermission('staff:manage')
+  @HttpCode(204)
+  removeWarehouseRole(
+    @Param('id') id: string,
+    @Param('warehouseId') warehouseId: string,
+  ) {
+    return this.users.removeWarehouseRole(id, warehouseId);
+  }
+}

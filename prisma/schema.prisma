@@ -1,0 +1,933 @@
+// Prisma schema — Module Quản lý kho (006) + stub sản phẩm
+// Chi tiết: specs/006-quan-ly-kho/data-model.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+
+enum UserRole {
+  warehouse_staff
+  purchasing
+  store_manager
+  sales
+  admin
+}
+
+enum PermissionScope {
+  system
+  warehouse
+}
+
+enum AccountStatus {
+  invited
+  active
+  inactive
+}
+
+enum InventoryBucket {
+  on_hand
+  committed
+  packing
+  unavailable
+  incoming
+}
+
+enum MovementType {
+  receipt
+  transfer_out
+  transfer_in
+  return_out
+  return_in
+  adjust
+  order_reserve
+  order_release
+  order_ship
+  packing_start
+  packing_cancel
+  incoming_po
+  incoming_receipt
+  incoming_cancel
+}
+
+enum PoStatus {
+  don_nhap
+  cho_nhap
+  da_nhap
+  huy
+}
+
+enum GoodsReceiptStatus {
+  chua_nhap
+  da_nhap
+}
+
+enum PaymentStatus {
+  chua_thanh_toan
+  da_thanh_toan
+}
+
+enum StockTransferStatus {
+  dang_chuyen
+  da_nhan
+  huy
+}
+
+enum CategoryConditionType {
+  manual
+  auto
+}
+
+enum OrderStatus {
+  ordered
+  processing
+  completed
+  cancelled
+  returned
+}
+
+enum DraftOrderStatus {
+  draft
+  confirmed
+}
+
+enum OrderSource {
+  facebook
+  tiktok
+  shopee
+  pos
+  web
+  zalo
+  live_fb
+  warranty
+  other
+}
+
+enum VoucherType {
+  receipt
+  payment
+}
+
+// --- Auth & config ---
+
+model User {
+  id           BigInt   @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String?  @map("password_hash")
+  name         String?
+  phone        String?
+  roles        UserRole[]
+  status       AccountStatus @default(active)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  warehouses      UserWarehouse[]
+  warehouseRoles  UserWarehouseRole[]
+  invitations     UserInvitation[]
+  inventoryMoves  InventoryMovement[] @relation("MovementCreatedBy")
+  activityLogs    ActivityLog[]
+  assignedSuppliers Supplier[] @relation("SupplierAssignedTo")
+  purchaseOrders  PurchaseOrder[] @relation("PoCreatedBy")
+  goodsReceipts   GoodsReceipt[] @relation("ReiCreatedBy")
+  stockTransfersCreated StockTransfer[] @relation("StnCreatedBy")
+  stockTransfersReceived StockTransfer[] @relation("StnReceivedBy")
+  purchaseReturns PurchaseReturn[] @relation("PvnCreatedBy")
+  ordersCreated   Order[]            @relation("OrderCreatedBy")
+  ordersAssigned  Order[]            @relation("OrderAssignedTo")
+  orderReturns    OrderReturn[]      @relation("OrderReturnCreatedBy")
+  draftOrders     DraftOrder[]       @relation("DraftOrderCreatedBy")
+  vouchersCreated Voucher[]          @relation("VoucherCreatedBy")
+  conversationsAssigned Conversation[] @relation("ConversationAssignedTo")
+  conversationMessages ConversationMessage[] @relation("ConversationMessageAuthor")
+
+  @@map("users")
+}
+
+model UserWarehouse {
+  userId      BigInt @map("user_id")
+  warehouseId BigInt @map("warehouse_id")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@id([userId, warehouseId])
+  @@map("user_warehouses")
+}
+
+// --- RBAC động (009) ---
+
+model Role {
+  id          BigInt   @id @default(autoincrement())
+  name        String
+  code        String   @unique
+  description String?  @db.Text
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  permissions    RolePermission[]
+  warehouseRoles UserWarehouseRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    BigInt          @id @default(autoincrement())
+  key   String          @unique
+  group String
+  label String
+  scope PermissionScope
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       BigInt @map("role_id")
+  permissionId BigInt @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserWarehouseRole {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  warehouseId BigInt   @map("warehouse_id")
+  roleId      BigInt   @map("role_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  role      Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, warehouseId])
+  @@map("user_warehouse_roles")
+}
+
+model UserInvitation {
+  id         BigInt    @id @default(autoincrement())
+  userId     BigInt    @map("user_id")
+  tokenHash  String    @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  acceptedAt DateTime? @map("accepted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_invitations")
+}
+
+model Branch {
+  id       BigInt  @id @default(autoincrement())
+  code     String  @unique
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+
+  warehouses Warehouse[]
+
+  purchaseOrders PurchaseOrder[]
+  priceLists     PriceList[]
+  orders         Order[]
+  draftOrders    DraftOrder[]
+  vouchers       Voucher[]
+
+  @@map("branches")
+}
+
+model Warehouse {
+  id       BigInt  @id @default(autoincrement())
+  code     String  @unique
+  name     String
+  branchId BigInt  @map("branch_id")
+  isActive Boolean @default(true) @map("is_active")
+
+  branch          Branch            @relation(fields: [branchId], references: [id])
+  users           UserWarehouse[]
+  userRoles       UserWarehouseRole[]
+  inventoryLevels InventoryLevel[]
+  movements       InventoryMovement[]
+  purchaseOrders  PurchaseOrder[]
+  goodsReceipts   GoodsReceipt[]
+  transfersFrom   StockTransfer[] @relation("TransferFrom")
+  transfersTo     StockTransfer[] @relation("TransferTo")
+  purchaseReturns PurchaseReturn[]
+  orderItems      OrderItem[]
+  draftOrderItems DraftOrderItem[]
+  orderReturnItems OrderReturnItem[]
+
+  @@map("warehouses")
+}
+
+// --- Module Sản phẩm (005) ---
+
+model CustomerGroup {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  priceLists PriceList[]
+
+  @@map("customer_groups")
+}
+
+model Product {
+  id               BigInt   @id @default(autoincrement())
+  slug             String   @unique
+  name             String
+  brand            String?
+  productType      String?  @map("product_type")
+  unit             String?
+  tags             String[] @default([])
+  requiresShipping Boolean  @default(true) @map("requires_shipping")
+  isPublished      Boolean  @default(false) @map("is_published")
+  taxable          Boolean  @default(true)
+  imageUrl         String?  @map("image_url")
+  seoTitle         String?  @map("seo_title")
+  seoDescription   String?  @map("seo_description")
+  description      String?  @db.Text
+  shortDescription String?  @map("short_description") @db.Text
+  trackInventory   Boolean  @default(true) @map("track_inventory")
+  allowBackorder   Boolean  @default(false) @map("allow_backorder")
+  taxIndustryGroup String?  @map("tax_industry_group")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  variants      ProductVariant[]
+  images        ProductImage[]
+  options       ProductOption[]
+  salesChannels ProductSalesChannel[]
+  categories    ProductCategory[]
+
+  @@index([brand, productType])
+  @@map("products")
+}
+
+model ProductImage {
+  id        BigInt  @id @default(autoincrement())
+  productId BigInt  @map("product_id")
+  url       String
+  position  Int     @default(0)
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("product_images")
+}
+
+model ProductOption {
+  id        BigInt @id @default(autoincrement())
+  productId BigInt @map("product_id")
+  name      String
+  position  Int    @default(0)
+
+  product Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  values  VariantOptionValue[]
+
+  @@unique([productId, name])
+  @@map("product_options")
+}
+
+model ProductVariant {
+  id             BigInt   @id @default(autoincrement())
+  productId      BigInt   @map("product_id")
+  sku            String   @unique
+  barcode        String?
+  price          Decimal  @default(0) @db.Decimal(18, 2)
+  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
+  cost           Decimal  @default(0) @db.Decimal(18, 2)
+  weight         Decimal? @db.Decimal(18, 4)
+  weightUnit     String?  @map("weight_unit")
+  imageUrl       String?  @map("image_url")
+  enabled        Boolean  @default(true)
+
+  product         Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues    VariantOptionValue[]
+  inventoryLevels InventoryLevel[]
+  movements       InventoryMovement[]
+  lots            Lot[]
+  poItems         PurchaseOrderItem[]
+  reiItems        GoodsReceiptItem[]
+  stnItems        StockTransferItem[]
+  pvnItems        PurchaseReturnItem[]
+  priceListItems  PriceListItem[]
+  orderItems      OrderItem[]
+  draftOrderItems DraftOrderItem[]
+  orderReturnItems OrderReturnItem[]
+
+  @@map("product_variants")
+}
+
+model VariantOptionValue {
+  variantId BigInt @map("variant_id")
+  optionId  BigInt @map("option_id")
+  value     String
+
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  option  ProductOption  @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, optionId])
+  @@map("variant_option_values")
+}
+
+model Category {
+  id              BigInt                @id @default(autoincrement())
+  name            String
+  description     String?               @db.Text
+  parentId        BigInt?               @map("parent_id")
+  slug            String                @unique
+  imageUrl        String?               @map("image_url")
+  conditionType   CategoryConditionType @default(manual) @map("condition_type")
+  autoConditions  Json?                 @map("auto_conditions")
+  salesChannels   String[]              @default([]) @map("sales_channels")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[]          @relation("CategoryTree")
+  products ProductCategory[]
+
+  @@map("categories")
+}
+
+model ProductCategory {
+  productId  BigInt @map("product_id")
+  categoryId BigInt @map("category_id")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@map("product_categories")
+}
+
+model ProductSalesChannel {
+  productId BigInt @map("product_id")
+  channel   String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([productId, channel])
+  @@map("product_sales_channels")
+}
+
+model PriceList {
+  id              BigInt   @id @default(autoincrement())
+  code            String   @unique
+  name            String
+  branchId        BigInt?  @map("branch_id")
+  customerGroupId BigInt?  @map("customer_group_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  customerGroup CustomerGroup? @relation(fields: [customerGroupId], references: [id])
+  items         PriceListItem[]
+
+  @@map("price_lists")
+}
+
+model PriceListItem {
+  id             BigInt   @id @default(autoincrement())
+  priceListId    BigInt   @map("price_list_id")
+  variantId      BigInt   @map("variant_id")
+  fixedPrice     Decimal  @map("fixed_price") @db.Decimal(18, 2)
+  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
+  enabled        Boolean  @default(true)
+
+  priceList PriceList      @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([priceListId, variantId])
+  @@index([variantId])
+  @@map("price_list_items")
+}
+
+// --- Inventory core ---
+
+model InventoryLevel {
+  variantId    BigInt  @map("variant_id")
+  warehouseId  BigInt  @map("warehouse_id")
+  onHand       Int     @default(0) @map("on_hand")
+  committed    Int     @default(0)
+  packing      Int     @default(0)
+  unavailable  Int     @default(0)
+  incoming     Int     @default(0)
+  available    Int     @default(0)
+  price        Decimal @default(0) @db.Decimal(18, 2)
+  cost         Decimal @default(0) @db.Decimal(18, 2)
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+
+  // PK (variant_id, warehouse_id) — index T046
+  @@id([variantId, warehouseId])
+  @@map("inventory_levels")
+}
+
+model InventoryMovement {
+  id            BigInt          @id @default(autoincrement())
+  variantId     BigInt          @map("variant_id")
+  warehouseId   BigInt          @map("warehouse_id")
+  lotId         BigInt?         @map("lot_id")
+  bucket        InventoryBucket
+  change        Int
+  type          MovementType
+  referenceType String?         @map("reference_type")
+  referenceId   BigInt?         @map("reference_id")
+  createdById   BigInt?         @map("created_by")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  lot       Lot?           @relation(fields: [lotId], references: [id])
+  createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
+
+  @@index([variantId, warehouseId, bucket, createdAt]) // T046
+  @@map("inventory_movements")
+}
+
+model Lot {
+  id             BigInt    @id @default(autoincrement())
+  code           String
+  variantId      BigInt    @map("variant_id")
+  manufacturedAt DateTime? @map("manufactured_at") @db.Date
+  expiredAt      DateTime? @map("expired_at") @db.Date
+
+  variant   ProductVariant      @relation(fields: [variantId], references: [id])
+  movements InventoryMovement[]
+  reiItems  GoodsReceiptItem[]
+  stnItems  StockTransferItem[]
+  pvnItems  PurchaseReturnItem[]
+
+  @@unique([variantId, code])
+  @@map("lots")
+}
+
+model ActivityLog {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   BigInt?  @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("activity_logs")
+}
+
+// --- Nhà cung cấp (US5) ---
+
+model Supplier {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @unique
+  name         String
+  email        String?
+  phone        String?
+  website      String?
+  fax          String?
+  taxCode      String?  @map("tax_code")
+  country      String?
+  province     String?
+  district     String?
+  ward         String?
+  address      String?
+  assignedToId BigInt?  @map("assigned_to")
+  tags         String[]
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  assignedTo User? @relation("SupplierAssignedTo", fields: [assignedToId], references: [id])
+
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+  purchaseReturns PurchaseReturn[]
+
+  @@map("suppliers")
+}
+
+// --- Đặt hàng nhập & Nhập hàng (US2) ---
+
+model PurchaseOrder {
+  id            BigInt   @id @default(autoincrement())
+  code          String   @unique
+  supplierId    BigInt   @map("supplier_id")
+  branchId      BigInt   @map("branch_id")
+  warehouseId   BigInt   @map("warehouse_id")
+  status        PoStatus @default(don_nhap)
+  totalQuantity Int      @default(0) @map("total_quantity")
+  totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
+  createdById   BigInt   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  supplier      Supplier            @relation(fields: [supplierId], references: [id])
+  branch        Branch              @relation(fields: [branchId], references: [id])
+  warehouse     Warehouse           @relation(fields: [warehouseId], references: [id])
+  createdBy     User                @relation("PoCreatedBy", fields: [createdById], references: [id])
+  items         PurchaseOrderItem[]
+  goodsReceipts GoodsReceipt[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               BigInt  @id @default(autoincrement())
+  purchaseOrderId  BigInt  @map("purchase_order_id")
+  variantId        BigInt  @map("variant_id")
+  quantity         Int
+  unitPrice        Decimal @map("unit_price") @db.Decimal(18, 2)
+  receivedQuantity Int     @default(0) @map("received_quantity")
+
+  purchaseOrder PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([purchaseOrderId, variantId])
+  @@map("purchase_order_items")
+}
+
+model GoodsReceipt {
+  id              BigInt             @id @default(autoincrement())
+  code            String             @unique
+  supplierId      BigInt             @map("supplier_id")
+  warehouseId     BigInt             @map("warehouse_id")
+  purchaseOrderId BigInt?            @map("purchase_order_id")
+  status          GoodsReceiptStatus @default(chua_nhap)
+  paymentStatus   PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
+  amountDue       Decimal            @default(0) @map("amount_due") @db.Decimal(18, 2)
+  createdById     BigInt             @map("created_by")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  receivedAt      DateTime?          @map("received_at")
+
+  supplier      Supplier           @relation(fields: [supplierId], references: [id])
+  warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
+  purchaseOrder PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  createdBy     User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
+  items         GoodsReceiptItem[]
+
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptItem {
+  id             BigInt  @id @default(autoincrement())
+  goodsReceiptId BigInt  @map("goods_receipt_id")
+  variantId      BigInt  @map("variant_id")
+  lotId          BigInt  @map("lot_id")
+  quantity       Int
+  unitPrice      Decimal @map("unit_price") @db.Decimal(18, 2)
+
+  goodsReceipt GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  variant      ProductVariant @relation(fields: [variantId], references: [id])
+  lot          Lot            @relation(fields: [lotId], references: [id])
+
+  @@map("goods_receipt_items")
+}
+
+// --- Chuyển kho (US3) ---
+
+model StockTransfer {
+  id              BigInt              @id @default(autoincrement())
+  code            String              @unique
+  fromWarehouseId BigInt              @map("from_warehouse_id")
+  toWarehouseId   BigInt              @map("to_warehouse_id")
+  status          StockTransferStatus @default(dang_chuyen)
+  note            String?
+  totalQuantity   Int                 @default(0) @map("total_quantity")
+  createdById     BigInt              @map("created_by")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  receivedAt      DateTime?           @map("received_at")
+  receivedById    BigInt?             @map("received_by")
+
+  fromWarehouse Warehouse           @relation("TransferFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouse   Warehouse           @relation("TransferTo", fields: [toWarehouseId], references: [id])
+  createdBy     User                @relation("StnCreatedBy", fields: [createdById], references: [id])
+  receivedBy    User?               @relation("StnReceivedBy", fields: [receivedById], references: [id])
+  items         StockTransferItem[]
+
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id              BigInt @id @default(autoincrement())
+  stockTransferId BigInt @map("stock_transfer_id")
+  variantId       BigInt @map("variant_id")
+  lotId           BigInt @map("lot_id")
+  quantity        Int
+
+  stockTransfer StockTransfer  @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  lot           Lot            @relation(fields: [lotId], references: [id])
+
+  @@map("stock_transfer_items")
+}
+
+// --- Trả hàng nhập (US4) ---
+
+model PurchaseReturn {
+  id            BigInt   @id @default(autoincrement())
+  code          String   @unique
+  supplierId    BigInt   @map("supplier_id")
+  warehouseId   BigInt   @map("warehouse_id")
+  totalQuantity Int      @default(0) @map("total_quantity")
+  totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
+  createdById   BigInt   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  supplier  Supplier             @relation(fields: [supplierId], references: [id])
+  warehouse Warehouse            @relation(fields: [warehouseId], references: [id])
+  createdBy User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
+  items     PurchaseReturnItem[]
+
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnItem {
+  id               BigInt  @id @default(autoincrement())
+  purchaseReturnId BigInt  @map("purchase_return_id")
+  variantId        BigInt  @map("variant_id")
+  lotId            BigInt  @map("lot_id")
+  quantity         Int
+  unitPrice        Decimal @map("unit_price") @db.Decimal(18, 2)
+
+  purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  lot            Lot            @relation(fields: [lotId], references: [id])
+
+  @@map("purchase_return_items")
+}
+
+// --- Module Đơn hàng (002) ---
+
+model Customer {
+  id        BigInt   @id @default(autoincrement())
+  firstName String?  @map("first_name")
+  lastName  String?  @map("last_name")
+  email     String?
+  phone     String?
+  company   String?
+  tags      String[] @default([])
+  note      String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  orders      Order[]
+  draftOrders DraftOrder[]
+  conversations Conversation[]
+
+  @@index([phone])
+  @@map("customers")
+}
+
+model Order {
+  id                 BigInt      @id @default(autoincrement())
+  code               String      @unique
+  customerId         BigInt?     @map("customer_id")
+  branchId           BigInt      @map("branch_id")
+  source             OrderSource @default(other)
+  status             OrderStatus @default(ordered)
+  assignedToId       BigInt?     @map("assigned_to")
+  createdById        BigInt      @map("created_by")
+  email              String?
+  phone              String?
+  subtotal           Decimal     @default(0) @db.Decimal(18, 2)
+  discountTotal      Decimal     @default(0) @map("discount_total") @db.Decimal(18, 2)
+  taxTotal           Decimal     @default(0) @map("tax_total") @db.Decimal(18, 2)
+  shippingFee        Decimal     @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  totalAmount        Decimal     @default(0) @map("total_amount") @db.Decimal(18, 2)
+  totalQuantity      Int         @default(0) @map("total_quantity")
+  note               String?     @db.Text
+  tags               String[]    @default([])
+  orderedAt          DateTime    @default(now()) @map("ordered_at")
+  expectedDeliveryAt DateTime?   @map("expected_delivery_at")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  customer   Customer?     @relation(fields: [customerId], references: [id])
+  branch     Branch        @relation(fields: [branchId], references: [id])
+  assignedTo User?         @relation("OrderAssignedTo", fields: [assignedToId], references: [id])
+  createdBy  User          @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  items      OrderItem[]
+  returns    OrderReturn[]
+  fromDraft  DraftOrder?   @relation("DraftConverted")
+
+  @@index([branchId, status, orderedAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          BigInt  @id @default(autoincrement())
+  orderId     BigInt  @map("order_id")
+  variantId   BigInt  @map("variant_id")
+  warehouseId BigInt  @map("warehouse_id")
+  productName String  @map("product_name")
+  sku         String
+  quantity    Int
+  price       Decimal @db.Decimal(18, 2)
+  discount    Decimal @default(0) @db.Decimal(18, 2)
+  total       Decimal @db.Decimal(18, 2)
+
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+
+  @@map("order_items")
+}
+
+model DraftOrder {
+  id                 BigInt           @id @default(autoincrement())
+  code               String           @unique
+  branchId           BigInt           @map("branch_id")
+  customerId         BigInt?          @map("customer_id")
+  source             OrderSource      @default(other)
+  status             DraftOrderStatus @default(draft)
+  createdById        BigInt           @map("created_by")
+  currency           String           @default("VND")
+  subtotal           Decimal          @default(0) @db.Decimal(18, 2)
+  discountTotal      Decimal          @default(0) @map("discount_total") @db.Decimal(18, 2)
+  taxTotal           Decimal          @default(0) @map("tax_total") @db.Decimal(18, 2)
+  shippingFee        Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  totalAmount        Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
+  shippingMethod     String?          @map("shipping_method")
+  note               String?          @db.Text
+  tags               String[]         @default([])
+  convertedOrderId   BigInt?          @unique @map("converted_order_id")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  branch         Branch           @relation(fields: [branchId], references: [id])
+  customer       Customer?        @relation(fields: [customerId], references: [id])
+  createdBy      User             @relation("DraftOrderCreatedBy", fields: [createdById], references: [id])
+  convertedOrder Order?           @relation("DraftConverted", fields: [convertedOrderId], references: [id])
+  items          DraftOrderItem[]
+
+  @@map("draft_orders")
+}
+
+model DraftOrderItem {
+  id           BigInt  @id @default(autoincrement())
+  draftOrderId BigInt  @map("draft_order_id")
+  variantId    BigInt  @map("variant_id")
+  warehouseId  BigInt  @map("warehouse_id")
+  productName  String  @map("product_name")
+  sku          String
+  quantity     Int
+  price        Decimal @db.Decimal(18, 2)
+  discount     Decimal @default(0) @db.Decimal(18, 2)
+
+  draftOrder DraftOrder     @relation(fields: [draftOrderId], references: [id], onDelete: Cascade)
+  variant    ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse  Warehouse      @relation(fields: [warehouseId], references: [id])
+
+  @@map("draft_order_items")
+}
+
+model OrderReturn {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @unique
+  orderId      BigInt   @map("order_id")
+  reason       String?  @db.Text
+  refundAmount Decimal  @default(0) @map("refund_amount") @db.Decimal(18, 2)
+  restock      Boolean  @default(true)
+  createdById  BigInt   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  order     Order              @relation(fields: [orderId], references: [id])
+  createdBy User               @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
+  items     OrderReturnItem[]
+
+  @@map("order_returns")
+}
+
+model OrderReturnItem {
+  id            BigInt  @id @default(autoincrement())
+  orderReturnId BigInt  @map("order_return_id")
+  variantId     BigInt  @map("variant_id")
+  warehouseId   BigInt  @map("warehouse_id")
+  productName   String  @map("product_name")
+  sku           String
+  variantTitle  String? @map("variant_title")
+  quantity      Int
+  price         Decimal @db.Decimal(18, 2)
+
+  orderReturn OrderReturn    @relation(fields: [orderReturnId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id])
+  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
+
+  @@map("order_return_items")
+}
+
+model Voucher {
+  id             BigInt      @id @default(autoincrement())
+  code           String      @unique
+  type           VoucherType
+  amountIn       Decimal     @default(0) @map("amount_in") @db.Decimal(18, 2)
+  amountOut      Decimal     @default(0) @map("amount_out") @db.Decimal(18, 2)
+  branchId       BigInt      @map("branch_id")
+  createdById    BigInt      @map("created_by")
+  sourceDocument String?     @map("source_document")
+  referenceType  String?     @map("reference_type")
+  referenceId    BigInt?     @map("reference_id")
+  reason         String?     @db.Text
+  recordedAt     DateTime    @default(now()) @map("recorded_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  branch    Branch @relation(fields: [branchId], references: [id])
+  createdBy User   @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+
+  @@index([branchId, type, recordedAt])
+  @@map("vouchers")
+}
+
+// --- Chat CSKH (002 US4) ---
+
+model Conversation {
+  id             BigInt      @id @default(autoincrement())
+  channel        OrderSource @default(other)
+  customerName   String      @map("customer_name")
+  customerPhone  String      @map("customer_phone")
+  customerId     BigInt?     @map("customer_id")
+  assignedToId   BigInt?     @map("assigned_to")
+  lastMessageAt  DateTime    @default(now()) @map("last_message_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  customer   Customer?             @relation(fields: [customerId], references: [id])
+  assignedTo User?                 @relation("ConversationAssignedTo", fields: [assignedToId], references: [id])
+  messages   ConversationMessage[]
+
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             BigInt   @id @default(autoincrement())
+  conversationId BigInt   @map("conversation_id")
+  senderType     String   @map("sender_type")
+  body           String   @db.Text
+  createdById    BigInt?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("ConversationMessageAuthor", fields: [createdById], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("conversation_messages")
+}
