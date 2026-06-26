@@ -4,9 +4,9 @@ import { AuthGuard } from '@nestjs/passport';
 import { CanActivate, ForbiddenException } from '@nestjs/common';
 import { PermissionScope } from '@prisma/client';
 import {
-  hasSystemPermission,
-  hasWarehousePermission,
-  isAdminUser,
+  hasPermission,
+  isAdminAtWarehouse,
+  resolveWarehouseId,
 } from '../auth/access';
 import { AuthUser } from '../decorators/current-user.decorator';
 import { PUBLIC_KEY } from '../decorators/roles.decorator';
@@ -45,22 +45,24 @@ export class PermissionGuard implements CanActivate {
       params: Record<string, string>;
       query: Record<string, string>;
       body: Record<string, unknown>;
+      headers: Record<string, string | string[] | undefined>;
     }>();
     const user = req.user;
     if (!user) throw new ForbiddenException('Unauthorized');
-    if (isAdminUser(user)) return true;
 
-    const warehouseId =
-      req.params?.warehouseId ??
-      req.query?.warehouse_id ??
-      (req.body?.warehouse_id as string | undefined);
+    const warehouseId = resolveWarehouseId({
+      params: req.params,
+      query: req.query,
+      body: req.body,
+      headers: req.headers,
+    });
 
     const ok = required.some((perm) => {
       const scope = PERMISSION_SCOPE[perm] ?? PermissionScope.system;
       if (scope === PermissionScope.warehouse) {
-        return hasWarehousePermission(user, perm, warehouseId);
+        return hasPermission(user, perm, warehouseId);
       }
-      return hasSystemPermission(user, perm);
+      return hasPermission(user, perm, warehouseId);
     });
 
     if (!ok) throw new ForbiddenException('FORBIDDEN');
@@ -76,18 +78,22 @@ export class BranchScopeGuard implements CanActivate {
       params: Record<string, string>;
       query: Record<string, string>;
       body: Record<string, unknown>;
+      headers: Record<string, string | string[] | undefined>;
     }>();
     const user = req.user;
-    if (!user || isAdminUser(user)) return true;
+    if (!user) return true;
 
-    const warehouseId =
-      req.params.warehouseId ??
-      req.query.warehouse_id ??
-      (req.body?.warehouse_id as string | undefined);
+    const warehouseId = resolveWarehouseId({
+      params: req.params,
+      query: req.query,
+      body: req.body,
+      headers: req.headers,
+    });
 
     if (!warehouseId) return true;
 
     const wid = BigInt(warehouseId);
+    if (isAdminAtWarehouse(user, warehouseId)) return true;
     if (!user.warehouseIds.some((id) => id === wid)) {
       throw new ForbiddenException('FORBIDDEN_SCOPE');
     }

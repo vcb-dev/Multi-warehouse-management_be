@@ -45,6 +45,8 @@ export class AuthService {
         name: user.name,
         roles: user.roles,
         warehouse_ids: resolved.warehouseIds.map((w) => w.toString()),
+        warehouse_permissions: resolved.warehousePermissions,
+        admin_warehouse_ids: resolved.adminWarehouseIds.map((w) => w.toString()),
         permissions: resolved.systemPermissions,
         is_admin: resolved.isAdmin,
       },

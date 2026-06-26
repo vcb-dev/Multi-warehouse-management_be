@@ -37,6 +37,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       roles: user.roles,
       warehouseIds: resolved.warehouseIds,
       isAdmin: resolved.isAdmin,
+      adminWarehouseIds: resolved.adminWarehouseIds,
       systemPermissions: resolved.systemPermissions,
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,

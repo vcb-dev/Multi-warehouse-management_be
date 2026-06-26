@@ -24,8 +24,10 @@ describe('assertAnyWarehouseAccess', () => {
     );
   });
 
-  it('admin bypass', () => {
-    const admin: AuthUser = { ...user, isAdmin: true };
-    expect(() => assertAnyWarehouseAccess(admin, [999n])).not.toThrow();
+  it('admin flag không bypass nếu không admin tại kho đích', () => {
+    const admin: AuthUser = { ...user, isAdmin: true, adminWarehouseIds: [10n] };
+    expect(() => assertAnyWarehouseAccess(admin, [999n])).toThrow(
+      ForbiddenException,
+    );
   });
 });

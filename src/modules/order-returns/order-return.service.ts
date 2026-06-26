@@ -9,7 +9,6 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   assertAnyWarehouseAccess,
   assertWarehouseAccess,
-  isAdminUser,
 } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
@@ -32,9 +31,7 @@ export class OrderReturnService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderReturnItemWhereInput = {};
 
-    if (!isAdminUser(user)) {
-      where.warehouseId = { in: user.warehouseIds };
-    }
+    where.warehouseId = { in: user.warehouseIds };
 
     if (query.q?.trim()) {
       const q = query.q.trim();

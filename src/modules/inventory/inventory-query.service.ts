@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { isAdminUser } from '../../common/auth/access';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
 
@@ -157,7 +156,7 @@ export class InventoryQueryService {
 
     if (query.warehouse_id) {
       where.warehouseId = BigInt(query.warehouse_id);
-    } else if (!isAdminUser(user)) {
+    } else {
       where.warehouseId = { in: user.warehouseIds };
     }
 
@@ -193,9 +192,7 @@ export class InventoryQueryService {
   ): Prisma.InventoryLevelWhereInput {
     const where: Prisma.InventoryLevelWhereInput = {};
 
-    if (!isAdminUser(user)) {
-      where.warehouseId = { in: user.warehouseIds };
-    }
+    where.warehouseId = { in: user.warehouseIds };
 
     if (query.variant_id) {
       where.variantId = BigInt(query.variant_id);

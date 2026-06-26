@@ -5,12 +5,15 @@ export type AuthUser = {
   email: string;
   roles: string[];
   warehouseIds: bigint[];
+  /** @deprecated Không dùng bypass toàn cục — dùng adminWarehouseIds. */
   isAdmin?: boolean;
-  /** Quyền scope=system (không theo kho). */
+  /** Kho mà user mang role admin. */
+  adminWarehouseIds?: bigint[];
+  /** @deprecated Quyền gom trong warehousePermissions theo từng kho. */
   systemPermissions?: string[];
-  /** @deprecated Dùng systemPermissions. */
+  /** @deprecated Dùng warehousePermissions. */
   permissions?: string[];
-  /** Quyền scope=warehouse theo từng kho. */
+  /** Quyền hiệu lực theo từng kho (gồm cả permission scope=system của role tại kho đó). */
   warehousePermissions?: Record<string, string[]>;
 };
 

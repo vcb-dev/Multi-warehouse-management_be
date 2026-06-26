@@ -113,6 +113,11 @@ export class ListOrdersQueryDto {
   @IsString()
   source?: string;
 
+  /** Danh sách nguồn cách nhau bởi dấu phẩy, ví dụ `shopee,facebook` */
+  @IsOptional()
+  @IsString()
+  sources?: string;
+
   @IsOptional()
   @IsString()
   assigned_to?: string;

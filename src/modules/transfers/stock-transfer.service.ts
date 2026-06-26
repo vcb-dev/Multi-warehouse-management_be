@@ -9,7 +9,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { isAdminUser } from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateStockTransferDto,
@@ -44,12 +43,10 @@ export class StockTransferService {
       where.status = query.status as StockTransferStatus;
     }
 
-    if (!isAdminUser(user)) {
-      where.OR = [
-        { fromWarehouseId: { in: user.warehouseIds } },
-        { toWarehouseId: { in: user.warehouseIds } },
-      ];
-    }
+    where.OR = [
+      { fromWarehouseId: { in: user.warehouseIds } },
+      { toWarehouseId: { in: user.warehouseIds } },
+    ];
 
     const [rows, total] = await Promise.all([
       this.prisma.stockTransfer.findMany({

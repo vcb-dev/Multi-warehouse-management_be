@@ -1,5 +1,5 @@
 /**
- * Unit test RbacService.resolvePermissions — system vs warehouse, isAdmin.
+ * Unit test RbacService.resolvePermissions — quyền theo kho, admin theo kho.
  */
 import { PermissionScope } from '@prisma/client';
 import { RbacService } from '../src/modules/rbac/rbac.service';
@@ -18,7 +18,7 @@ const perm = (key: string, scope: PermissionScope = PermissionScope.warehouse) =
 });
 
 describe('RbacService.resolvePermissions', () => {
-  it('tách system vs warehouse permissions', async () => {
+  it('gom mọi permission vào warehousePermissions theo từng kho', async () => {
     const prisma = fakePrisma([
       {
         warehouseId: 1n,
@@ -44,18 +44,19 @@ describe('RbacService.resolvePermissions', () => {
     const svc = new RbacService(prisma);
     const res = await svc.resolvePermissions(1n);
 
-    expect(new Set(res.systemPermissions)).toEqual(new Set(['customer:view']));
+    expect(res.systemPermissions).toEqual([]);
     expect(new Set(res.warehousePermissions['1'])).toEqual(
-      new Set(['order:view', 'order:pack']),
+      new Set(['order:view', 'order:pack', 'customer:view']),
     );
     expect(new Set(res.warehousePermissions['2'])).toEqual(
       new Set(['order:view', 'product:view']),
     );
     expect(res.warehouseIds).toEqual([1n, 2n]);
     expect(res.isAdmin).toBe(false);
+    expect(res.adminWarehouseIds).toEqual([]);
   });
 
-  it('isAdmin khi gán role admin hệ thống', async () => {
+  it('adminWarehouseIds khi gán role admin tại kho', async () => {
     const prisma = fakePrisma([
       {
         warehouseId: 1n,
@@ -67,7 +68,9 @@ describe('RbacService.resolvePermissions', () => {
       },
     ]);
     const res = await new RbacService(prisma).resolvePermissions(1n);
+    expect(res.adminWarehouseIds).toEqual([1n]);
     expect(res.isAdmin).toBe(true);
+    expect(res.warehousePermissions['1']).toContain('role:manage');
   });
 
   it('user không có gán role -> rỗng', async () => {
@@ -76,5 +79,6 @@ describe('RbacService.resolvePermissions', () => {
     expect(res.systemPermissions).toEqual([]);
     expect(res.warehousePermissions).toEqual({});
     expect(res.isAdmin).toBe(false);
+    expect(res.adminWarehouseIds).toEqual([]);
   });
 });

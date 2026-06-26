@@ -1,5 +1,5 @@
 /**
- * Unit test PermissionGuard — system/warehouse scope, admin bypass.
+ * Unit test PermissionGuard — quyền theo kho đang làm việc.
  */
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -9,7 +9,14 @@ import type { AuthUser } from '../src/common/decorators/current-user.decorator';
 function ctx(user: AuthUser | undefined, req: Partial<Record<string, unknown>> = {}) {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ user, params: {}, query: {}, body: {}, ...req }),
+      getRequest: () => ({
+        user,
+        params: {},
+        query: {},
+        body: {},
+        headers: {},
+        ...req,
+      }),
     }),
     getHandler: () => ({}),
     getClass: () => ({}),
@@ -28,9 +35,10 @@ const baseUser: AuthUser = {
   email: 't@t',
   roles: [],
   warehouseIds: [1n, 2n],
-  systemPermissions: ['customer:view'],
-  permissions: ['customer:view'],
-  warehousePermissions: { '1': ['order:view', 'order:pack'], '2': ['order:view'] },
+  warehousePermissions: {
+    '1': ['order:view', 'order:pack', 'customer:view'],
+    '2': ['order:view'],
+  },
 };
 
 describe('PermissionGuard', () => {
@@ -39,25 +47,30 @@ describe('PermissionGuard', () => {
     expect(guard.canActivate(ctx(baseUser))).toBe(true);
   });
 
-  it('system-scope: kiểm tra systemPermissions', () => {
+  it('system-scope: kiểm tra theo kho trong header', () => {
     const guard = guardWith(['customer:view']);
-    expect(guard.canActivate(ctx(baseUser))).toBe(true);
+    expect(
+      guard.canActivate(
+        ctx(baseUser, { headers: { 'x-warehouse-id': '1' } }),
+      ),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(ctx(baseUser, { headers: { 'x-warehouse-id': '2' } })),
+    ).toThrow(ForbiddenException);
   });
 
-  it('warehouse-scope: không cấp qua systemPermissions', () => {
-    const systemOnly: AuthUser = {
-      ...baseUser,
-      systemPermissions: ['customer:view'],
-      permissions: ['customer:view'],
-      warehousePermissions: {},
-    };
-    const guard = guardWith(['order:view']);
-    expect(() => guard.canActivate(ctx(systemOnly))).toThrow(ForbiddenException);
+  it('warehouse-scope: không cấp qua kho khác', () => {
+    const guard = guardWith(['order:pack']);
+    expect(() =>
+      guard.canActivate(ctx(baseUser, { query: { warehouse_id: '2' } })),
+    ).toThrow(ForbiddenException);
   });
 
   it('system-scope: thiếu quyền -> Forbidden', () => {
     const guard = guardWith(['staff:manage']);
-    expect(() => guard.canActivate(ctx(baseUser))).toThrow(ForbiddenException);
+    expect(() =>
+      guard.canActivate(ctx(baseUser, { headers: { 'x-warehouse-id': '1' } })),
+    ).toThrow(ForbiddenException);
   });
 
   it('warehouse-scope: kiểm tra theo warehouse_id trong query', () => {
@@ -65,9 +78,6 @@ describe('PermissionGuard', () => {
     expect(
       guard.canActivate(ctx(baseUser, { query: { warehouse_id: '1' } })),
     ).toBe(true);
-    expect(() =>
-      guard.canActivate(ctx(baseUser, { query: { warehouse_id: '2' } })),
-    ).toThrow(ForbiddenException);
   });
 
   it('warehouse-scope: thiếu warehouse_id -> kiểm tra bất kỳ kho nào', () => {
@@ -80,20 +90,35 @@ describe('PermissionGuard', () => {
     expect(() => guard.canActivate(ctx(noPack))).toThrow(ForbiddenException);
   });
 
-  it('admin bypass mọi permission qua isAdmin', () => {
-    const admin: AuthUser = { ...baseUser, isAdmin: true };
-    const guard = guardWith(['staff:manage']);
-    expect(guard.canActivate(ctx(admin))).toBe(true);
-  });
-
-  it('role:manage không còn bypass nếu không phải admin', () => {
-    const fakeAdmin: AuthUser = {
+  it('admin chỉ bypass tại kho được gán admin', () => {
+    const admin: AuthUser = {
       ...baseUser,
-      systemPermissions: ['role:manage'],
-      permissions: ['role:manage'],
+      adminWarehouseIds: [1n],
+      isAdmin: true,
     };
     const guard = guardWith(['staff:manage']);
-    expect(() => guard.canActivate(ctx(fakeAdmin))).toThrow(ForbiddenException);
+    expect(
+      guard.canActivate(ctx(admin, { query: { warehouse_id: '1' } })),
+    ).toBe(true);
+    expect(() =>
+      guard.canActivate(ctx(admin, { query: { warehouse_id: '2' } })),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('role:manage không bypass nếu không phải admin tại kho', () => {
+    const fakeAdmin: AuthUser = {
+      ...baseUser,
+      warehousePermissions: {
+        '1': ['role:manage'],
+        '2': ['order:view'],
+      },
+    };
+    const guard = guardWith(['staff:manage']);
+    expect(() =>
+      guard.canActivate(
+        ctx(fakeAdmin, { headers: { 'x-warehouse-id': '1' } }),
+      ),
+    ).toThrow(ForbiddenException);
   });
 
   it('không có user -> Forbidden', () => {

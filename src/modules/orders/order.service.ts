@@ -6,7 +6,7 @@ import {
   OrderStatus,
   Prisma,
 } from '@prisma/client';
-import { assertAnyWarehouseAccess, isAdminUser } from '../../common/auth/access';
+import { assertAnyWarehouseAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   BusinessException,
@@ -49,13 +49,19 @@ export class OrderService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderWhereInput = {};
 
-    if (!isAdminUser(user)) {
-      where.items = { some: { warehouseId: { in: user.warehouseIds } } };
-    }
+    where.items = { some: { warehouseId: { in: user.warehouseIds } } };
 
     if (query.status) where.status = query.status as OrderStatus;
     if (query.branch_id) where.branchId = BigInt(query.branch_id);
-    if (query.source) where.source = query.source as OrderSource;
+    if (query.sources) {
+      const list = query.sources
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (list.length) where.source = { in: list as OrderSource[] };
+    } else if (query.source) {
+      where.source = query.source as OrderSource;
+    }
     if (query.assigned_to) {
       where.assignedToId = BigInt(query.assigned_to);
     }

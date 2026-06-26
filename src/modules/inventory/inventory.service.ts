@@ -3,7 +3,7 @@ import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { isAdminUser } from '../../common/auth/access';
+import { assertWarehouseAccess as assertUserWarehouseAccess } from '../../common/auth/access';
 import { InventoryRepository } from './inventory.repository';
 import { serializeLevelBare } from './inventory.serializer';
 import {
@@ -148,7 +148,7 @@ export class InventoryService {
     },
     user: AuthUser,
   ) {
-    this.assertWarehouseAccess(user, input.warehouseId);
+    assertUserWarehouseAccess(user, input.warehouseId);
 
     const existing = await this.prisma.inventoryLevel.findUnique({
       where: {
@@ -214,14 +214,6 @@ export class InventoryService {
       movementId: result.movementIds[0] ?? null,
     };
   }
-
-  assertWarehouseAccess(user: AuthUser, warehouseId: bigint) {
-    if (isAdminUser(user)) return;
-    if (!user.warehouseIds.some((id) => id === warehouseId)) {
-      throw new ForbiddenException('FORBIDDEN_SCOPE');
-    }
-  }
-
   /** Đối soát INV-2a/2b */
   async reconcile(variantId: bigint, warehouseId: bigint) {
     const level = await this.prisma.inventoryLevel.findUnique({

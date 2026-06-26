@@ -1,14 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { PermissionScope } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export type ResolvedPermissions = {
-  isAdmin: boolean;
-  systemPermissions: string[];
+  /** Kho mà user được gán role admin — quyền admin chỉ hiệu lực tại từng kho này. */
+  adminWarehouseIds: bigint[];
   warehousePermissions: Record<string, string[]>;
   warehouseIds: bigint[];
-  /** @deprecated Dùng systemPermissions — giữ tương thích ngắn hạn. */
+  /** @deprecated Quyền gom theo kho; field giữ cho tương thích login cũ. */
+  systemPermissions: string[];
+  /** @deprecated Dùng adminWarehouseIds + warehousePermissions. */
   permissions: string[];
+  /** @deprecated true nếu có admin ở ít nhất một kho — không dùng bypass toàn cục. */
+  isAdmin: boolean;
 };
 
 @Injectable()
@@ -16,8 +19,7 @@ export class RbacService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Phân giải quyền từ user_warehouse_roles -> role_permissions.
-   * Quyền system gom toàn cục; quyền warehouse chỉ theo từng kho.
+   * Quyền hiệu lực tại kho K = mọi permission (system + warehouse) của role tại K.
    */
   async resolvePermissions(userId: bigint): Promise<ResolvedPermissions> {
     const assignments = await this.prisma.userWarehouseRole.findMany({
@@ -31,41 +33,35 @@ export class RbacService {
       },
     });
 
-    const systemPerms = new Set<string>();
     const byWarehouse: Record<string, Set<string>> = {};
     const warehouseIds: bigint[] = [];
-    let isAdmin = false;
+    const adminWarehouseIds: bigint[] = [];
 
     for (const a of assignments) {
       warehouseIds.push(a.warehouseId);
-      if (a.role.isSystem && a.role.code === 'admin') {
-        isAdmin = true;
-      }
-
       const whKey = a.warehouseId.toString();
       byWarehouse[whKey] ??= new Set<string>();
 
+      if (a.role.isSystem && a.role.code === 'admin') {
+        adminWarehouseIds.push(a.warehouseId);
+      }
+
       for (const rp of a.role.permissions) {
-        const { key, scope } = rp.permission;
-        if (scope === PermissionScope.system) {
-          systemPerms.add(key);
-        } else {
-          byWarehouse[whKey].add(key);
-        }
+        byWarehouse[whKey].add(rp.permission.key);
       }
     }
 
-    const systemPermissions = [...systemPerms];
     const warehousePermissions = Object.fromEntries(
       Object.entries(byWarehouse).map(([k, v]) => [k, [...v]]),
     );
 
     return {
-      isAdmin,
-      systemPermissions,
+      adminWarehouseIds,
       warehousePermissions,
       warehouseIds,
-      permissions: systemPermissions,
+      systemPermissions: [],
+      permissions: [],
+      isAdmin: adminWarehouseIds.length > 0,
     };
   }
 }

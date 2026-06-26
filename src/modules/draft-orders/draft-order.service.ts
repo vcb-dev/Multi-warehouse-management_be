@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DraftOrderStatus, OrderSource, Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { assertAnyWarehouseAccess, assertWarehouseAccess, isAdminUser } from '../../common/auth/access';
+import { assertAnyWarehouseAccess, assertWarehouseAccess } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { OrderService } from '../orders/order.service';
 import { generateDraftCode } from '../orders/order-code';
@@ -18,9 +18,7 @@ export class DraftOrderService {
 
   async list(user: AuthUser) {
     const where: Prisma.DraftOrderWhereInput = { status: DraftOrderStatus.draft };
-    if (!isAdminUser(user)) {
-      where.items = { some: { warehouseId: { in: user.warehouseIds } } };
-    }
+    where.items = { some: { warehouseId: { in: user.warehouseIds } } };
     const rows = await this.prisma.draftOrder.findMany({
       where,
       orderBy: { createdAt: 'desc' },

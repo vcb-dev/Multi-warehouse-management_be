@@ -25,9 +25,12 @@ export type CategoryTreeNode = {
   name: string;
   slug: string;
   parent_id: string | null;
+  description: string | null;
   condition_type: CategoryConditionType;
+  auto_conditions: AutoConditions | null;
   sales_channels: string[];
   image_url: string | null;
+  product_count: number;
   children: CategoryTreeNode[];
 };
 
@@ -38,6 +41,7 @@ export class CategoryService {
   async listTree() {
     const rows = await this.prisma.category.findMany({
       orderBy: { name: 'asc' },
+      include: { _count: { select: { products: true } } },
     });
     return { data: this.buildTree(rows) };
   }
@@ -151,9 +155,12 @@ export class CategoryService {
       name: string;
       parentId: bigint | null;
       conditionType: CategoryConditionType;
+      autoConditions: unknown;
+      description: string | null;
       salesChannels: string[];
       imageUrl: string | null;
       slug: string;
+      _count: { products: number };
     }[],
     parentId: bigint | null = null,
   ): CategoryTreeNode[] {
@@ -164,9 +171,12 @@ export class CategoryService {
         name: r.name,
         slug: r.slug,
         parent_id: r.parentId?.toString() ?? null,
+        description: r.description,
         condition_type: r.conditionType,
+        auto_conditions: (r.autoConditions as AutoConditions | null) ?? null,
         sales_channels: r.salesChannels,
         image_url: r.imageUrl,
+        product_count: r._count.products,
         children: this.buildTree(rows, r.id),
       }));
   }
