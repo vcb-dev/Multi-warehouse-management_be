@@ -3,7 +3,7 @@
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/stock-transfer.e2e-spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { StockTransferStatus } from '@prisma/client';
+import { InventoryBucket, MovementType, StockTransferStatus } from '@prisma/client';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { TransfersModule } from '../src/modules/transfers/transfers.module';
@@ -54,21 +54,18 @@ describeIfDb('US3 stock transfer (integration)', () => {
     });
     lotId = lot.id;
 
-    await inventoryService.adjustOnHand(
-      {
-        variantId,
-        warehouseId: fromWarehouseId,
-        newOnHand: 20,
-        reason: 'seed for STN test',
-        createdById: userId,
-      },
-      {
-        userId,
-        email: 'test@local.dev',
-        roles: ['admin'],
-        warehouseIds: [fromWarehouseId, toWarehouseId],
-      },
-    );
+    const levelBeforeSeed = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: fromWarehouseId } },
+    });
+    await inventoryService.applyMovement({
+      variantId,
+      warehouseId: fromWarehouseId,
+      bucket: InventoryBucket.on_hand,
+      change: 20 - (levelBeforeSeed?.onHand ?? 0),
+      type: MovementType.adjust,
+      referenceType: 'test',
+      createdById: userId,
+    });
   });
 
   afterAll(async () => {

@@ -22,6 +22,7 @@ type ReiWithItems = GoodsReceipt & {
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
   purchaseOrder?: { code: string } | null;
+  assignedTo?: { name: string | null; email: string } | null;
 };
 
 export function serializePurchaseOrder(po: PoWithItems) {
@@ -68,6 +69,14 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     status: rei.status,
     payment_status: rei.paymentStatus,
     amount_due: rei.amountDue.toString(),
+    discount_amount: rei.discountAmount.toString(),
+    extra_cost: rei.extraCost.toString(),
+    assigned_to_id: rei.assignedToId?.toString() ?? null,
+    assigned_to_name: rei.assignedTo?.name ?? rei.assignedTo?.email ?? null,
+    expected_receipt_at: rei.expectedReceiptAt?.toISOString() ?? null,
+    invoice_at: rei.invoiceAt?.toISOString() ?? null,
+    order_code: rei.orderCode ?? null,
+    reference_code: rei.referenceCode ?? null,
     created_at: rei.createdAt.toISOString(),
     received_at: rei.receivedAt?.toISOString() ?? null,
     items: rei.items.map((item) => ({

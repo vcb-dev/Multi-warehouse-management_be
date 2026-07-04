@@ -1,13 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { hasPermission } from '../../common/auth/access';
 
 @Injectable()
 export class ConfigService {
   constructor(private prisma: PrismaService) {}
 
-  async listBranches() {
+  async listBranches(user: AuthUser) {
+    const canSeeAll = hasPermission(user, 'staff:manage');
+
     const data = await this.prisma.branch.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(canSeeAll
+          ? {}
+          : { warehouses: { some: { id: { in: user.warehouseIds } } } }),
+      },
       orderBy: { code: 'asc' },
     });
     return {
@@ -20,11 +29,14 @@ export class ConfigService {
     };
   }
 
-  async listWarehouses(branchId?: bigint) {
+  async listWarehouses(user: AuthUser, branchId?: bigint) {
+    const canSeeAll = hasPermission(user, 'staff:manage');
+
     const data = await this.prisma.warehouse.findMany({
       where: {
         isActive: true,
         ...(branchId ? { branchId } : {}),
+        ...(canSeeAll ? {} : { id: { in: user.warehouseIds } }),
       },
       orderBy: { code: 'asc' },
     });

@@ -223,7 +223,7 @@ export class ProductService {
     const newSkus = dto.variants?.map((v) => v.sku) ?? [];
     const keepSkus = existing.variants.map((v) => v.sku);
     const toCheck = newSkus.filter((s) => !keepSkus.includes(s));
-    await this.validateSkus(toCheck);
+    await this.validateSkus(toCheck, id);
 
     await this.repo.client.$transaction(async (tx) => {
       await tx.product.update({
@@ -422,6 +422,19 @@ export class ProductService {
     options: NonNullable<CreateProductDto['options']>,
     variants: NonNullable<CreateProductDto['variants']>,
   ) {
+    const existingVariants = await tx.productVariant.findMany({
+      where: { productId },
+      include: { optionValues: true },
+    });
+
+    const existingByKey = new Map<string, (typeof existingVariants)[0]>();
+    for (const ev of existingVariants) {
+      const vals = ev.optionValues
+        .sort((a, b) => Number(a.optionId - b.optionId))
+        .map((ov) => ov.value);
+      existingByKey.set(this.variants.optionKey(vals), ev);
+    }
+
     await tx.variantOptionValue.deleteMany({
       where: { variant: { productId } },
     });
@@ -437,19 +450,6 @@ export class ProductService {
         },
       });
       optionRecords.push({ ...options[i], id: opt.id });
-    }
-
-    const existingVariants = await tx.productVariant.findMany({
-      where: { productId },
-      include: { optionValues: true },
-    });
-
-    const existingByKey = new Map<string, (typeof existingVariants)[0]>();
-    for (const ev of existingVariants) {
-      const vals = ev.optionValues
-        .sort((a, b) => Number(a.optionId - b.optionId))
-        .map((ov) => ov.value);
-      existingByKey.set(this.variants.optionKey(vals), ev);
     }
 
     const desired = this.buildVariantRows(slug, options, variants);
@@ -526,13 +526,18 @@ export class ProductService {
     }
   }
 
-  private async validateSkus(skus: string[]) {
+  private async validateSkus(skus: string[], excludeProductId?: bigint) {
     for (const sku of skus) {
-      const existing = await this.repo.findVariantBySku(sku.trim());
-      if (existing) {
+      const trimmed = sku.trim();
+      if (!trimmed) continue;
+      const existing = await this.repo.findVariantBySku(trimmed);
+      if (
+        existing &&
+        (!excludeProductId || existing.productId !== excludeProductId)
+      ) {
         throw new BusinessException(
           'DUPLICATE_SKU',
-          `SKU "${sku}" đã tồn tại`,
+          `SKU "${trimmed}" đã tồn tại`,
           409,
         );
       }

@@ -1,0 +1,13 @@
+node_modules
+dist
+uploads
+.env
+.env.*
+!.env.example
+coverage
+.git
+*.md
+test
+.vscode
+.cursor
+pnpm-workspace.yaml

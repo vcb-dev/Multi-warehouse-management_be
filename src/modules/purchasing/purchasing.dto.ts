@@ -5,6 +5,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -117,6 +118,38 @@ export class CreateGoodsReceiptDto {
   @IsOptional()
   @IsString()
   purchase_order_id?: string;
+
+  @IsOptional()
+  @IsString()
+  assigned_to_id?: string;
+
+  @IsOptional()
+  @IsDateString()
+  expected_receipt_at?: string;
+
+  @IsOptional()
+  @IsDateString()
+  invoice_at?: string;
+
+  @IsOptional()
+  @IsString()
+  order_code?: string;
+
+  @IsOptional()
+  @IsString()
+  reference_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  discount_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  extra_cost?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

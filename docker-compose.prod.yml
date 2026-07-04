@@ -1,0 +1,26 @@
+# Deploy production (backend Docker + Supabase Postgres):
+#   cp .env.production.example .env.production
+#   # điền DATABASE_URL, DIRECT_URL từ Supabase Dashboard → Connect → Prisma
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '${HOST_PORT:-3001}:3001'
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      PUBLIC_UPLOAD_URL: ${PUBLIC_UPLOAD_URL:-http://localhost:3001/uploads}
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  uploads_data:

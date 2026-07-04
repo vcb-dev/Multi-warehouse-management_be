@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // --- Enums ---
@@ -117,34 +118,35 @@ enum VoucherType {
 // --- Auth & config ---
 
 model User {
-  id           BigInt   @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String?  @map("password_hash")
+  id           BigInt        @id @default(autoincrement())
+  email        String        @unique
+  passwordHash String?       @map("password_hash")
   name         String?
   phone        String?
   roles        UserRole[]
   status       AccountStatus @default(active)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
 
-  warehouses      UserWarehouse[]
-  warehouseRoles  UserWarehouseRole[]
-  invitations     UserInvitation[]
-  inventoryMoves  InventoryMovement[] @relation("MovementCreatedBy")
-  activityLogs    ActivityLog[]
-  assignedSuppliers Supplier[] @relation("SupplierAssignedTo")
-  purchaseOrders  PurchaseOrder[] @relation("PoCreatedBy")
-  goodsReceipts   GoodsReceipt[] @relation("ReiCreatedBy")
-  stockTransfersCreated StockTransfer[] @relation("StnCreatedBy")
-  stockTransfersReceived StockTransfer[] @relation("StnReceivedBy")
-  purchaseReturns PurchaseReturn[] @relation("PvnCreatedBy")
-  ordersCreated   Order[]            @relation("OrderCreatedBy")
-  ordersAssigned  Order[]            @relation("OrderAssignedTo")
-  orderReturns    OrderReturn[]      @relation("OrderReturnCreatedBy")
-  draftOrders     DraftOrder[]       @relation("DraftOrderCreatedBy")
-  vouchersCreated Voucher[]          @relation("VoucherCreatedBy")
-  conversationsAssigned Conversation[] @relation("ConversationAssignedTo")
-  conversationMessages ConversationMessage[] @relation("ConversationMessageAuthor")
+  warehouses             UserWarehouse[]
+  warehouseRoles         UserWarehouseRole[]
+  invitations            UserInvitation[]
+  inventoryMoves         InventoryMovement[]   @relation("MovementCreatedBy")
+  activityLogs           ActivityLog[]
+  assignedSuppliers      Supplier[]            @relation("SupplierAssignedTo")
+  purchaseOrders         PurchaseOrder[]       @relation("PoCreatedBy")
+  goodsReceipts          GoodsReceipt[]        @relation("ReiCreatedBy")
+  goodsReceiptsAssigned  GoodsReceipt[]        @relation("ReiAssignedTo")
+  stockTransfersCreated  StockTransfer[]       @relation("StnCreatedBy")
+  stockTransfersReceived StockTransfer[]       @relation("StnReceivedBy")
+  purchaseReturns        PurchaseReturn[]      @relation("PvnCreatedBy")
+  ordersCreated          Order[]               @relation("OrderCreatedBy")
+  ordersAssigned         Order[]               @relation("OrderAssignedTo")
+  orderReturns           OrderReturn[]         @relation("OrderReturnCreatedBy")
+  draftOrders            DraftOrder[]          @relation("DraftOrderCreatedBy")
+  vouchersCreated        Voucher[]             @relation("VoucherCreatedBy")
+  conversationsAssigned  Conversation[]        @relation("ConversationAssignedTo")
+  conversationMessages   ConversationMessage[] @relation("ConversationMessageAuthor")
 
   @@map("users")
 }
@@ -254,18 +256,18 @@ model Warehouse {
   branchId BigInt  @map("branch_id")
   isActive Boolean @default(true) @map("is_active")
 
-  branch          Branch            @relation(fields: [branchId], references: [id])
-  users           UserWarehouse[]
-  userRoles       UserWarehouseRole[]
-  inventoryLevels InventoryLevel[]
-  movements       InventoryMovement[]
-  purchaseOrders  PurchaseOrder[]
-  goodsReceipts   GoodsReceipt[]
-  transfersFrom   StockTransfer[] @relation("TransferFrom")
-  transfersTo     StockTransfer[] @relation("TransferTo")
-  purchaseReturns PurchaseReturn[]
-  orderItems      OrderItem[]
-  draftOrderItems DraftOrderItem[]
+  branch           Branch              @relation(fields: [branchId], references: [id])
+  users            UserWarehouse[]
+  userRoles        UserWarehouseRole[]
+  inventoryLevels  InventoryLevel[]
+  movements        InventoryMovement[]
+  purchaseOrders   PurchaseOrder[]
+  goodsReceipts    GoodsReceipt[]
+  transfersFrom    StockTransfer[]     @relation("TransferFrom")
+  transfersTo      StockTransfer[]     @relation("TransferTo")
+  purchaseReturns  PurchaseReturn[]
+  orderItems       OrderItem[]
+  draftOrderItems  DraftOrderItem[]
   orderReturnItems OrderReturnItem[]
 
   @@map("warehouses")
@@ -335,7 +337,7 @@ model ProductOption {
   name      String
   position  Int    @default(0)
 
-  product Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   values  VariantOptionValue[]
 
   @@unique([productId, name])
@@ -355,18 +357,18 @@ model ProductVariant {
   imageUrl       String?  @map("image_url")
   enabled        Boolean  @default(true)
 
-  product         Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
-  optionValues    VariantOptionValue[]
-  inventoryLevels InventoryLevel[]
-  movements       InventoryMovement[]
-  lots            Lot[]
-  poItems         PurchaseOrderItem[]
-  reiItems        GoodsReceiptItem[]
-  stnItems        StockTransferItem[]
-  pvnItems        PurchaseReturnItem[]
-  priceListItems  PriceListItem[]
-  orderItems      OrderItem[]
-  draftOrderItems DraftOrderItem[]
+  product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues     VariantOptionValue[]
+  inventoryLevels  InventoryLevel[]
+  movements        InventoryMovement[]
+  lots             Lot[]
+  poItems          PurchaseOrderItem[]
+  reiItems         GoodsReceiptItem[]
+  stnItems         StockTransferItem[]
+  pvnItems         PurchaseReturnItem[]
+  priceListItems   PriceListItem[]
+  orderItems       OrderItem[]
+  draftOrderItems  DraftOrderItem[]
   orderReturnItems OrderReturnItem[]
 
   @@map("product_variants")
@@ -385,20 +387,20 @@ model VariantOptionValue {
 }
 
 model Category {
-  id              BigInt                @id @default(autoincrement())
-  name            String
-  description     String?               @db.Text
-  parentId        BigInt?               @map("parent_id")
-  slug            String                @unique
-  imageUrl        String?               @map("image_url")
-  conditionType   CategoryConditionType @default(manual) @map("condition_type")
-  autoConditions  Json?                 @map("auto_conditions")
-  salesChannels   String[]              @default([]) @map("sales_channels")
-  createdAt       DateTime              @default(now()) @map("created_at")
-  updatedAt       DateTime              @updatedAt @map("updated_at")
+  id             BigInt                @id @default(autoincrement())
+  name           String
+  description    String?               @db.Text
+  parentId       BigInt?               @map("parent_id")
+  slug           String                @unique
+  imageUrl       String?               @map("image_url")
+  conditionType  CategoryConditionType @default(manual) @map("condition_type")
+  autoConditions Json?                 @map("auto_conditions")
+  salesChannels  String[]              @default([]) @map("sales_channels")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
 
   parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id])
-  children Category[]          @relation("CategoryTree")
+  children Category[]        @relation("CategoryTree")
   products ProductCategory[]
 
   @@map("categories")
@@ -434,8 +436,8 @@ model PriceList {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  branch        Branch?        @relation(fields: [branchId], references: [id])
-  customerGroup CustomerGroup? @relation(fields: [customerGroupId], references: [id])
+  branch        Branch?         @relation(fields: [branchId], references: [id])
+  customerGroup CustomerGroup?  @relation(fields: [customerGroupId], references: [id])
   items         PriceListItem[]
 
   @@map("price_lists")
@@ -460,17 +462,17 @@ model PriceListItem {
 // --- Inventory core ---
 
 model InventoryLevel {
-  variantId    BigInt  @map("variant_id")
-  warehouseId  BigInt  @map("warehouse_id")
-  onHand       Int     @default(0) @map("on_hand")
-  committed    Int     @default(0)
-  packing      Int     @default(0)
-  unavailable  Int     @default(0)
-  incoming     Int     @default(0)
-  available    Int     @default(0)
-  price        Decimal @default(0) @db.Decimal(18, 2)
-  cost         Decimal @default(0) @db.Decimal(18, 2)
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  variantId   BigInt   @map("variant_id")
+  warehouseId BigInt   @map("warehouse_id")
+  onHand      Int      @default(0) @map("on_hand")
+  committed   Int      @default(0)
+  packing     Int      @default(0)
+  unavailable Int      @default(0)
+  incoming    Int      @default(0)
+  available   Int      @default(0)
+  price       Decimal  @default(0) @db.Decimal(18, 2)
+  cost        Decimal  @default(0) @db.Decimal(18, 2)
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
@@ -509,7 +511,7 @@ model Lot {
   manufacturedAt DateTime? @map("manufactured_at") @db.Date
   expiredAt      DateTime? @map("expired_at") @db.Date
 
-  variant   ProductVariant      @relation(fields: [variantId], references: [id])
+  variant   ProductVariant       @relation(fields: [variantId], references: [id])
   movements InventoryMovement[]
   reiItems  GoodsReceiptItem[]
   stnItems  StockTransferItem[]
@@ -558,8 +560,8 @@ model Supplier {
 
   assignedTo User? @relation("SupplierAssignedTo", fields: [assignedToId], references: [id])
 
-  purchaseOrders PurchaseOrder[]
-  goodsReceipts  GoodsReceipt[]
+  purchaseOrders  PurchaseOrder[]
+  goodsReceipts   GoodsReceipt[]
   purchaseReturns PurchaseReturn[]
 
   @@map("suppliers")
@@ -606,22 +608,30 @@ model PurchaseOrderItem {
 }
 
 model GoodsReceipt {
-  id              BigInt             @id @default(autoincrement())
-  code            String             @unique
-  supplierId      BigInt             @map("supplier_id")
-  warehouseId     BigInt             @map("warehouse_id")
-  purchaseOrderId BigInt?            @map("purchase_order_id")
-  status          GoodsReceiptStatus @default(chua_nhap)
-  paymentStatus   PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
-  amountDue       Decimal            @default(0) @map("amount_due") @db.Decimal(18, 2)
-  createdById     BigInt             @map("created_by")
-  createdAt       DateTime           @default(now()) @map("created_at")
-  receivedAt      DateTime?          @map("received_at")
+  id                BigInt             @id @default(autoincrement())
+  code              String             @unique
+  supplierId        BigInt             @map("supplier_id")
+  warehouseId       BigInt             @map("warehouse_id")
+  purchaseOrderId   BigInt?            @map("purchase_order_id")
+  status            GoodsReceiptStatus @default(chua_nhap)
+  paymentStatus     PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
+  amountDue         Decimal            @default(0) @map("amount_due") @db.Decimal(18, 2)
+  discountAmount    Decimal            @default(0) @map("discount_amount") @db.Decimal(18, 2)
+  extraCost         Decimal            @default(0) @map("extra_cost") @db.Decimal(18, 2)
+  assignedToId      BigInt?            @map("assigned_to")
+  expectedReceiptAt DateTime?          @map("expected_receipt_at")
+  invoiceAt         DateTime?          @map("invoice_at")
+  orderCode         String?            @map("order_code")
+  referenceCode     String?            @map("reference_code")
+  createdById       BigInt             @map("created_by")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  receivedAt        DateTime?          @map("received_at")
 
   supplier      Supplier           @relation(fields: [supplierId], references: [id])
   warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
   purchaseOrder PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   createdBy     User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
+  assignedTo    User?              @relation("ReiAssignedTo", fields: [assignedToId], references: [id])
   items         GoodsReceiptItem[]
 
   @@map("goods_receipts")
@@ -728,8 +738,8 @@ model Customer {
   note      String?  @db.Text
   createdAt DateTime @default(now()) @map("created_at")
 
-  orders      Order[]
-  draftOrders DraftOrder[]
+  orders        Order[]
+  draftOrders   DraftOrder[]
   conversations Conversation[]
 
   @@index([phone])
@@ -792,25 +802,25 @@ model OrderItem {
 }
 
 model DraftOrder {
-  id                 BigInt           @id @default(autoincrement())
-  code               String           @unique
-  branchId           BigInt           @map("branch_id")
-  customerId         BigInt?          @map("customer_id")
-  source             OrderSource      @default(other)
-  status             DraftOrderStatus @default(draft)
-  createdById        BigInt           @map("created_by")
-  currency           String           @default("VND")
-  subtotal           Decimal          @default(0) @db.Decimal(18, 2)
-  discountTotal      Decimal          @default(0) @map("discount_total") @db.Decimal(18, 2)
-  taxTotal           Decimal          @default(0) @map("tax_total") @db.Decimal(18, 2)
-  shippingFee        Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
-  totalAmount        Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
-  shippingMethod     String?          @map("shipping_method")
-  note               String?          @db.Text
-  tags               String[]         @default([])
-  convertedOrderId   BigInt?          @unique @map("converted_order_id")
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
+  id               BigInt           @id @default(autoincrement())
+  code             String           @unique
+  branchId         BigInt           @map("branch_id")
+  customerId       BigInt?          @map("customer_id")
+  source           OrderSource      @default(other)
+  status           DraftOrderStatus @default(draft)
+  createdById      BigInt           @map("created_by")
+  currency         String           @default("VND")
+  subtotal         Decimal          @default(0) @db.Decimal(18, 2)
+  discountTotal    Decimal          @default(0) @map("discount_total") @db.Decimal(18, 2)
+  taxTotal         Decimal          @default(0) @map("tax_total") @db.Decimal(18, 2)
+  shippingFee      Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  totalAmount      Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
+  shippingMethod   String?          @map("shipping_method")
+  note             String?          @db.Text
+  tags             String[]         @default([])
+  convertedOrderId BigInt?          @unique @map("converted_order_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   branch         Branch           @relation(fields: [branchId], references: [id])
   customer       Customer?        @relation(fields: [customerId], references: [id])
@@ -849,8 +859,8 @@ model OrderReturn {
   createdById  BigInt   @map("created_by")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  order     Order              @relation(fields: [orderId], references: [id])
-  createdBy User               @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
+  order     Order             @relation(fields: [orderId], references: [id])
+  createdBy User              @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
   items     OrderReturnItem[]
 
   @@map("order_returns")
@@ -899,15 +909,15 @@ model Voucher {
 // --- Chat CSKH (002 US4) ---
 
 model Conversation {
-  id             BigInt      @id @default(autoincrement())
-  channel        OrderSource @default(other)
-  customerName   String      @map("customer_name")
-  customerPhone  String      @map("customer_phone")
-  customerId     BigInt?     @map("customer_id")
-  assignedToId   BigInt?     @map("assigned_to")
-  lastMessageAt  DateTime    @default(now()) @map("last_message_at")
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  id            BigInt      @id @default(autoincrement())
+  channel       OrderSource @default(other)
+  customerName  String      @map("customer_name")
+  customerPhone String      @map("customer_phone")
+  customerId    BigInt?     @map("customer_id")
+  assignedToId  BigInt?     @map("assigned_to")
+  lastMessageAt DateTime    @default(now()) @map("last_message_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
 
   customer   Customer?             @relation(fields: [customerId], references: [id])
   assignedTo User?                 @relation("ConversationAssignedTo", fields: [assignedToId], references: [id])

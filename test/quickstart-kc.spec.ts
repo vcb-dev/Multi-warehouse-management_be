@@ -309,16 +309,18 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       update: {},
     });
 
-    await inventory.adjustOnHand(
-      {
-        variantId,
-        warehouseId: warehouseK1,
-        newOnHand: 10,
-        reason: 'KC6 cancel test',
-        createdById: userId,
-      },
-      auth,
-    );
+    const levelBeforeSetup = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+    });
+    await inventory.applyMovement({
+      variantId,
+      warehouseId: warehouseK1,
+      bucket: InventoryBucket.on_hand,
+      change: 10 - (levelBeforeSetup?.onHand ?? 0),
+      type: MovementType.adjust,
+      referenceType: 'test',
+      createdById: userId,
+    });
 
     await expect(
       transferService.create(
@@ -344,18 +346,9 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       warehouseIds: [warehouseK2],
     };
 
-    await expect(
-      inventory.adjustOnHand(
-        {
-          variantId,
-          warehouseId: warehouseK1,
-          newOnHand: 5,
-          reason: 'should fail',
-          createdById: userId,
-        },
-        scopedUser,
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(() =>
+      inventory.assertWarehouseAccess(scopedUser, warehouseK1),
+    ).toThrow(ForbiddenException);
 
     const onHandBeforeCancel = (
       await prisma.inventoryLevel.findUniqueOrThrow({

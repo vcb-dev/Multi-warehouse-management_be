@@ -3,9 +3,16 @@ dist/
 coverage/
 .env
 .env.local
+.env.production
 *.log
 .DS_Store
 
 # Prisma
 generated/
 .embedded-postgres/
+
+# Docker export (gửi file này cho đồng nghiệp, không commit)
+sapo-backend-*.tar.gz
+
+# Uploaded runtime files
+uploads/

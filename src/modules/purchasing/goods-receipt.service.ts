@@ -29,6 +29,7 @@ const reiInclude = {
   supplier: { select: { code: true, name: true } },
   warehouse: { select: { code: true, name: true } },
   purchaseOrder: { select: { code: true } },
+  assignedTo: { select: { name: true, email: true } },
 } satisfies Prisma.GoodsReceiptInclude;
 
 @Injectable()
@@ -138,6 +139,15 @@ export class GoodsReceiptService {
           status: GoodsReceiptStatus.chua_nhap,
           paymentStatus: PaymentStatus.chua_thanh_toan,
           createdById: user.userId,
+          assignedToId: dto.assigned_to_id ? BigInt(dto.assigned_to_id) : null,
+          expectedReceiptAt: dto.expected_receipt_at
+            ? new Date(dto.expected_receipt_at)
+            : null,
+          invoiceAt: dto.invoice_at ? new Date(dto.invoice_at) : null,
+          orderCode: dto.order_code?.trim() || null,
+          referenceCode: dto.reference_code?.trim() || null,
+          discountAmount: dto.discount_amount ?? 0,
+          extraCost: dto.extra_cost ?? 0,
         },
       });
 
@@ -265,6 +275,8 @@ export class GoodsReceiptService {
           }
         }
       }
+
+      amountDue = amountDue - Number(rei.discountAmount) + Number(rei.extraCost);
 
       await tx.goodsReceipt.update({
         where: { id: rei.id },

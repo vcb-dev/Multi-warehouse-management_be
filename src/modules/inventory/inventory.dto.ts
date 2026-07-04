@@ -83,22 +83,3 @@ export class ListLotsQueryDto {
   @IsNotEmpty()
   variant_id!: string;
 }
-
-export class AdjustInventoryDto {
-  @IsString()
-  @IsNotEmpty()
-  variant_id!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  warehouse_id!: string;
-
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  new_on_hand!: number;
-
-  @IsString()
-  @IsNotEmpty({ message: 'reason is required' })
-  reason!: string;
-}

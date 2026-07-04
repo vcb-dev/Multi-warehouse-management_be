@@ -25,22 +25,6 @@ export function serializeLevel(level: LevelWithRelations) {
   };
 }
 
-export function serializeLevelBare(level: InventoryLevel) {
-  return {
-    variant_id: level.variantId.toString(),
-    warehouse_id: level.warehouseId.toString(),
-    on_hand: level.onHand,
-    committed: level.committed,
-    packing: level.packing,
-    unavailable: level.unavailable,
-    incoming: level.incoming,
-    available: level.available,
-    price: level.price.toString(),
-    cost: level.cost.toString(),
-    updated_at: level.updatedAt.toISOString(),
-  };
-}
-
 export function serializeMovement(m: InventoryMovement) {
   return {
     id: m.id.toString(),

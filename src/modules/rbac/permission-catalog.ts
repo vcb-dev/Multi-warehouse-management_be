@@ -40,7 +40,6 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
 
   // Quản lý kho (theo kho)
   { key: 'inventory:view', group: 'Quản lý kho', label: 'Xem tồn kho', scope: PermissionScope.warehouse },
-  { key: 'inventory:adjust', group: 'Quản lý kho', label: 'Điều chỉnh tồn kho', scope: PermissionScope.warehouse },
   { key: 'inventory:transfer', group: 'Quản lý kho', label: 'Chuyển kho', scope: PermissionScope.warehouse },
   { key: 'inventory:receive', group: 'Quản lý kho', label: 'Nhập hàng', scope: PermissionScope.warehouse },
   { key: 'purchasing:manage', group: 'Quản lý kho', label: 'Đặt hàng nhập & NCC', scope: PermissionScope.warehouse },
@@ -69,7 +68,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'draft_order:view', 'draft_order:manage',
       'order_return:view', 'order_return:manage',
       'product:view', 'product:manage',
-      'inventory:view', 'inventory:adjust', 'inventory:transfer', 'inventory:receive',
+      'inventory:view', 'inventory:transfer', 'inventory:receive',
       'customer:view', 'customer:manage',
     ],
   },
@@ -91,7 +90,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'dashboard:view',
       'order:view', 'order:pack',
       'product:view',
-      'inventory:view', 'inventory:adjust', 'inventory:transfer', 'inventory:receive',
+      'inventory:view', 'inventory:transfer', 'inventory:receive',
     ],
   },
   purchasing: {

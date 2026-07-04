@@ -1,11 +1,10 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { InventoryBucket, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { assertWarehouseAccess as assertUserWarehouseAccess } from '../../common/auth/access';
 import { InventoryRepository } from './inventory.repository';
-import { serializeLevelBare } from './inventory.serializer';
 import {
   ApplyMovementInput,
   computeAvailable,
@@ -20,6 +19,10 @@ export class InventoryService {
     private prisma: PrismaService,
     private repo: InventoryRepository,
   ) {}
+
+  assertWarehouseAccess(user: AuthUser, warehouseId: bigint): void {
+    assertUserWarehouseAccess(user, warehouseId);
+  }
 
   /** Một điểm vào duy nhất thay đổi tồn (Nguyên tắc III) */
   applyMovement(input: ApplyMovementInput, tx?: Prisma.TransactionClient) {
@@ -138,82 +141,6 @@ export class InventoryService {
     };
   }
 
-  async adjustOnHand(
-    input: {
-      variantId: bigint;
-      warehouseId: bigint;
-      newOnHand: number;
-      reason: string;
-      createdById: bigint;
-    },
-    user: AuthUser,
-  ) {
-    assertUserWarehouseAccess(user, input.warehouseId);
-
-    const existing = await this.prisma.inventoryLevel.findUnique({
-      where: {
-        variantId_warehouseId: {
-          variantId: input.variantId,
-          warehouseId: input.warehouseId,
-        },
-      },
-    });
-
-    const current = existing?.onHand ?? 0;
-    const change = input.newOnHand - current;
-
-    if (change === 0) {
-      if (!existing) {
-        await this.prisma.$transaction(async (tx) => {
-          await this.repo.createLevel(
-            tx,
-            input.variantId,
-            input.warehouseId,
-          );
-        });
-      }
-      const level = await this.prisma.inventoryLevel.findUniqueOrThrow({
-        where: {
-          variantId_warehouseId: {
-            variantId: input.variantId,
-            warehouseId: input.warehouseId,
-          },
-        },
-      });
-      return { level, movementId: null as bigint | null };
-    }
-
-    const result = await this.applyMovement({
-      variantId: input.variantId,
-      warehouseId: input.warehouseId,
-      bucket: InventoryBucket.on_hand,
-      change,
-      type: MovementType.adjust,
-      referenceType: 'adjust',
-      createdById: input.createdById,
-    });
-
-    await this.prisma.activityLog.create({
-      data: {
-        userId: input.createdById,
-        action: 'inventory.adjust',
-        entityType: 'inventory_level',
-        entityId: input.variantId,
-        metadata: {
-          warehouse_id: input.warehouseId.toString(),
-          reason: input.reason,
-          previous_on_hand: current,
-          new_on_hand: input.newOnHand,
-          change,
-        },
-      },
-    });
-
-    return {
-      level: result.level,
-      movementId: result.movementIds[0] ?? null,
-    };
-  }
   /** Đối soát INV-2a/2b */
   async reconcile(variantId: bigint, warehouseId: bigint) {
     const level = await this.prisma.inventoryLevel.findUnique({
