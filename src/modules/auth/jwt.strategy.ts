@@ -8,8 +8,18 @@ import { RbacService } from '../rbac/rbac.service';
 
 type JwtPayload = { sub: string; email: string };
 
+// Mọi request đều chạy validate() nên phải cache: tránh 2 round-trip DB
+// (user + permissions) lặp lại trên từng API call. TTL ngắn để đổi role/khoá
+// tài khoản có hiệu lực gần như ngay lập tức.
+const AUTH_CACHE_TTL_MS = 30_000;
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  private readonly cache = new Map<
+    string,
+    { value: AuthUser; expiresAt: number }
+  >();
+
   constructor(
     config: ConfigService,
     private prisma: PrismaService,
@@ -23,15 +33,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
+    const cached = this.cache.get(payload.sub);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(payload.sub) },
       include: { warehouses: true, warehouseRoles: true },
     });
     if (!user || !user.isActive || user.status === 'inactive') {
+      this.cache.delete(payload.sub);
       throw new UnauthorizedException();
     }
     const resolved = await this.rbac.resolvePermissions(user.id);
-    return {
+    const authUser: AuthUser = {
       userId: user.id,
       email: user.email,
       roles: user.roles,
@@ -42,5 +58,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,
     };
+    this.cache.set(payload.sub, {
+      value: authUser,
+      expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
+    });
+    return authUser;
   }
 }

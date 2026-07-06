@@ -3,10 +3,13 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import * as compression from 'compression';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.use(compression());
 
   const uploadDir = process.env.UPLOAD_DIR ?? join(process.cwd(), 'uploads');
   app.useStaticAssets(uploadDir, { prefix: '/uploads' });
