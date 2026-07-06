@@ -95,6 +95,13 @@ export class PutWarehouseRolesDto {
   assignments!: WarehouseRoleAssignmentDto[];
 }
 
+export class UpdateUserPermissionsDto {
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  permission_keys!: string[];
+}
+
 export class AcceptInviteDto {
   @IsString()
   @MinLength(6)

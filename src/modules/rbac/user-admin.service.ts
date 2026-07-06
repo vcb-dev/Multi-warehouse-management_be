@@ -1,11 +1,17 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ListUsersQueryDto, PutWarehouseRolesDto } from './rbac.dto';
+import {
+  ListUsersQueryDto,
+  PutWarehouseRolesDto,
+  UpdateUserPermissionsDto,
+} from './rbac.dto';
+import { PROTECTED_PERMISSION_KEYS } from './role.service';
 
 @Injectable()
 export class UserAdminService {
@@ -49,7 +55,10 @@ export class UserAdminService {
         { phone: { contains: query.search, mode: 'insensitive' } },
       ];
     }
-    if (query.status && ['invited', 'active', 'inactive'].includes(query.status)) {
+    if (
+      query.status &&
+      ['invited', 'active', 'inactive'].includes(query.status)
+    ) {
       where.status = query.status as Prisma.EnumAccountStatusFilter['equals'];
     }
 
@@ -110,20 +119,28 @@ export class UserAdminService {
   }
 
   async setStatus(id: string, isActive: boolean) {
-    const user = await this.prisma.user.findUnique({ where: { id: BigInt(id) } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: BigInt(id) },
+    });
     if (!user) throw new NotFoundException('USER_NOT_FOUND');
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
         isActive,
-        status: isActive ? (user.passwordHash ? 'active' : 'invited') : 'inactive',
+        status: isActive
+          ? user.passwordHash
+            ? 'active'
+            : 'invited'
+          : 'inactive',
       },
     });
     return this.findOne(id);
   }
 
   async putWarehouseRoles(id: string, dto: PutWarehouseRolesDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: BigInt(id) } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: BigInt(id) },
+    });
     if (!user) throw new NotFoundException('USER_NOT_FOUND');
 
     const seen = new Set<string>();
@@ -153,5 +170,112 @@ export class UserAdminService {
     await this.prisma.userWarehouseRole.deleteMany({
       where: { userId: BigInt(id), warehouseId: BigInt(warehouseId) },
     });
+  }
+
+  private async getWarehouseRoleAssignment(id: string, warehouseId: string) {
+    const assignment = await this.prisma.userWarehouseRole.findUnique({
+      where: {
+        userId_warehouseId: {
+          userId: BigInt(id),
+          warehouseId: BigInt(warehouseId),
+        },
+      },
+      include: {
+        role: { include: { permissions: { include: { permission: true } } } },
+      },
+    });
+    if (!assignment) throw new NotFoundException('WAREHOUSE_ROLE_NOT_FOUND');
+    return assignment;
+  }
+
+  /** Quyền hiệu lực = quyền mặc định của role tại kho, chồng lệch (override) riêng của user. */
+  async getWarehousePermissions(id: string, warehouseId: string) {
+    const assignment = await this.getWarehouseRoleAssignment(id, warehouseId);
+    const overrides = await this.prisma.userPermissionOverride.findMany({
+      where: { userId: BigInt(id), warehouseId: BigInt(warehouseId) },
+      include: { permission: true },
+    });
+
+    const rolePermissionKeys = assignment.role.permissions.map(
+      (p) => p.permission.key,
+    );
+    const effective = new Set(rolePermissionKeys);
+    for (const o of overrides) {
+      if (o.granted) effective.add(o.permission.key);
+      else effective.delete(o.permission.key);
+    }
+
+    return {
+      data: {
+        role_id: assignment.roleId.toString(),
+        role_name: assignment.role.name,
+        is_system: assignment.role.isSystem,
+        role_permission_keys: rolePermissionKeys,
+        permission_keys: [...effective],
+      },
+    };
+  }
+
+  /** Lưu lệch quyền (chỉ diff so với mặc định của role) cho user tại một kho. */
+  async updateWarehousePermissions(
+    id: string,
+    warehouseId: string,
+    dto: UpdateUserPermissionsDto,
+  ) {
+    const assignment = await this.getWarehouseRoleAssignment(id, warehouseId);
+    if (assignment.role.isSystem) throw new ForbiddenException('ROLE_SYSTEM');
+
+    const allPermissions = await this.prisma.permission.findMany({
+      select: { id: true, key: true },
+    });
+    const idByKey = new Map(allPermissions.map((p) => [p.key, p.id]));
+    const unknown = dto.permission_keys.filter((k) => !idByKey.has(k));
+    if (unknown.length) {
+      throw new BadRequestException(
+        `UNKNOWN_PERMISSION: ${unknown.join(', ')}`,
+      );
+    }
+
+    const roleDefaultKeys = new Set(
+      assignment.role.permissions.map((p) => p.permission.key),
+    );
+    const desiredKeys = new Set(dto.permission_keys);
+    const toGrant = [...desiredKeys].filter((k) => !roleDefaultKeys.has(k));
+    const toRevoke = [...roleDefaultKeys].filter((k) => !desiredKeys.has(k));
+
+    if (toGrant.some((k) => PROTECTED_PERMISSION_KEYS.has(k))) {
+      throw new ForbiddenException('PROTECTED_PERMISSION');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userPermissionOverride.deleteMany({
+        where: {
+          userId: assignment.userId,
+          warehouseId: assignment.warehouseId,
+        },
+      });
+      const rows = [
+        ...toGrant.map((key) => ({
+          permissionId: idByKey.get(key)!,
+          granted: true,
+        })),
+        ...toRevoke.map((key) => ({
+          permissionId: idByKey.get(key)!,
+          granted: false,
+        })),
+      ];
+      if (rows.length) {
+        await tx.userPermissionOverride.createMany({
+          data: rows.map((r) => ({
+            userId: assignment.userId,
+            warehouseId: assignment.warehouseId,
+            permissionId: r.permissionId,
+            granted: r.granted,
+          })),
+        });
+      }
+    });
+
+    return this.getWarehousePermissions(id, warehouseId);
   }
 }

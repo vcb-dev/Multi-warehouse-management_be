@@ -16,6 +16,7 @@ import {
   InviteUserDto,
   ListUsersQueryDto,
   PutWarehouseRolesDto,
+  UpdateUserPermissionsDto,
   UpdateUserStatusDto,
 } from './rbac.dto';
 import { InvitationService } from './invitation.service';
@@ -68,7 +69,10 @@ export class UsersController {
 
   @Put(':id/warehouse-roles')
   @RequirePermission('staff:manage')
-  putWarehouseRoles(@Param('id') id: string, @Body() dto: PutWarehouseRolesDto) {
+  putWarehouseRoles(
+    @Param('id') id: string,
+    @Body() dto: PutWarehouseRolesDto,
+  ) {
     return this.users.putWarehouseRoles(id, dto);
   }
 
@@ -80,5 +84,24 @@ export class UsersController {
     @Param('warehouseId') warehouseId: string,
   ) {
     return this.users.removeWarehouseRole(id, warehouseId);
+  }
+
+  @Get(':id/warehouses/:warehouseId/permissions')
+  @RequirePermission('staff:manage')
+  getWarehousePermissions(
+    @Param('id') id: string,
+    @Param('warehouseId') warehouseId: string,
+  ) {
+    return this.users.getWarehousePermissions(id, warehouseId);
+  }
+
+  @Put(':id/warehouses/:warehouseId/permissions')
+  @RequirePermission('staff:manage')
+  updateWarehousePermissions(
+    @Param('id') id: string,
+    @Param('warehouseId') warehouseId: string,
+    @Body() dto: UpdateUserPermissionsDto,
+  ) {
+    return this.users.updateWarehousePermissions(id, warehouseId, dto);
   }
 }

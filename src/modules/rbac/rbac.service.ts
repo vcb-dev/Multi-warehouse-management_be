@@ -22,16 +22,22 @@ export class RbacService {
    * Quyền hiệu lực tại kho K = mọi permission (system + warehouse) của role tại K.
    */
   async resolvePermissions(userId: bigint): Promise<ResolvedPermissions> {
-    const assignments = await this.prisma.userWarehouseRole.findMany({
-      where: { userId, role: { isActive: true } },
-      include: {
-        role: {
-          include: {
-            permissions: { include: { permission: true } },
+    const [assignments, overrides] = await Promise.all([
+      this.prisma.userWarehouseRole.findMany({
+        where: { userId, role: { isActive: true } },
+        include: {
+          role: {
+            include: {
+              permissions: { include: { permission: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      this.prisma.userPermissionOverride.findMany({
+        where: { userId },
+        include: { permission: true },
+      }),
+    ]);
 
     const byWarehouse: Record<string, Set<string>> = {};
     const warehouseIds: bigint[] = [];
@@ -49,6 +55,16 @@ export class RbacService {
       for (const rp of a.role.permissions) {
         byWarehouse[whKey].add(rp.permission.key);
       }
+    }
+
+    // Lệch quyền riêng (nhân viên) chồng lên quyền mặc định của role tại kho —
+    // bỏ qua với kho user đang là admin (admin luôn full quyền, không override).
+    for (const o of overrides) {
+      const whKey = o.warehouseId.toString();
+      if (adminWarehouseIds.some((id) => id === o.warehouseId)) continue;
+      const set = (byWarehouse[whKey] ??= new Set<string>());
+      if (o.granted) set.add(o.permission.key);
+      else set.delete(o.permission.key);
     }
 
     const warehousePermissions = Object.fromEntries(

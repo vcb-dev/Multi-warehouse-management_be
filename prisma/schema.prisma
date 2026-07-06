@@ -130,23 +130,24 @@ model User {
 
   warehouses             UserWarehouse[]
   warehouseRoles         UserWarehouseRole[]
+  permissionOverrides    UserPermissionOverride[]
   invitations            UserInvitation[]
-  inventoryMoves         InventoryMovement[]   @relation("MovementCreatedBy")
+  inventoryMoves         InventoryMovement[]      @relation("MovementCreatedBy")
   activityLogs           ActivityLog[]
-  assignedSuppliers      Supplier[]            @relation("SupplierAssignedTo")
-  purchaseOrders         PurchaseOrder[]       @relation("PoCreatedBy")
-  goodsReceipts          GoodsReceipt[]        @relation("ReiCreatedBy")
-  goodsReceiptsAssigned  GoodsReceipt[]        @relation("ReiAssignedTo")
-  stockTransfersCreated  StockTransfer[]       @relation("StnCreatedBy")
-  stockTransfersReceived StockTransfer[]       @relation("StnReceivedBy")
-  purchaseReturns        PurchaseReturn[]      @relation("PvnCreatedBy")
-  ordersCreated          Order[]               @relation("OrderCreatedBy")
-  ordersAssigned         Order[]               @relation("OrderAssignedTo")
-  orderReturns           OrderReturn[]         @relation("OrderReturnCreatedBy")
-  draftOrders            DraftOrder[]          @relation("DraftOrderCreatedBy")
-  vouchersCreated        Voucher[]             @relation("VoucherCreatedBy")
-  conversationsAssigned  Conversation[]        @relation("ConversationAssignedTo")
-  conversationMessages   ConversationMessage[] @relation("ConversationMessageAuthor")
+  assignedSuppliers      Supplier[]               @relation("SupplierAssignedTo")
+  purchaseOrders         PurchaseOrder[]          @relation("PoCreatedBy")
+  goodsReceipts          GoodsReceipt[]           @relation("ReiCreatedBy")
+  goodsReceiptsAssigned  GoodsReceipt[]           @relation("ReiAssignedTo")
+  stockTransfersCreated  StockTransfer[]          @relation("StnCreatedBy")
+  stockTransfersReceived StockTransfer[]          @relation("StnReceivedBy")
+  purchaseReturns        PurchaseReturn[]         @relation("PvnCreatedBy")
+  ordersCreated          Order[]                  @relation("OrderCreatedBy")
+  ordersAssigned         Order[]                  @relation("OrderAssignedTo")
+  orderReturns           OrderReturn[]            @relation("OrderReturnCreatedBy")
+  draftOrders            DraftOrder[]             @relation("DraftOrderCreatedBy")
+  vouchersCreated        Voucher[]                @relation("VoucherCreatedBy")
+  conversationsAssigned  Conversation[]           @relation("ConversationAssignedTo")
+  conversationMessages   ConversationMessage[]    @relation("ConversationMessageAuthor")
 
   @@map("users")
 }
@@ -187,7 +188,8 @@ model Permission {
   label String
   scope PermissionScope
 
-  roles RolePermission[]
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
 
   @@map("permissions")
 }
@@ -216,6 +218,26 @@ model UserWarehouseRole {
 
   @@unique([userId, warehouseId])
   @@map("user_warehouse_roles")
+}
+
+// Lệch quyền riêng cho một user tại một kho, chồng lên quyền mặc định của
+// role gán tại (user, kho) — không đổi role hay ảnh hưởng user khác.
+// granted=true: thêm quyền role không có. granted=false: bỏ quyền role có sẵn.
+model UserPermissionOverride {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id")
+  warehouseId  BigInt   @map("warehouse_id")
+  permissionId BigInt   @map("permission_id")
+  granted      Boolean
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse  Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, warehouseId, permissionId])
+  @@map("user_permission_overrides")
 }
 
 model UserInvitation {
@@ -256,19 +278,20 @@ model Warehouse {
   branchId BigInt  @map("branch_id")
   isActive Boolean @default(true) @map("is_active")
 
-  branch           Branch              @relation(fields: [branchId], references: [id])
-  users            UserWarehouse[]
-  userRoles        UserWarehouseRole[]
-  inventoryLevels  InventoryLevel[]
-  movements        InventoryMovement[]
-  purchaseOrders   PurchaseOrder[]
-  goodsReceipts    GoodsReceipt[]
-  transfersFrom    StockTransfer[]     @relation("TransferFrom")
-  transfersTo      StockTransfer[]     @relation("TransferTo")
-  purchaseReturns  PurchaseReturn[]
-  orderItems       OrderItem[]
-  draftOrderItems  DraftOrderItem[]
-  orderReturnItems OrderReturnItem[]
+  branch              Branch                   @relation(fields: [branchId], references: [id])
+  users               UserWarehouse[]
+  userRoles           UserWarehouseRole[]
+  permissionOverrides UserPermissionOverride[]
+  inventoryLevels     InventoryLevel[]
+  movements           InventoryMovement[]
+  purchaseOrders      PurchaseOrder[]
+  goodsReceipts       GoodsReceipt[]
+  transfersFrom       StockTransfer[]          @relation("TransferFrom")
+  transfersTo         StockTransfer[]          @relation("TransferTo")
+  purchaseReturns     PurchaseReturn[]
+  orderItems          OrderItem[]
+  draftOrderItems     DraftOrderItem[]
+  orderReturnItems    OrderReturnItem[]
 
   @@map("warehouses")
 }
