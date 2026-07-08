@@ -49,6 +49,12 @@ export class GoodsReceiptService {
     if (query.status) {
       where.status = query.status as GoodsReceiptStatus;
     }
+    if (query.date_from || query.date_to) {
+      where.createdAt = {
+        ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+        ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+      };
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.goodsReceipt.findMany({
@@ -100,7 +106,11 @@ export class GoodsReceiptService {
         include: { items: true },
       });
       if (!purchaseOrder) {
-        throw new BusinessException('VALIDATION_ERROR', 'PO không tồn tại', 422);
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'PO không tồn tại',
+          422,
+        );
       }
       if (purchaseOrder.status !== PoStatus.cho_nhap) {
         throw new BusinessException(
@@ -276,7 +286,8 @@ export class GoodsReceiptService {
         }
       }
 
-      amountDue = amountDue - Number(rei.discountAmount) + Number(rei.extraCost);
+      amountDue =
+        amountDue - Number(rei.discountAmount) + Number(rei.extraCost);
 
       await tx.goodsReceipt.update({
         where: { id: rei.id },
@@ -366,11 +377,7 @@ export class GoodsReceiptService {
       : null;
 
     if (manufacturedAt && expiredAt && expiredAt < manufacturedAt) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        'HSD phải >= NSX',
-        422,
-      );
+      throw new BusinessException('VALIDATION_ERROR', 'HSD phải >= NSX', 422);
     }
 
     return tx.lot.upsert({

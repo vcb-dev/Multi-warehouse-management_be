@@ -46,6 +46,29 @@ export class CreatePurchaseOrderDto {
   items!: PoItemDto[];
 }
 
+export class UpdatePurchaseOrderDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  supplier_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  branch_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  warehouse_id?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PoItemDto)
+  items?: PoItemDto[];
+}
+
 export class PoTransitionDto {
   @IsIn(['submit', 'close', 'cancel'])
   action!: 'submit' | 'close' | 'cancel';
@@ -161,6 +184,14 @@ export class ListGoodsReceiptsQueryDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
 
   @IsOptional()
   @Type(() => Number)

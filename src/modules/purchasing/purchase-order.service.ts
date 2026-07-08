@@ -12,6 +12,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import {
   CreatePurchaseOrderDto,
   ListPurchaseOrdersQueryDto,
+  UpdatePurchaseOrderDto,
 } from './purchasing.dto';
 import { serializePurchaseOrder } from './purchasing.serializer';
 
@@ -34,7 +35,8 @@ export class PurchaseOrderService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.PurchaseOrderWhereInput = {};
 
-    if (query.status) where.status = query.status as import('@prisma/client').PoStatus;
+    if (query.status)
+      where.status = query.status as import('@prisma/client').PoStatus;
     if (query.supplier_id) where.supplierId = BigInt(query.supplier_id);
 
     const [rows, total] = await Promise.all([
@@ -110,6 +112,62 @@ export class PurchaseOrderService {
     return { data: serializePurchaseOrder(po) };
   }
 
+  async update(id: bigint, dto: UpdatePurchaseOrderDto, user: AuthUser) {
+    const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
+    if (!po) throw new NotFoundException('Không tìm thấy PO');
+    if (po.status !== PoStatus.don_nhap) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Chỉ sửa PO ở trạng thái đơn nháp',
+        409,
+      );
+    }
+    if (dto.items && !dto.items.length) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'PO phải có ít nhất một dòng',
+        422,
+      );
+    }
+
+    if (dto.supplier_id) await this.validateSupplier(BigInt(dto.supplier_id));
+    if (dto.branch_id) await this.validateBranch(BigInt(dto.branch_id));
+    if (dto.warehouse_id) {
+      this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
+    }
+
+    const data: Prisma.PurchaseOrderUpdateInput = {};
+    if (dto.supplier_id)
+      data.supplier = { connect: { id: BigInt(dto.supplier_id) } };
+    if (dto.branch_id) data.branch = { connect: { id: BigInt(dto.branch_id) } };
+    if (dto.warehouse_id)
+      data.warehouse = { connect: { id: BigInt(dto.warehouse_id) } };
+
+    if (dto.items) {
+      data.totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
+      data.totalAmount = dto.items.reduce(
+        (s, i) => s + i.quantity * i.unit_price,
+        0,
+      );
+      data.items = {
+        deleteMany: {},
+        create: dto.items.map((item) => ({
+          variantId: BigInt(item.variant_id),
+          quantity: item.quantity,
+          unitPrice: item.unit_price,
+        })),
+      };
+    }
+
+    const updated = await this.prisma.purchaseOrder.update({
+      where: { id },
+      data,
+      include: poInclude,
+    });
+
+    return { data: serializePurchaseOrder(updated) };
+  }
+
   async transition(
     id: bigint,
     action: 'submit' | 'close' | 'cancel',
@@ -131,7 +189,11 @@ export class PurchaseOrderService {
       case 'cancel':
         return this.cancel(po, user);
       default:
-        throw new BusinessException('INVALID_TRANSITION', 'Action không hợp lệ', 409);
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Action không hợp lệ',
+          409,
+        );
     }
   }
 
@@ -278,7 +340,11 @@ export class PurchaseOrderService {
   private async validateBranch(id: bigint) {
     const b = await this.prisma.branch.findUnique({ where: { id } });
     if (!b || !b.isActive) {
-      throw new BusinessException('VALIDATION_ERROR', 'Chi nhánh không hợp lệ', 422);
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chi nhánh không hợp lệ',
+        422,
+      );
     }
   }
 

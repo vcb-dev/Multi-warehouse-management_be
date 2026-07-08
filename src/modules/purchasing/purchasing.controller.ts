@@ -6,10 +6,14 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { GoodsReceiptService } from './goods-receipt.service';
 import { PurchaseOrderService } from './purchase-order.service';
@@ -22,6 +26,7 @@ import {
   ListPurchaseOrdersQueryDto,
   ListPurchaseReturnsQueryDto,
   PoTransitionDto,
+  UpdatePurchaseOrderDto,
 } from './purchasing.dto';
 
 @ApiTags('purchasing')
@@ -53,6 +58,16 @@ export class PurchasingController {
     return this.po.findOne(BigInt(id));
   }
 
+  @Put('purchase-orders/:id')
+  @RequirePermission('purchasing:manage')
+  updatePo(
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchaseOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.po.update(BigInt(id), dto, user);
+  }
+
   @Post('purchase-orders/:id/transition')
   @RequirePermission('purchasing:manage')
   transitionPo(
@@ -72,10 +87,7 @@ export class PurchasingController {
   @Post('goods-receipts')
   @RequirePermission('inventory:receive', 'purchasing:manage')
   @HttpCode(HttpStatus.CREATED)
-  createRei(
-    @Body() dto: CreateGoodsReceiptDto,
-    @CurrentUser() user: AuthUser,
-  ) {
+  createRei(@Body() dto: CreateGoodsReceiptDto, @CurrentUser() user: AuthUser) {
     return this.rei.create(dto, user);
   }
 
