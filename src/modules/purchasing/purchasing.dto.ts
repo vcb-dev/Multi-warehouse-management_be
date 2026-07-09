@@ -180,10 +180,22 @@ export class CreateGoodsReceiptDto {
   items!: ReiItemDto[];
 }
 
+export class PayGoodsReceiptDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount?: number;
+}
+
 export class ListGoodsReceiptsQueryDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsString()
+  supplier_id?: string;
 
   @IsOptional()
   @IsDateString()
@@ -244,6 +256,14 @@ export class ListPurchaseReturnsQueryDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
 
   @IsOptional()
   @Type(() => Number)

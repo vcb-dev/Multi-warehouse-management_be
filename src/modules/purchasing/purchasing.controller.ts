@@ -25,6 +25,7 @@ import {
   ListGoodsReceiptsQueryDto,
   ListPurchaseOrdersQueryDto,
   ListPurchaseReturnsQueryDto,
+  PayGoodsReceiptDto,
   PoTransitionDto,
   UpdatePurchaseOrderDto,
 } from './purchasing.dto';
@@ -105,8 +106,18 @@ export class PurchasingController {
 
   @Post('goods-receipts/:id/pay')
   @RequirePermission('purchasing:manage')
-  payRei(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.rei.pay(BigInt(id), user);
+  payRei(
+    @Param('id') id: string,
+    @Body() dto: PayGoodsReceiptDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.rei.pay(BigInt(id), user, dto.amount);
+  }
+
+  @Post('goods-receipts/:id/cancel')
+  @RequirePermission('inventory:receive', 'purchasing:manage')
+  cancelRei(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.rei.cancel(BigInt(id), user);
   }
 
   @Get('purchase-returns')
@@ -123,5 +134,17 @@ export class PurchasingController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.pvn.create(dto, user);
+  }
+
+  @Get('purchase-returns/:id')
+  @RequirePermission('purchasing:manage', 'inventory:view')
+  getPvn(@Param('id') id: string) {
+    return this.pvn.findOne(BigInt(id));
+  }
+
+  @Post('purchase-returns/:id/confirm-refund')
+  @RequirePermission('purchasing:manage')
+  confirmRefund(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.pvn.confirmRefund(BigInt(id), user);
   }
 }

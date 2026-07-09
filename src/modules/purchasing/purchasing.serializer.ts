@@ -1,6 +1,7 @@
 import {
   GoodsReceipt,
   GoodsReceiptItem,
+  Prisma,
   PurchaseOrder,
   PurchaseOrderItem,
   PurchaseReturn,
@@ -69,6 +70,10 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     status: rei.status,
     payment_status: rei.paymentStatus,
     amount_due: rei.amountDue.toString(),
+    paid_amount: rei.paidAmount.toString(),
+    remaining_amount: (
+      Number(rei.amountDue) - Number(rei.paidAmount)
+    ).toString(),
     discount_amount: rei.discountAmount.toString(),
     extra_cost: rei.extraCost.toString(),
     assigned_to_id: rei.assignedToId?.toString() ?? null,
@@ -101,6 +106,13 @@ export const PO_STATUS_LABELS: Record<string, string> = {
 export const REI_STATUS_LABELS: Record<string, string> = {
   chua_nhap: 'Chưa nhập',
   da_nhap: 'Đã nhập',
+  huy: 'Đã hủy',
+};
+
+export const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  chua_thanh_toan: 'Chưa thanh toán',
+  mot_phan: 'Thanh toán một phần',
+  da_thanh_toan: 'Đã thanh toán',
 };
 
 type PvnWithRelations = PurchaseReturn & {
@@ -123,6 +135,8 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
     warehouse_code: pvn.warehouse?.code,
     total_quantity: pvn.totalQuantity,
     total_amount: pvn.totalAmount.toString(),
+    refund_status: pvn.refundStatus,
+    refunded_at: pvn.refundedAt?.toISOString() ?? null,
     created_at: pvn.createdAt.toISOString(),
     items: pvn.items.map((item) => ({
       id: item.id.toString(),
@@ -133,5 +147,36 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
     })),
+  };
+}
+
+export const REFUND_STATUS_LABELS: Record<string, string> = {
+  chua_hoan_tien: 'Chưa nhận hoàn tiền',
+  da_hoan_tien: 'Đã nhận hoàn tiền',
+};
+
+type LedgerEntryWithRelations = {
+  id: bigint;
+  supplierId: bigint;
+  referenceType: string;
+  referenceCode: string | null;
+  transactionLabel: string;
+  reason: string | null;
+  amount: Prisma.Decimal;
+  createdAt: Date;
+  createdBy?: { name: string | null; email: string } | null;
+};
+
+export function serializeLedgerEntry(entry: LedgerEntryWithRelations) {
+  return {
+    id: entry.id.toString(),
+    supplier_id: entry.supplierId.toString(),
+    reference_type: entry.referenceType,
+    reference_code: entry.referenceCode,
+    transaction_label: entry.transactionLabel,
+    reason: entry.reason,
+    amount: entry.amount.toString(),
+    created_by_name: entry.createdBy?.name ?? entry.createdBy?.email ?? null,
+    created_at: entry.createdAt.toISOString(),
   };
 }

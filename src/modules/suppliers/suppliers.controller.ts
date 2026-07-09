@@ -12,9 +12,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import {
+  CreateDebtAdjustmentDto,
   CreateSupplierDto,
   ListSuppliersQueryDto,
+  ListSupplierLedgerQueryDto,
+  SupplierSummaryQueryDto,
   UpdateSupplierDto,
 } from './supplier.dto';
 import { SupplierService } from './supplier.service';
@@ -54,5 +58,28 @@ export class SupplierController {
   @RequirePermission('purchasing:manage')
   remove(@Param('id') id: string) {
     return this.suppliers.softDelete(BigInt(id));
+  }
+
+  @Get(':id/summary')
+  @RequirePermission('purchasing:manage', 'inventory:view')
+  getSummary(@Param('id') id: string, @Query() query: SupplierSummaryQueryDto) {
+    return this.suppliers.getSummary(BigInt(id), query);
+  }
+
+  @Get(':id/ledger')
+  @RequirePermission('purchasing:manage', 'inventory:view')
+  getLedger(@Param('id') id: string, @Query() query: ListSupplierLedgerQueryDto) {
+    return this.suppliers.getLedger(BigInt(id), query);
+  }
+
+  @Post(':id/debt-adjustments')
+  @RequirePermission('purchasing:manage')
+  @HttpCode(HttpStatus.CREATED)
+  createDebtAdjustment(
+    @Param('id') id: string,
+    @Body() dto: CreateDebtAdjustmentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.suppliers.createDebtAdjustment(BigInt(id), dto, user);
   }
 }

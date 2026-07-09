@@ -49,6 +49,9 @@ export class GoodsReceiptService {
     if (query.status) {
       where.status = query.status as GoodsReceiptStatus;
     }
+    if (query.supplier_id) {
+      where.supplierId = BigInt(query.supplier_id);
+    }
     if (query.date_from || query.date_to) {
       where.createdAt = {
         ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
@@ -199,6 +202,13 @@ export class GoodsReceiptService {
         409,
       );
     }
+    if (rei.status === GoodsReceiptStatus.huy) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Phiếu nhập đã hủy',
+        409,
+      );
+    }
 
     this.inventory.assertWarehouseAccess(user, rei.warehouseId);
 
@@ -304,6 +314,18 @@ export class GoodsReceiptService {
           tx,
         );
       }
+
+      await tx.supplierLedgerEntry.create({
+        data: {
+          supplierId: rei.supplierId,
+          referenceType: 'goods_receipt',
+          referenceCode: rei.code,
+          transactionLabel: 'Nhập hàng',
+          reason: 'Nhập hàng',
+          amount: -amountDue,
+          createdById: user.userId,
+        },
+      });
     });
 
     return {
@@ -314,7 +336,7 @@ export class GoodsReceiptService {
     };
   }
 
-  async pay(id: bigint, user: AuthUser) {
+  async pay(id: bigint, user: AuthUser, amount?: number) {
     const rei = await this.prisma.goodsReceipt.findUnique({
       where: { id },
       include: { supplier: true, warehouse: true },
@@ -331,22 +353,46 @@ export class GoodsReceiptService {
       return {
         id: rei.id.toString(),
         payment_status: PaymentStatus.da_thanh_toan,
+        paid_amount: rei.paidAmount.toString(),
       };
     }
 
     this.inventory.assertWarehouseAccess(user, rei.warehouseId);
 
-    const amount = Number(rei.amountDue);
+    const remaining = Number(rei.amountDue) - Number(rei.paidAmount);
+    const payAmount = amount ?? remaining;
+
+    if (payAmount <= 0) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Số tiền thanh toán phải lớn hơn 0',
+        422,
+      );
+    }
+    if (payAmount > remaining) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `Số tiền thanh toán vượt quá số tiền còn phải trả (còn ${remaining})`,
+        422,
+      );
+    }
+
+    const newPaidAmount = Number(rei.paidAmount) + payAmount;
+    const newStatus =
+      newPaidAmount >= Number(rei.amountDue)
+        ? PaymentStatus.da_thanh_toan
+        : PaymentStatus.mot_phan;
+
     const voucher = await this.prisma.$transaction(async (tx) => {
       await tx.goodsReceipt.update({
         where: { id },
-        data: { paymentStatus: PaymentStatus.da_thanh_toan },
+        data: { paymentStatus: newStatus, paidAmount: newPaidAmount },
       });
 
-      return this.vouchers.createPayment(
+      const result = await this.vouchers.createPayment(
         {
           branchId: rei.warehouse.branchId,
-          amount,
+          amount: payAmount,
           createdById: user.userId,
           sourceDocument: rei.code,
           referenceType: 'goods_receipt',
@@ -355,13 +401,49 @@ export class GoodsReceiptService {
         },
         tx,
       );
+
+      await tx.supplierLedgerEntry.create({
+        data: {
+          supplierId: rei.supplierId,
+          referenceType: 'payment',
+          referenceCode: rei.code,
+          transactionLabel: 'Thanh toán',
+          reason: 'Thanh toán nhập hàng',
+          amount: payAmount,
+          createdById: user.userId,
+        },
+      });
+
+      return result;
     });
 
     return {
       id: rei.id.toString(),
-      payment_status: PaymentStatus.da_thanh_toan,
+      payment_status: newStatus,
+      paid_amount: newPaidAmount.toString(),
       voucher,
     };
+  }
+
+  async cancel(id: bigint, user: AuthUser) {
+    const rei = await this.prisma.goodsReceipt.findUnique({ where: { id } });
+    if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
+    if (rei.status !== GoodsReceiptStatus.chua_nhap) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Chỉ hủy được phiếu nhập chưa nhập kho',
+        409,
+      );
+    }
+
+    this.inventory.assertWarehouseAccess(user, rei.warehouseId);
+
+    await this.prisma.goodsReceipt.update({
+      where: { id },
+      data: { status: GoodsReceiptStatus.huy },
+    });
+
+    return { id: rei.id.toString(), status: GoodsReceiptStatus.huy };
   }
 
   private async upsertLot(

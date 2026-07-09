@@ -1,6 +1,10 @@
 import { Supplier } from '@prisma/client';
 
-export function serializeSupplier(s: Supplier) {
+type SupplierWithRelations = Supplier & {
+  assignedTo?: { name: string | null; email: string } | null;
+};
+
+export function serializeSupplier(s: SupplierWithRelations) {
   return {
     id: s.id.toString(),
     code: s.code,
@@ -18,6 +22,7 @@ export function serializeSupplier(s: Supplier) {
       address: s.address,
     },
     assigned_to: s.assignedToId?.toString() ?? null,
+    assigned_to_name: s.assignedTo?.name ?? s.assignedTo?.email ?? null,
     tags: s.tags,
     is_active: s.isActive,
     created_at: s.createdAt.toISOString(),

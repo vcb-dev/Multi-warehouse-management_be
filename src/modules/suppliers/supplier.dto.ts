@@ -2,9 +2,11 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEmail,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -145,4 +147,38 @@ export class UpdateSupplierDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+}
+
+export class SupplierSummaryQueryDto {
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
+}
+
+export class ListSupplierLedgerQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page_size?: number = 20;
+}
+
+export class CreateDebtAdjustmentDto {
+  @Type(() => Number)
+  @IsNumber()
+  amount!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
 }

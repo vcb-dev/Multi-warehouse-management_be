@@ -67,10 +67,12 @@ enum PoStatus {
 enum GoodsReceiptStatus {
   chua_nhap
   da_nhap
+  huy
 }
 
 enum PaymentStatus {
   chua_thanh_toan
+  mot_phan
   da_thanh_toan
 }
 
@@ -78,6 +80,11 @@ enum StockTransferStatus {
   dang_chuyen
   da_nhan
   huy
+}
+
+enum RefundStatus {
+  chua_hoan_tien
+  da_hoan_tien
 }
 
 enum CategoryConditionType {
@@ -146,6 +153,7 @@ model User {
   orderReturns           OrderReturn[]            @relation("OrderReturnCreatedBy")
   draftOrders            DraftOrder[]             @relation("DraftOrderCreatedBy")
   vouchersCreated        Voucher[]                @relation("VoucherCreatedBy")
+  supplierLedgerEntries  SupplierLedgerEntry[]    @relation("SupplierLedgerCreatedBy")
   conversationsAssigned  Conversation[]           @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]    @relation("ConversationMessageAuthor")
 
@@ -586,8 +594,36 @@ model Supplier {
   purchaseOrders  PurchaseOrder[]
   goodsReceipts   GoodsReceipt[]
   purchaseReturns PurchaseReturn[]
+  ledgerEntries   SupplierLedgerEntry[]
 
   @@map("suppliers")
+}
+
+enum SupplierLedgerReferenceType {
+  goods_receipt
+  payment
+  purchase_return
+  refund
+  adjustment
+}
+
+// Sổ công nợ NCC — amount: âm = tăng nợ phải trả NCC, dương = giảm nợ phải trả NCC
+model SupplierLedgerEntry {
+  id               BigInt                      @id @default(autoincrement())
+  supplierId       BigInt                      @map("supplier_id")
+  referenceType    SupplierLedgerReferenceType @map("reference_type")
+  referenceCode    String?                     @map("reference_code")
+  transactionLabel String                      @map("transaction_label")
+  reason           String?
+  amount           Decimal                     @db.Decimal(18, 2)
+  createdById      BigInt                      @map("created_by")
+  createdAt        DateTime                    @default(now()) @map("created_at")
+
+  supplier  Supplier @relation(fields: [supplierId], references: [id])
+  createdBy User     @relation("SupplierLedgerCreatedBy", fields: [createdById], references: [id])
+
+  @@index([supplierId, createdAt])
+  @@map("supplier_ledger_entries")
 }
 
 // --- Đặt hàng nhập & Nhập hàng (US2) ---
@@ -639,6 +675,7 @@ model GoodsReceipt {
   status            GoodsReceiptStatus @default(chua_nhap)
   paymentStatus     PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
   amountDue         Decimal            @default(0) @map("amount_due") @db.Decimal(18, 2)
+  paidAmount        Decimal            @default(0) @map("paid_amount") @db.Decimal(18, 2)
   discountAmount    Decimal            @default(0) @map("discount_amount") @db.Decimal(18, 2)
   extraCost         Decimal            @default(0) @map("extra_cost") @db.Decimal(18, 2)
   assignedToId      BigInt?            @map("assigned_to")
@@ -716,14 +753,16 @@ model StockTransferItem {
 // --- Trả hàng nhập (US4) ---
 
 model PurchaseReturn {
-  id            BigInt   @id @default(autoincrement())
-  code          String   @unique
-  supplierId    BigInt   @map("supplier_id")
-  warehouseId   BigInt   @map("warehouse_id")
-  totalQuantity Int      @default(0) @map("total_quantity")
-  totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
-  createdById   BigInt   @map("created_by")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id            BigInt       @id @default(autoincrement())
+  code          String       @unique
+  supplierId    BigInt       @map("supplier_id")
+  warehouseId   BigInt       @map("warehouse_id")
+  totalQuantity Int          @default(0) @map("total_quantity")
+  totalAmount   Decimal      @default(0) @map("total_amount") @db.Decimal(18, 2)
+  refundStatus  RefundStatus @default(chua_hoan_tien) @map("refund_status")
+  refundedAt    DateTime?    @map("refunded_at")
+  createdById   BigInt       @map("created_by")
+  createdAt     DateTime     @default(now()) @map("created_at")
 
   supplier  Supplier             @relation(fields: [supplierId], references: [id])
   warehouse Warehouse            @relation(fields: [warehouseId], references: [id])

@@ -1,14 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   GoodsReceiptStatus,
   InventoryBucket,
   MovementType,
   Prisma,
+  RefundStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { VoucherService } from '../vouchers/voucher.service';
 import {
   CreatePurchaseReturnDto,
   ListPurchaseReturnsQueryDto,
@@ -31,6 +33,7 @@ export class PurchaseReturnService {
   constructor(
     private prisma: PrismaService,
     private inventory: InventoryService,
+    private vouchers: VoucherService,
   ) {}
 
   async list(query: ListPurchaseReturnsQueryDto) {
@@ -40,6 +43,12 @@ export class PurchaseReturnService {
 
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
+    }
+    if (query.date_from || query.date_to) {
+      where.createdAt = {
+        ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+        ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+      };
     }
 
     const [rows, total] = await Promise.all([
@@ -123,6 +132,18 @@ export class PurchaseReturnService {
         );
       }
 
+      await tx.supplierLedgerEntry.create({
+        data: {
+          supplierId,
+          referenceType: 'purchase_return',
+          referenceCode: code,
+          transactionLabel: 'Trả hàng nhập',
+          reason: 'Tạo đơn trả hàng nhập',
+          amount: totalAmount,
+          createdById: user.userId,
+        },
+      });
+
       return tx.purchaseReturn.findUniqueOrThrow({
         where: { id: record.id },
         include: pvnInclude,
@@ -130,6 +151,58 @@ export class PurchaseReturnService {
     });
 
     return { data: serializePurchaseReturn(pvn) };
+  }
+
+  async findOne(id: bigint) {
+    const pvn = await this.prisma.purchaseReturn.findUnique({
+      where: { id },
+      include: pvnInclude,
+    });
+    if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    return { data: serializePurchaseReturn(pvn) };
+  }
+
+  async confirmRefund(id: bigint, user: AuthUser) {
+    const pvn = await this.prisma.purchaseReturn.findUnique({
+      where: { id },
+      include: { supplier: true, warehouse: true },
+    });
+    if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    if (pvn.refundStatus === RefundStatus.da_hoan_tien) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Phiếu trả đã nhận hoàn tiền',
+        409,
+      );
+    }
+
+    this.inventory.assertWarehouseAccess(user, pvn.warehouseId);
+
+    const voucher = await this.prisma.$transaction(async (tx) => {
+      await tx.purchaseReturn.update({
+        where: { id },
+        data: { refundStatus: RefundStatus.da_hoan_tien, refundedAt: new Date() },
+      });
+
+      return this.vouchers.createReceipt(
+        {
+          branchId: pvn.warehouse.branchId,
+          amount: Number(pvn.totalAmount),
+          createdById: user.userId,
+          sourceDocument: pvn.code,
+          referenceType: 'purchase_return',
+          referenceId: pvn.id,
+          reason: `Nhận hoàn tiền trả hàng nhập — NCC ${pvn.supplier.name}`,
+        },
+        tx,
+      );
+    });
+
+    return {
+      id: pvn.id.toString(),
+      refund_status: RefundStatus.da_hoan_tien,
+      voucher,
+    };
   }
 
   /** Số lượng đã nhập của lô tại kho (từ REI đã xác nhận) trừ đã trả */

@@ -46,6 +46,34 @@ export class VoucherService {
     };
   }
 
+  async createReceipt(
+    input: CreatePaymentVoucherInput,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    const code = await generateVoucherCode(client, VoucherType.receipt);
+
+    const row = await client.voucher.create({
+      data: {
+        code,
+        type: VoucherType.receipt,
+        amountIn: input.amount,
+        branchId: input.branchId,
+        createdById: input.createdById,
+        sourceDocument: input.sourceDocument,
+        referenceType: input.referenceType,
+        referenceId: input.referenceId,
+        reason: input.reason?.trim() || null,
+      },
+    });
+
+    return {
+      id: row.id.toString(),
+      code: row.code,
+      amount_in: Number(row.amountIn),
+    };
+  }
+
   async list(query: ListVouchersQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
