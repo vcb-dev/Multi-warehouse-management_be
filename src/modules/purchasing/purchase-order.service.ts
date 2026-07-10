@@ -16,6 +16,10 @@ import {
 } from './purchasing.dto';
 import { serializePurchaseOrder } from './purchasing.serializer';
 
+// DB ở xa (Supabase qua pooler) + transaction lặp qua nhiều dòng sản phẩm dễ
+// vượt timeout mặc định 5s của Prisma interactive transaction.
+const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
+
 const poInclude = {
   items: { include: { variant: { select: { sku: true } } } },
   supplier: { select: { code: true, name: true } },
@@ -121,7 +125,7 @@ export class PurchaseOrderService {
       });
 
       return created;
-    });
+    }, TX_OPTIONS);
 
     return { data: serializePurchaseOrder(po) };
   }
@@ -191,7 +195,7 @@ export class PurchaseOrderService {
       });
 
       return result;
-    });
+    }, TX_OPTIONS);
 
     return { data: serializePurchaseOrder(updated) };
   }
@@ -301,7 +305,7 @@ export class PurchaseOrderService {
           metadata: { code: po.code },
         },
       });
-    });
+    }, TX_OPTIONS);
 
     return this.findOne(po.id);
   }
@@ -334,7 +338,7 @@ export class PurchaseOrderService {
           metadata: { code: po.code },
         },
       });
-    });
+    }, TX_OPTIONS);
 
     return this.findOne(po.id);
   }
@@ -366,7 +370,7 @@ export class PurchaseOrderService {
       });
 
       await tx.purchaseOrder.delete({ where: { id: po.id } });
-    });
+    }, TX_OPTIONS);
 
     return { id: po.id.toString(), deleted: true };
   }

@@ -20,6 +20,10 @@ import {
 import { serializeGoodsReceipt } from './purchasing.serializer';
 import { generateSupplierLotCode, nextSupplierLotSequence, supplierLotPrefix } from './lot-code.util';
 
+// DB ở xa (Supabase qua pooler) + transaction lặp qua nhiều dòng sản phẩm dễ
+// vượt timeout mặc định 5s của Prisma interactive transaction.
+const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
+
 const reiInclude = {
   items: {
     include: {
@@ -197,7 +201,7 @@ export class GoodsReceiptService {
         where: { id: receipt.id },
         include: reiInclude,
       });
-    });
+    }, TX_OPTIONS);
 
     return { data: serializeGoodsReceipt(rei) };
   }
@@ -353,7 +357,7 @@ export class GoodsReceiptService {
           metadata: { code: rei.code },
         },
       });
-    });
+    }, TX_OPTIONS);
 
     return {
       id: rei.id.toString(),
@@ -452,7 +456,7 @@ export class GoodsReceiptService {
       });
 
       return result;
-    });
+    }, TX_OPTIONS);
 
     return {
       id: rei.id.toString(),
@@ -489,7 +493,7 @@ export class GoodsReceiptService {
       });
 
       await tx.goodsReceipt.delete({ where: { id } });
-    });
+    }, TX_OPTIONS);
 
     return { id: rei.id.toString(), deleted: true };
   }
