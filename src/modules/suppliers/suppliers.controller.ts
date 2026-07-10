@@ -72,6 +72,12 @@ export class SupplierController {
     return this.suppliers.getLedger(BigInt(id), query);
   }
 
+  @Get(':id/next-lot-code')
+  @RequirePermission('purchasing:manage', 'inventory:receive')
+  getNextLotCode(@Param('id') id: string) {
+    return this.suppliers.getNextLotCode(BigInt(id));
+  }
+
   @Post(':id/debt-adjustments')
   @RequirePermission('purchasing:manage')
   @HttpCode(HttpStatus.CREATED)

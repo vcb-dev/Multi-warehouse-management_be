@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNumber,
@@ -98,6 +99,12 @@ export class CreateOrderDto {
   @IsNumber()
   @Min(0)
   tax_rate?: number;
+
+  /** Số tiền khách thanh toán ngay khi tạo đơn — phần còn lại ghi công nợ */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  paid_amount?: number;
 }
 
 export class ListOrdersQueryDto {
@@ -209,6 +216,37 @@ export class ListOrderReturnsQueryDto {
   page_size?: number;
 }
 
+export class PayOrderDto {
+  /** Bỏ trống = thanh toán toàn bộ số còn phải thu */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+}
+
+export class CreateCustomerDebtAdjustmentDto {
+  @IsNumber()
+  amount!: number;
+
+  @IsString()
+  @MinLength(1)
+  reason!: string;
+}
+
+export class ListCustomerLedgerQueryDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page_size?: number;
+}
+
 export class CreateDraftOrderDto extends CreateOrderDto {}
 
 export class UpdateDraftOrderDto extends CreateOrderDto {}
@@ -227,6 +265,11 @@ export class CreateOrderReturnDto {
 
   @IsOptional()
   restock?: boolean;
+
+  /** true: trừ vào công nợ KH (không tạo phiếu chi); false/mặc định: hoàn tiền ngay */
+  @IsOptional()
+  @IsBoolean()
+  deduct_from_debt?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

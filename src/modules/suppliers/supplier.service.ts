@@ -1,9 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { GoodsReceiptStatus, PaymentStatus, Prisma, RefundStatus } from '@prisma/client';
+import {
+  GoodsReceiptStatus,
+  PaymentStatus,
+  Prisma,
+  RefundStatus,
+  SupplierLedgerReferenceType,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { serializeLedgerEntry } from '../purchasing/purchasing.serializer';
+import { generateSupplierLotCode } from '../purchasing/lot-code.util';
 import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
@@ -214,23 +221,151 @@ export class SupplierService {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
 
-    const [rows, total] = await Promise.all([
-      this.prisma.supplierLedgerEntry.findMany({
-        where: { supplierId: id },
-        include: { createdBy: { select: { name: true, email: true } } },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.supplierLedgerEntry.count({ where: { supplierId: id } }),
-    ]);
+    const createdAtRange =
+      query.date_from || query.date_to
+        ? {
+            ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+            ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+          }
+        : undefined;
+
+    const where: Prisma.SupplierLedgerEntryWhereInput = {
+      supplierId: id,
+      ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+      ...(query.reference_type
+        ? { referenceType: query.reference_type as SupplierLedgerReferenceType }
+        : {}),
+      ...(query.q?.trim()
+        ? { referenceCode: { contains: query.q.trim(), mode: 'insensitive' } }
+        : {}),
+    };
+
+    // Tổng hợp kỳ (Nợ đầu kỳ / tăng / giảm) chỉ theo khoảng ngày, không theo q/loại
+    const periodWhere: Prisma.SupplierLedgerEntryWhereInput = {
+      supplierId: id,
+      ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+    };
+
+    const [rows, total, totalAgg, openingAgg, decreasedAgg, increasedAgg] =
+      await Promise.all([
+        this.prisma.supplierLedgerEntry.findMany({
+          where,
+          include: { createdBy: { select: { name: true, email: true } } },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        this.prisma.supplierLedgerEntry.count({ where }),
+        this.prisma.supplierLedgerEntry.aggregate({
+          where: { supplierId: id },
+          _sum: { amount: true },
+        }),
+        query.date_from
+          ? this.prisma.supplierLedgerEntry.aggregate({
+              where: {
+                supplierId: id,
+                createdAt: { lt: new Date(query.date_from) },
+              },
+              _sum: { amount: true },
+            })
+          : Promise.resolve(null),
+        this.prisma.supplierLedgerEntry.aggregate({
+          where: { ...periodWhere, amount: { gt: 0 } },
+          _sum: { amount: true },
+        }),
+        this.prisma.supplierLedgerEntry.aggregate({
+          where: { ...periodWhere, amount: { lt: 0 } },
+          _sum: { amount: true },
+        }),
+      ]);
+
+    // Nợ sau giao dịch: số dư lũy kế trên toàn bộ sổ (không phụ thuộc bộ lọc)
+    const balances: number[] = [];
+    if (rows.length > 0) {
+      const newest = rows[0];
+      const newerAgg = await this.prisma.supplierLedgerEntry.aggregate({
+        where: {
+          supplierId: id,
+          OR: [
+            { createdAt: { gt: newest.createdAt } },
+            { createdAt: newest.createdAt, id: { gt: newest.id } },
+          ],
+        },
+        _sum: { amount: true },
+      });
+      let running =
+        Number(totalAgg._sum.amount ?? 0) - Number(newerAgg._sum.amount ?? 0);
+      for (const row of rows) {
+        balances.push(running);
+        running -= Number(row.amount);
+      }
+    }
+
+    // Tra id chứng từ theo mã để FE dựng link
+    const codes = [
+      ...new Set(
+        rows
+          .map((r) => r.referenceCode)
+          .filter((c): c is string => !!c),
+      ),
+    ];
+    const [reis, pvns] = codes.length
+      ? await Promise.all([
+          this.prisma.goodsReceipt.findMany({
+            where: { code: { in: codes } },
+            select: { id: true, code: true },
+          }),
+          this.prisma.purchaseReturn.findMany({
+            where: { code: { in: codes } },
+            select: { id: true, code: true },
+          }),
+        ])
+      : [[], []];
+    const refMap = new Map<string, { kind: string; id: string }>();
+    for (const r of reis) {
+      refMap.set(r.code, { kind: 'goods_receipt', id: r.id.toString() });
+    }
+    for (const p of pvns) {
+      refMap.set(p.code, { kind: 'purchase_return', id: p.id.toString() });
+    }
+
+    const openingBalance = query.date_from
+      ? Number(openingAgg?._sum.amount ?? 0)
+      : 0;
+    const decreased = Number(decreasedAgg._sum.amount ?? 0);
+    const increased = Math.abs(Number(increasedAgg._sum.amount ?? 0));
 
     return {
-      data: rows.map(serializeLedgerEntry),
+      data: rows.map((row, i) => {
+        const ref = row.referenceCode
+          ? refMap.get(row.referenceCode)
+          : undefined;
+        return {
+          ...serializeLedgerEntry(row),
+          balance_after: (balances[i] ?? 0).toString(),
+          reference_id: ref?.id ?? null,
+          reference_kind: ref?.kind ?? null,
+        };
+      }),
       total,
       page,
       page_size: pageSize,
+      summary: {
+        opening_balance: openingBalance.toString(),
+        debt_decreased: decreased.toString(),
+        debt_increased: increased.toString(),
+        closing_balance: (openingBalance + decreased - increased).toString(),
+      },
     };
+  }
+
+  /** Xem trước mã lô sẽ được sinh cho phiếu nhập tiếp theo của NCC này */
+  async getNextLotCode(id: bigint) {
+    const supplier = await this.findOneOrThrow(id);
+    const priorReceipts = await this.prisma.goodsReceipt.count({
+      where: { supplierId: id },
+    });
+    return { data: { code: generateSupplierLotCode(supplier.name, priorReceipts + 1) } };
   }
 
   async createDebtAdjustment(

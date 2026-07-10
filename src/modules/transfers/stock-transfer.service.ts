@@ -140,6 +140,22 @@ export class StockTransferService {
           },
           tx,
         );
+
+        // Kho nhận thấy "hàng đang về" trong lúc phiếu trên đường
+        await this.inventory.applyMovement(
+          {
+            variantId: item.variantId,
+            warehouseId: toId,
+            bucket: InventoryBucket.incoming,
+            change: item.quantity,
+            type: MovementType.incoming_transfer,
+            referenceType: 'stock_transfer',
+            referenceId: transfer.id,
+            lotId: item.lotId,
+            createdById: user.userId,
+          },
+          tx,
+        );
       }
 
       return tx.stockTransfer.findUniqueOrThrow({
@@ -170,18 +186,31 @@ export class StockTransferService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of stn.items) {
-        await this.inventory.applyMovement(
-          {
-            variantId: item.variantId,
-            warehouseId: stn.toWarehouseId,
-            bucket: InventoryBucket.on_hand,
-            change: item.quantity,
-            type: MovementType.transfer_in,
-            referenceType: 'stock_transfer',
-            referenceId: stn.id,
-            lotId: item.lotId,
-            createdById: user.userId,
-          },
+        await this.inventory.applyMovements(
+          [
+            {
+              variantId: item.variantId,
+              warehouseId: stn.toWarehouseId,
+              bucket: InventoryBucket.incoming,
+              change: -item.quantity,
+              type: MovementType.incoming_receipt,
+              referenceType: 'stock_transfer',
+              referenceId: stn.id,
+              lotId: item.lotId,
+              createdById: user.userId,
+            },
+            {
+              variantId: item.variantId,
+              warehouseId: stn.toWarehouseId,
+              bucket: InventoryBucket.on_hand,
+              change: item.quantity,
+              type: MovementType.transfer_in,
+              referenceType: 'stock_transfer',
+              referenceId: stn.id,
+              lotId: item.lotId,
+              createdById: user.userId,
+            },
+          ],
           tx,
         );
       }
@@ -225,6 +254,7 @@ export class StockTransferService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of stn.items) {
+        // Hoàn on_hand kho đi
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
@@ -232,6 +262,22 @@ export class StockTransferService {
             bucket: InventoryBucket.on_hand,
             change: item.quantity,
             type: MovementType.transfer_in,
+            referenceType: 'stock_transfer',
+            referenceId: stn.id,
+            lotId: item.lotId,
+            createdById: user.userId,
+          },
+          tx,
+        );
+
+        // Gỡ "hàng đang về" tại kho nhận
+        await this.inventory.applyMovement(
+          {
+            variantId: item.variantId,
+            warehouseId: stn.toWarehouseId,
+            bucket: InventoryBucket.incoming,
+            change: -item.quantity,
+            type: MovementType.incoming_cancel,
             referenceType: 'stock_transfer',
             referenceId: stn.id,
             lotId: item.lotId,

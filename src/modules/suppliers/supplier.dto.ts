@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -160,6 +161,22 @@ export class SupplierSummaryQueryDto {
 }
 
 export class ListSupplierLedgerQueryDto {
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
+
+  @IsOptional()
+  @IsIn(['goods_receipt', 'payment', 'purchase_return', 'refund', 'adjustment'])
+  reference_type?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

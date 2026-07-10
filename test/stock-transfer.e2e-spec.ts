@@ -88,6 +88,11 @@ describeIfDb('US3 stock transfer (integration)', () => {
     };
 
     const totalBefore = await sumOnHand([fromWarehouseId, toWarehouseId]);
+    const toBefore = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: toWarehouseId } },
+    });
+    const toIncomingBefore = toBefore?.incoming ?? 0;
+    const toOnHandBefore = toBefore?.onHand ?? 0;
 
     const { data: stn } = await transferService.create(
       {
@@ -114,6 +119,12 @@ describeIfDb('US3 stock transfer (integration)', () => {
     const totalInTransit = await sumOnHand([fromWarehouseId, toWarehouseId]);
     expect(totalInTransit).toBe(totalBefore - 5);
 
+    // Trong lúc đang chuyển: kho nhận thấy "hàng đang về"
+    const toInTransit = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: toWarehouseId } },
+    });
+    expect(toInTransit?.incoming).toBe(toIncomingBefore + 5);
+
     await transferService.receive(BigInt(stn.id), authUser);
 
     const totalAfter = await sumOnHand([fromWarehouseId, toWarehouseId]);
@@ -122,6 +133,51 @@ describeIfDb('US3 stock transfer (integration)', () => {
     const toLevel = await prisma.inventoryLevel.findUnique({
       where: { variantId_warehouseId: { variantId, warehouseId: toWarehouseId } },
     });
-    expect(toLevel?.onHand).toBe(5);
+    expect(toLevel?.onHand).toBe(toOnHandBefore + 5);
+    expect(toLevel?.incoming).toBe(toIncomingBefore);
+  });
+
+  it('cancel hoàn on_hand kho đi và gỡ incoming kho nhận', async () => {
+    const authUser = {
+      userId,
+      email: 'test@local.dev',
+      roles: ['admin'],
+      warehouseIds: [fromWarehouseId, toWarehouseId],
+    };
+
+    const fromBefore = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: fromWarehouseId } },
+    });
+    const toBefore = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: toWarehouseId } },
+    });
+
+    const { data: stn } = await transferService.create(
+      {
+        from_warehouse_id: fromWarehouseId.toString(),
+        to_warehouse_id: toWarehouseId.toString(),
+        items: [
+          {
+            variant_id: variantId.toString(),
+            lot_id: lotId.toString(),
+            quantity: 3,
+          },
+        ],
+      },
+      authUser,
+    );
+
+    await transferService.cancel(BigInt(stn.id), authUser);
+
+    const fromAfter = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: fromWarehouseId } },
+    });
+    const toAfter = await prisma.inventoryLevel.findUnique({
+      where: { variantId_warehouseId: { variantId, warehouseId: toWarehouseId } },
+    });
+
+    expect(fromAfter?.onHand).toBe(fromBefore?.onHand ?? 0);
+    expect(toAfter?.incoming).toBe(toBefore?.incoming ?? 0);
+    expect(toAfter?.onHand).toBe(toBefore?.onHand ?? 0);
   });
 });

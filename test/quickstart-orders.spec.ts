@@ -13,6 +13,7 @@ import { ChannelsModule } from '../src/modules/channels/channels.module';
 import { ChannelSyncService } from '../src/modules/channels/channel-sync.service';
 import { OrdersModule } from '../src/modules/orders/orders.module';
 import { OrderService } from '../src/modules/orders/order.service';
+import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -44,6 +45,7 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [
         PrismaModule,
+        VouchersModule,
         OrdersModule,
         DraftOrdersModule,
         OrderReturnsModule,

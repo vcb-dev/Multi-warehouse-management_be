@@ -18,6 +18,7 @@ import {
   ListGoodsReceiptsQueryDto,
 } from './purchasing.dto';
 import { serializeGoodsReceipt } from './purchasing.serializer';
+import { generateSupplierLotCode } from './lot-code.util';
 
 const reiInclude = {
   items: {
@@ -96,7 +97,7 @@ export class GoodsReceiptService {
       );
     }
 
-    await this.validateSupplier(BigInt(dto.supplier_id));
+    const supplier = await this.getActiveSupplier(BigInt(dto.supplier_id));
     this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
 
     let purchaseOrder: Prisma.PurchaseOrderGetPayload<{
@@ -141,6 +142,12 @@ export class GoodsReceiptService {
     const code = await this.generateReiCode();
 
     const rei = await this.prisma.$transaction(async (tx) => {
+      // Mã lô tự sinh theo NCC, dùng chung cho mọi dòng SP trong phiếu nhập này
+      const priorReceipts = await tx.goodsReceipt.count({
+        where: { supplierId: BigInt(dto.supplier_id) },
+      });
+      const lotCode = generateSupplierLotCode(supplier.name, priorReceipts + 1);
+
       const receipt = await tx.goodsReceipt.create({
         data: {
           code,
@@ -165,7 +172,7 @@ export class GoodsReceiptService {
       });
 
       for (const item of dto.items) {
-        const lot = await this.upsertLot(tx, item);
+        const lot = await this.upsertLot(tx, item, lotCode);
         await tx.goodsReceiptItem.create({
           data: {
             goodsReceiptId: receipt.id,
@@ -176,6 +183,16 @@ export class GoodsReceiptService {
           },
         });
       }
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'goods_receipt.create',
+          entityType: 'goods_receipt',
+          entityId: receipt.id,
+          metadata: { code: receipt.code },
+        },
+      });
 
       return tx.goodsReceipt.findUniqueOrThrow({
         where: { id: receipt.id },
@@ -311,6 +328,7 @@ export class GoodsReceiptService {
       if (rei.purchaseOrderId) {
         await this.poService.tryCompleteIfFullyReceived(
           rei.purchaseOrderId,
+          user.userId,
           tx,
         );
       }
@@ -324,6 +342,16 @@ export class GoodsReceiptService {
           reason: 'Nhập hàng',
           amount: -amountDue,
           createdById: user.userId,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'goods_receipt.confirm',
+          entityType: 'goods_receipt',
+          entityId: rei.id,
+          metadata: { code: rei.code },
         },
       });
     });
@@ -414,6 +442,16 @@ export class GoodsReceiptService {
         },
       });
 
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'goods_receipt.pay',
+          entityType: 'goods_receipt',
+          entityId: rei.id,
+          metadata: { code: rei.code, amount: payAmount },
+        },
+      });
+
       return result;
     });
 
@@ -438,17 +476,29 @@ export class GoodsReceiptService {
 
     this.inventory.assertWarehouseAccess(user, rei.warehouseId);
 
-    await this.prisma.goodsReceipt.update({
-      where: { id },
-      data: { status: GoodsReceiptStatus.huy },
+    // Phiếu "chưa nhập" chưa từng đụng vào tồn kho/công nợ nên hủy = xóa hẳn,
+    // không giữ lại bản ghi "đã hủy" (khớp Sapo: chỉ có 2 trạng thái Đã nhập/Chưa nhập).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'goods_receipt.cancel',
+          entityType: 'goods_receipt',
+          entityId: rei.id,
+          metadata: { code: rei.code },
+        },
+      });
+
+      await tx.goodsReceipt.delete({ where: { id } });
     });
 
-    return { id: rei.id.toString(), status: GoodsReceiptStatus.huy };
+    return { id: rei.id.toString(), deleted: true };
   }
 
   private async upsertLot(
     tx: Prisma.TransactionClient,
     item: CreateGoodsReceiptDto['items'][0],
+    code: string,
   ) {
     const variantId = BigInt(item.variant_id);
     const manufacturedAt = item.lot.manufactured_at
@@ -464,11 +514,11 @@ export class GoodsReceiptService {
 
     return tx.lot.upsert({
       where: {
-        variantId_code: { variantId, code: item.lot.code.trim() },
+        variantId_code: { variantId, code },
       },
       create: {
         variantId,
-        code: item.lot.code.trim(),
+        code,
         manufacturedAt,
         expiredAt,
       },
@@ -476,11 +526,12 @@ export class GoodsReceiptService {
     });
   }
 
-  private async validateSupplier(id: bigint) {
+  private async getActiveSupplier(id: bigint) {
     const s = await this.prisma.supplier.findUnique({ where: { id } });
     if (!s || !s.isActive) {
       throw new BusinessException('VALIDATION_ERROR', 'NCC không hợp lệ', 422);
     }
+    return s;
   }
 
   private async generateReiCode() {

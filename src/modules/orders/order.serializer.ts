@@ -71,6 +71,8 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     shipping_fee: dec(o.shippingFee),
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
+    payment_status: o.paymentStatus,
+    paid_amount: dec(o.paidAmount),
     note: o.note,
     tags: o.tags,
     ordered_at: o.orderedAt.toISOString(),

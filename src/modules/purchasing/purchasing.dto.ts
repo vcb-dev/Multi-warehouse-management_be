@@ -97,9 +97,10 @@ export class ListPurchaseOrdersQueryDto {
 }
 
 export class LotInputDto {
+  // Mã lô nay do hệ thống tự sinh theo NCC khi tạo phiếu nhập, field này bỏ qua nếu có gửi lên.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  code!: string;
+  code?: string;
 
   @IsOptional()
   @IsDateString()

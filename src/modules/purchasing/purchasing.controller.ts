@@ -15,6 +15,7 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { GoodsReceiptService } from './goods-receipt.service';
 import { PurchaseOrderService } from './purchase-order.service';
 import { PurchaseReturnService } from './purchase-return.service';
@@ -38,6 +39,7 @@ export class PurchasingController {
     private po: PurchaseOrderService,
     private rei: GoodsReceiptService,
     private pvn: PurchaseReturnService,
+    private activityLog: ActivityLogService,
   ) {}
 
   @Get('purchase-orders')
@@ -79,6 +81,12 @@ export class PurchasingController {
     return this.po.transition(BigInt(id), dto.action, user);
   }
 
+  @Get('purchase-orders/:id/history')
+  @RequirePermission('purchasing:manage', 'inventory:view')
+  getPoHistory(@Param('id') id: string) {
+    return this.activityLog.getHistory('purchase_order', BigInt(id));
+  }
+
   @Get('goods-receipts')
   @RequirePermission('purchasing:manage', 'inventory:view', 'inventory:receive')
   listRei(@Query() query: ListGoodsReceiptsQueryDto) {
@@ -118,6 +126,12 @@ export class PurchasingController {
   @RequirePermission('inventory:receive', 'purchasing:manage')
   cancelRei(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.rei.cancel(BigInt(id), user);
+  }
+
+  @Get('goods-receipts/:id/history')
+  @RequirePermission('purchasing:manage', 'inventory:view', 'inventory:receive')
+  getReiHistory(@Param('id') id: string) {
+    return this.activityLog.getHistory('goods_receipt', BigInt(id));
   }
 
   @Get('purchase-returns')

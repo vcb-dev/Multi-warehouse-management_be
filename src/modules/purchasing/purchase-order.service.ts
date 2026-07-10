@@ -88,25 +88,39 @@ export class PurchaseOrderService {
 
     const code = await this.generatePoCode();
 
-    const po = await this.prisma.purchaseOrder.create({
-      data: {
-        code,
-        supplierId: BigInt(dto.supplier_id),
-        branchId: BigInt(dto.branch_id),
-        warehouseId: BigInt(dto.warehouse_id),
-        status: PoStatus.don_nhap,
-        totalQuantity,
-        totalAmount,
-        createdById: user.userId,
-        items: {
-          create: dto.items.map((item) => ({
-            variantId: BigInt(item.variant_id),
-            quantity: item.quantity,
-            unitPrice: item.unit_price,
-          })),
+    const po = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.purchaseOrder.create({
+        data: {
+          code,
+          supplierId: BigInt(dto.supplier_id),
+          branchId: BigInt(dto.branch_id),
+          warehouseId: BigInt(dto.warehouse_id),
+          status: PoStatus.don_nhap,
+          totalQuantity,
+          totalAmount,
+          createdById: user.userId,
+          items: {
+            create: dto.items.map((item) => ({
+              variantId: BigInt(item.variant_id),
+              quantity: item.quantity,
+              unitPrice: item.unit_price,
+            })),
+          },
         },
-      },
-      include: poInclude,
+        include: poInclude,
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_order.create',
+          entityType: 'purchase_order',
+          entityId: created.id,
+          metadata: { code: created.code },
+        },
+      });
+
+      return created;
     });
 
     return { data: serializePurchaseOrder(po) };
@@ -159,10 +173,24 @@ export class PurchaseOrderService {
       };
     }
 
-    const updated = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data,
-      include: poInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.purchaseOrder.update({
+        where: { id },
+        data,
+        include: poInclude,
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_order.update',
+          entityType: 'purchase_order',
+          entityId: id,
+          metadata: { code: result.code },
+        },
+      });
+
+      return result;
     });
 
     return { data: serializePurchaseOrder(updated) };
@@ -200,6 +228,7 @@ export class PurchaseOrderService {
   /** Gọi sau REI confirm — tự chuyển PO → da_nhap nếu nhập đủ */
   async tryCompleteIfFullyReceived(
     purchaseOrderId: bigint,
+    userId: bigint,
     tx: Prisma.TransactionClient,
   ) {
     const po = await tx.purchaseOrder.findUnique({
@@ -215,6 +244,16 @@ export class PurchaseOrderService {
       await tx.purchaseOrder.update({
         where: { id: purchaseOrderId },
         data: { status: PoStatus.da_nhap },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId,
+          action: 'purchase_order.auto_complete',
+          entityType: 'purchase_order',
+          entityId: purchaseOrderId,
+          metadata: { code: po.code },
+        },
       });
     }
   }
@@ -252,6 +291,16 @@ export class PurchaseOrderService {
         where: { id: po.id },
         data: { status: PoStatus.cho_nhap },
       });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_order.submit',
+          entityType: 'purchase_order',
+          entityId: po.id,
+          metadata: { code: po.code },
+        },
+      });
     });
 
     return this.findOne(po.id);
@@ -275,6 +324,16 @@ export class PurchaseOrderService {
         where: { id: po.id },
         data: { status: PoStatus.da_nhap },
       });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_order.close',
+          entityType: 'purchase_order',
+          entityId: po.id,
+          metadata: { code: po.code },
+        },
+      });
     });
 
     return this.findOne(po.id);
@@ -284,25 +343,32 @@ export class PurchaseOrderService {
     po: Prisma.PurchaseOrderGetPayload<{ include: { items: true } }>,
     user: AuthUser,
   ) {
-    if (po.status !== PoStatus.don_nhap && po.status !== PoStatus.cho_nhap) {
+    if (po.status !== PoStatus.don_nhap) {
       throw new BusinessException(
         'INVALID_TRANSITION',
-        'Không thể hủy PO ở trạng thái này',
+        'Chỉ hủy được PO ở trạng thái đơn nháp',
         409,
       );
     }
 
+    // PO đơn nháp chưa từng submit nên chưa tạo incoming/công nợ gì — hủy = xóa hẳn,
+    // giống logic hủy phiếu nhập (REI): không giữ lại trạng thái "đã hủy".
+    // PO đã "Chờ nhập" (cho_nhap) chỉ có thể đóng sớm qua "Chốt" (close), không hủy được nữa.
     await this.prisma.$transaction(async (tx) => {
-      if (po.status === PoStatus.cho_nhap) {
-        await this.cancelRemainingIncoming(po, user.userId, tx);
-      }
-      await tx.purchaseOrder.update({
-        where: { id: po.id },
-        data: { status: PoStatus.huy },
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_order.cancel',
+          entityType: 'purchase_order',
+          entityId: po.id,
+          metadata: { code: po.code },
+        },
       });
+
+      await tx.purchaseOrder.delete({ where: { id: po.id } });
     });
 
-    return this.findOne(po.id);
+    return { id: po.id.toString(), deleted: true };
   }
 
   private async cancelRemainingIncoming(

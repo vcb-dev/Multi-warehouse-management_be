@@ -6,6 +6,7 @@ import {
   CreateOrderDto,
   ListOrdersQueryDto,
   OrderTransitionDto,
+  PayOrderDto,
   UpdateOrderDto,
 } from './order.dto';
 import { OrderService } from './order.service';
@@ -52,5 +53,15 @@ export class OrdersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.orders.transition(BigInt(id), dto, user);
+  }
+
+  @Post(':id/payments')
+  @RequirePermission('order:update')
+  pay(
+    @Param('id') id: string,
+    @Body() dto: PayOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.orders.pay(BigInt(id), dto, user);
   }
 }

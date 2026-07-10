@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
   OrderStatus,
@@ -13,6 +14,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
 import { VoucherService } from '../vouchers/voucher.service';
+import { CustomerDebtService } from '../orders/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
 import { CreateOrderReturnDto, ListOrderReturnsQueryDto } from '../orders/order.dto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -24,6 +26,7 @@ export class OrderReturnService {
     private prisma: PrismaService,
     private inventory: InventoryService,
     private vouchers: VoucherService,
+    private customerDebt: CustomerDebtService,
   ) {}
 
   async list(query: ListOrderReturnsQueryDto, user: AuthUser) {
@@ -114,6 +117,15 @@ export class OrderReturnService {
 
     const code = await generateReturnCode(this.prisma);
     const restock = dto.restock ?? true;
+    const deductFromDebt = dto.deduct_from_debt ?? false;
+
+    if (deductFromDebt && !order.customerId) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Đơn không có khách hàng — không thể trừ công nợ, hãy hoàn tiền ngay',
+        422,
+      );
+    }
 
     const record = await this.prisma.$transaction(async (tx) => {
       const ret = await tx.orderReturn.create({
@@ -168,31 +180,53 @@ export class OrderReturnService {
         }
       }
 
-      const voucher = await this.vouchers.createPayment(
-        {
-          branchId: order.branchId,
-          amount: dto.refund_amount,
-          createdById: user.userId,
-          sourceDocument: order.code,
-          referenceType: 'order_return',
-          referenceId: ret.id,
-          reason: dto.reason?.trim() || `Hoàn tiền đơn ${order.code}`,
-        },
-        tx,
-      );
+      // 2 lựa chọn như Sapo: trừ vào công nợ KH (không chi tiền)
+      // hoặc hoàn tiền ngay (phiếu chi, công nợ không đổi)
+      let voucher: Awaited<
+        ReturnType<VoucherService['createPayment']>
+      > | null = null;
+
+      if (deductFromDebt) {
+        await this.customerDebt.recordEntry(
+          {
+            customerId: order.customerId!,
+            referenceType: CustomerLedgerReferenceType.order_return,
+            referenceCode: ret.code,
+            transactionLabel: 'Trả hàng — trừ công nợ',
+            reason: dto.reason?.trim() || `Trả hàng đơn ${order.code}`,
+            amount: -dto.refund_amount,
+            createdById: user.userId,
+          },
+          tx,
+        );
+      } else {
+        voucher = await this.vouchers.createPayment(
+          {
+            branchId: order.branchId,
+            amount: dto.refund_amount,
+            createdById: user.userId,
+            sourceDocument: order.code,
+            referenceType: 'order_return',
+            referenceId: ret.id,
+            reason: dto.reason?.trim() || `Hoàn tiền đơn ${order.code}`,
+          },
+          tx,
+        );
+      }
 
       await tx.activityLog.create({
         data: {
           userId: user.userId,
-          action: 'voucher.refund',
+          action: deductFromDebt ? 'debt.deduct' : 'voucher.refund',
           entityType: 'order_return',
           entityId: ret.id,
           metadata: {
             order_id: orderId.toString(),
             refund_amount: dto.refund_amount,
             code: ret.code,
-            voucher_id: voucher.id,
-            voucher_code: voucher.code,
+            ...(voucher
+              ? { voucher_id: voucher.id, voucher_code: voucher.code }
+              : { deduct_from_debt: true }),
           },
         },
       });

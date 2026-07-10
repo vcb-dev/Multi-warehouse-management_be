@@ -3,6 +3,7 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersModule } from '../src/modules/orders/orders.module';
+import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -22,7 +23,7 @@ describeIfDb('order guards', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [PrismaModule, OrdersModule],
+      imports: [PrismaModule, VouchersModule, OrdersModule],
     }).compile();
     orders = module.get(OrderService);
     prisma = module.get(PrismaService);

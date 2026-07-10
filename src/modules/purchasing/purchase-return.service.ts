@@ -184,6 +184,19 @@ export class PurchaseReturnService {
         data: { refundStatus: RefundStatus.da_hoan_tien, refundedAt: new Date() },
       });
 
+      // NCC hoàn tiền mặt thay vì trừ công nợ → đảo lại bút toán giảm nợ khi tạo phiếu trả
+      await tx.supplierLedgerEntry.create({
+        data: {
+          supplierId: pvn.supplierId,
+          referenceType: 'refund',
+          referenceCode: pvn.code,
+          transactionLabel: 'Nhận hoàn tiền',
+          reason: 'NCC hoàn tiền trả hàng nhập',
+          amount: -Number(pvn.totalAmount),
+          createdById: user.userId,
+        },
+      });
+
       return this.vouchers.createReceipt(
         {
           branchId: pvn.warehouse.branchId,

@@ -55,6 +55,7 @@ enum MovementType {
   incoming_po
   incoming_receipt
   incoming_cancel
+  incoming_transfer
 }
 
 enum PoStatus {
@@ -154,6 +155,7 @@ model User {
   draftOrders            DraftOrder[]             @relation("DraftOrderCreatedBy")
   vouchersCreated        Voucher[]                @relation("VoucherCreatedBy")
   supplierLedgerEntries  SupplierLedgerEntry[]    @relation("SupplierLedgerCreatedBy")
+  customerLedgerEntries  CustomerLedgerEntry[]    @relation("CustomerLedgerCreatedBy")
   conversationsAssigned  Conversation[]           @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]    @relation("ConversationMessageAuthor")
 
@@ -803,9 +805,37 @@ model Customer {
   orders        Order[]
   draftOrders   DraftOrder[]
   conversations Conversation[]
+  ledgerEntries CustomerLedgerEntry[]
 
   @@index([phone])
   @@map("customers")
+}
+
+enum CustomerLedgerReferenceType {
+  order
+  payment
+  order_return
+  refund
+  adjustment
+}
+
+// Sổ công nợ KH — amount: dương = tăng nợ phải thu (khách nợ thêm), âm = giảm nợ phải thu
+model CustomerLedgerEntry {
+  id               BigInt                      @id @default(autoincrement())
+  customerId       BigInt                      @map("customer_id")
+  referenceType    CustomerLedgerReferenceType @map("reference_type")
+  referenceCode    String?                     @map("reference_code")
+  transactionLabel String                      @map("transaction_label")
+  reason           String?
+  amount           Decimal                     @db.Decimal(18, 2)
+  createdById      BigInt                      @map("created_by")
+  createdAt        DateTime                    @default(now()) @map("created_at")
+
+  customer  Customer @relation(fields: [customerId], references: [id])
+  createdBy User     @relation("CustomerLedgerCreatedBy", fields: [createdById], references: [id])
+
+  @@index([customerId, createdAt])
+  @@map("customer_ledger_entries")
 }
 
 model Order {
@@ -825,6 +855,8 @@ model Order {
   shippingFee        Decimal     @default(0) @map("shipping_fee") @db.Decimal(18, 2)
   totalAmount        Decimal     @default(0) @map("total_amount") @db.Decimal(18, 2)
   totalQuantity      Int         @default(0) @map("total_quantity")
+  paymentStatus      PaymentStatus @default(chua_thanh_toan) @map("payment_status")
+  paidAmount         Decimal     @default(0) @map("paid_amount") @db.Decimal(18, 2)
   note               String?     @db.Text
   tags               String[]    @default([])
   orderedAt          DateTime    @default(now()) @map("ordered_at")
