@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 // Chuẩn hoá tiền tố mã lô: bỏ dấu, bỏ từ pháp lý (TNHH, Cổ phần...),
 // lấy 2 ký tự đầu của từ có nghĩa cuối cùng trong tên NCC.
 // VD: "VGEMS" -> "VG", "Công ty TNHH Thiết bị ABC" -> "AB".
@@ -47,4 +49,31 @@ export function generateSupplierLotCode(
   sequence: number,
 ): string {
   return `${supplierLotPrefix(supplierName)}-${String(sequence).padStart(4, '0')}`;
+}
+
+type LotLookupClient = {
+  lot: {
+    findFirst: (args: {
+      where: { code: { startsWith: string } };
+      orderBy: { code: 'desc' };
+      select: { code: true };
+    }) => Promise<{ code: string } | null>;
+  };
+};
+
+// Số thứ tự mã lô lấy theo mã lô lớn nhất đã cấp cho tiền tố này (không phải
+// đếm số phiếu nhập còn lại) — để không bị cấp trùng sau khi phiếu nháp bị
+// hủy hẳn (xóa khỏi DB).
+export async function nextSupplierLotSequence(
+  db: LotLookupClient | Prisma.TransactionClient,
+  prefix: string,
+): Promise<number> {
+  const latest = await (db as LotLookupClient).lot.findFirst({
+    where: { code: { startsWith: `${prefix}-` } },
+    orderBy: { code: 'desc' },
+    select: { code: true },
+  });
+  if (!latest) return 1;
+  const seq = Number(latest.code.slice(prefix.length + 1));
+  return Number.isFinite(seq) ? seq + 1 : 1;
 }

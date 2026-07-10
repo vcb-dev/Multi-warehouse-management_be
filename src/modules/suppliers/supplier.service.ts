@@ -10,7 +10,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { serializeLedgerEntry } from '../purchasing/purchasing.serializer';
-import { generateSupplierLotCode } from '../purchasing/lot-code.util';
+import {
+  generateSupplierLotCode,
+  nextSupplierLotSequence,
+  supplierLotPrefix,
+} from '../purchasing/lot-code.util';
 import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
@@ -362,10 +366,9 @@ export class SupplierService {
   /** Xem trước mã lô sẽ được sinh cho phiếu nhập tiếp theo của NCC này */
   async getNextLotCode(id: bigint) {
     const supplier = await this.findOneOrThrow(id);
-    const priorReceipts = await this.prisma.goodsReceipt.count({
-      where: { supplierId: id },
-    });
-    return { data: { code: generateSupplierLotCode(supplier.name, priorReceipts + 1) } };
+    const prefix = supplierLotPrefix(supplier.name);
+    const sequence = await nextSupplierLotSequence(this.prisma, prefix);
+    return { data: { code: generateSupplierLotCode(supplier.name, sequence) } };
   }
 
   async createDebtAdjustment(

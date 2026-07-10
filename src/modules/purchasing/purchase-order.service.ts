@@ -415,7 +415,15 @@ export class PurchaseOrderService {
   }
 
   private async generatePoCode() {
-    const count = await this.prisma.purchaseOrder.count();
-    return `PO${String(count + 1).padStart(6, '0')}`;
+    // Dựa vào count() sẽ trùng mã sau khi PO nháp bị xóa hẳn (cancel), nên
+    // phải lấy số thứ tự cao nhất đã từng cấp thay vì đếm số bản ghi còn lại.
+    // Sắp theo chính "code" (không phải id) — thứ tự tạo record không đảm bảo
+    // khớp thứ tự số trong code nếu dữ liệu cũ từng bị cấp lệch.
+    const latest = await this.prisma.purchaseOrder.findFirst({
+      orderBy: { code: 'desc' },
+      select: { code: true },
+    });
+    const nextSeq = latest ? Number(latest.code.slice(2)) + 1 : 1;
+    return `PO${String(nextSeq).padStart(6, '0')}`;
   }
 }

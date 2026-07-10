@@ -18,7 +18,7 @@ import {
   ListGoodsReceiptsQueryDto,
 } from './purchasing.dto';
 import { serializeGoodsReceipt } from './purchasing.serializer';
-import { generateSupplierLotCode } from './lot-code.util';
+import { generateSupplierLotCode, nextSupplierLotSequence, supplierLotPrefix } from './lot-code.util';
 
 const reiInclude = {
   items: {
@@ -143,10 +143,9 @@ export class GoodsReceiptService {
 
     const rei = await this.prisma.$transaction(async (tx) => {
       // Mã lô tự sinh theo NCC, dùng chung cho mọi dòng SP trong phiếu nhập này
-      const priorReceipts = await tx.goodsReceipt.count({
-        where: { supplierId: BigInt(dto.supplier_id) },
-      });
-      const lotCode = generateSupplierLotCode(supplier.name, priorReceipts + 1);
+      const prefix = supplierLotPrefix(supplier.name);
+      const sequence = await nextSupplierLotSequence(tx, prefix);
+      const lotCode = generateSupplierLotCode(supplier.name, sequence);
 
       const receipt = await tx.goodsReceipt.create({
         data: {
@@ -535,7 +534,15 @@ export class GoodsReceiptService {
   }
 
   private async generateReiCode() {
-    const count = await this.prisma.goodsReceipt.count();
-    return `REI${String(count + 1).padStart(6, '0')}`;
+    // Dựa vào count() sẽ trùng mã sau khi phiếu nháp bị xóa hẳn (cancel), nên
+    // phải lấy số thứ tự cao nhất đã từng cấp thay vì đếm số bản ghi còn lại.
+    // Sắp theo chính "code" (không phải id) — thứ tự tạo record không đảm bảo
+    // khớp thứ tự số trong code nếu dữ liệu cũ từng bị cấp lệch.
+    const latest = await this.prisma.goodsReceipt.findFirst({
+      orderBy: { code: 'desc' },
+      select: { code: true },
+    });
+    const nextSeq = latest ? Number(latest.code.slice(3)) + 1 : 1;
+    return `REI${String(nextSeq).padStart(6, '0')}`;
   }
 }
