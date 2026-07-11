@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import { CategoryService, CreateCategoryDto } from './category.service';
+import { CreateCategoryDto } from './category.dto';
+import { CategoryService } from './category.service';
 
 @ApiTags('categories')
 @ApiBearerAuth()
