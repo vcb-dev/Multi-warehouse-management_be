@@ -16,3 +16,4 @@ sapo-backend-*.tar.gz
 
 # Uploaded runtime files
 uploads/
+.cursor/rules/*.mdc
