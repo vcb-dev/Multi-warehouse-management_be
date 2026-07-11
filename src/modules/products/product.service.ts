@@ -39,9 +39,17 @@ export class ProductService {
         },
       ];
     }
-    if (query.brand) where.brand = query.brand;
-    if (query.product_type) where.productType = query.product_type;
-    if (query.is_published !== undefined) where.isPublished = query.is_published;
+    if (query.brand?.trim()) {
+      where.brand = { contains: query.brand.trim(), mode: 'insensitive' };
+    }
+    if (query.product_type?.trim()) {
+      where.productType = {
+        contains: query.product_type.trim(),
+        mode: 'insensitive',
+      };
+    }
+    if (query.is_published !== undefined)
+      where.isPublished = query.is_published;
     if (query.category_id) {
       where.categories = { some: { categoryId: BigInt(query.category_id) } };
     }
@@ -213,7 +221,11 @@ export class ProductService {
       where: { productId: product.id, enabled: true },
     });
 
-    return { id: product.id.toString(), slug: product.slug, variant_count: count };
+    return {
+      id: product.id.toString(),
+      slug: product.slug,
+      variant_count: count,
+    };
   }
 
   async update(id: bigint, dto: UpdateProductDto, user: AuthUser) {
@@ -230,7 +242,9 @@ export class ProductService {
         where: { id },
         data: {
           ...(dto.name ? { name: dto.name.trim() } : {}),
-          ...(dto.brand !== undefined ? { brand: dto.brand?.trim() || null } : {}),
+          ...(dto.brand !== undefined
+            ? { brand: dto.brand?.trim() || null }
+            : {}),
           ...(dto.product_type !== undefined
             ? { productType: dto.product_type?.trim() || null }
             : {}),
@@ -316,7 +330,13 @@ export class ProductService {
       }
 
       if (dto.options && dto.variants) {
-        await this.syncVariants(tx, id, existing.slug, dto.options, dto.variants);
+        await this.syncVariants(
+          tx,
+          id,
+          existing.slug,
+          dto.options,
+          dto.variants,
+        );
       }
 
       await this.categories.evaluateAutoForProduct(tx, id);
@@ -334,7 +354,11 @@ export class ProductService {
     return this.findOne(id);
   }
 
-  async getInventory(id: bigint, query: ProductInventoryQueryDto, user: AuthUser) {
+  async getInventory(
+    id: bigint,
+    query: ProductInventoryQueryDto,
+    user: AuthUser,
+  ) {
     const product = await this.repo.findById(id);
     if (!product) throw new NotFoundException('Không tìm thấy sản phẩm');
 
@@ -400,9 +424,7 @@ export class ProductService {
       const key = this.variants.optionKey(optionValues);
       const input = byKey.get(key);
       return {
-        sku:
-          input?.sku ??
-          this.variants.suggestSku(slug, optionValues),
+        sku: input?.sku ?? this.variants.suggestSku(slug, optionValues),
         price: input?.price ?? 0,
         cost: input?.cost,
         compareAtPrice: input?.compare_at_price,
