@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -11,6 +11,13 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+
+function toBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
+  return undefined;
+}
 
 export class ProductOptionDto {
   @IsString()
@@ -177,8 +184,10 @@ export class ListProductsQueryDto {
   product_type?: string;
 
   @IsOptional()
+  @Transform(({ obj }: { obj: Record<string, unknown> }) =>
+    toBoolean(obj.is_published),
+  )
   @IsBoolean()
-  @Type(() => Boolean)
   is_published?: boolean;
 
   @IsOptional()
