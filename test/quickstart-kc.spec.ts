@@ -19,6 +19,7 @@ import { PurchaseOrderService } from '../src/modules/purchasing/purchase-order.s
 import { PurchaseReturnService } from '../src/modules/purchasing/purchase-return.service';
 import { TransfersModule } from '../src/modules/transfers/transfers.module';
 import { StockTransferService } from '../src/modules/transfers/stock-transfer.service';
+import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { computeAvailable } from '../src/modules/inventory/inventory.types';
@@ -55,7 +56,13 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [PrismaModule, InventoryModule, PurchasingModule, TransfersModule],
+      imports: [
+        PrismaModule,
+        InventoryModule,
+        PurchasingModule,
+        TransfersModule,
+        VouchersModule,
+      ],
     }).compile();
 
     inventory = module.get(InventoryService);

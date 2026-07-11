@@ -44,6 +44,12 @@ export class CreatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items!: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class UpdatePurchaseOrderDto {
@@ -67,6 +73,12 @@ export class UpdatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items?: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class PoTransitionDto {
