@@ -274,6 +274,11 @@ export class CreatePurchaseReturnDto {
   @IsNotEmpty()
   warehouse_id!: string;
 
+  /** Có giá trị khi tạo "trả hàng nhập theo đơn" — gắn phiếu trả với đúng đơn nhập gốc */
+  @IsOptional()
+  @IsString()
+  goods_receipt_id?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PvnItemDto)

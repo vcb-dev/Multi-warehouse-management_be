@@ -26,6 +26,8 @@ const pvnInclude = {
   },
   supplier: { select: { code: true, name: true } },
   warehouse: { select: { code: true, name: true } },
+  goodsReceipt: { select: { code: true } },
+  createdBy: { select: { name: true, email: true } },
 } satisfies Prisma.PurchaseReturnInclude;
 
 @Injectable()
@@ -85,6 +87,14 @@ export class PurchaseReturnService {
     await this.validateSupplier(supplierId);
     this.inventory.assertWarehouseAccess(user, warehouseId);
 
+    const goodsReceiptId = dto.goods_receipt_id
+      ? await this.validateGoodsReceiptRef(
+          BigInt(dto.goods_receipt_id),
+          supplierId,
+          warehouseId,
+        )
+      : null;
+
     await this.validateReturnQuantities(dto.items, warehouseId);
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
@@ -100,6 +110,7 @@ export class PurchaseReturnService {
           code,
           supplierId,
           warehouseId,
+          goodsReceiptId,
           totalQuantity,
           totalAmount,
           createdById: user.userId,
@@ -141,6 +152,16 @@ export class PurchaseReturnService {
           reason: 'Tạo đơn trả hàng nhập',
           amount: totalAmount,
           createdById: user.userId,
+        },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_return.create',
+          entityType: 'purchase_return',
+          entityId: record.id,
+          metadata: { code: record.code },
         },
       });
 
@@ -197,6 +218,16 @@ export class PurchaseReturnService {
         },
       });
 
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'purchase_return.confirm_refund',
+          entityType: 'purchase_return',
+          entityId: pvn.id,
+          metadata: { code: pvn.code },
+        },
+      });
+
       return this.vouchers.createReceipt(
         {
           branchId: pvn.warehouse.branchId,
@@ -240,6 +271,46 @@ export class PurchaseReturnService {
     });
 
     return (received._sum.quantity ?? 0) - (returned._sum.quantity ?? 0);
+  }
+
+  /** "Trả theo đơn" — đơn nhập gốc phải đã nhập kho và khớp đúng NCC/kho đang trả */
+  private async validateGoodsReceiptRef(
+    goodsReceiptId: bigint,
+    supplierId: bigint,
+    warehouseId: bigint,
+  ) {
+    const rei = await this.prisma.goodsReceipt.findUnique({
+      where: { id: goodsReceiptId },
+    });
+    if (!rei) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Đơn nhập hàng không tồn tại',
+        422,
+      );
+    }
+    if (rei.status !== GoodsReceiptStatus.da_nhap) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chỉ trả hàng theo đơn nhập đã nhập kho',
+        422,
+      );
+    }
+    if (rei.supplierId !== supplierId) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'NCC không khớp với đơn nhập hàng',
+        422,
+      );
+    }
+    if (rei.warehouseId !== warehouseId) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Kho không khớp với đơn nhập hàng',
+        422,
+      );
+    }
+    return goodsReceiptId;
   }
 
   private async validateReturnQuantities(

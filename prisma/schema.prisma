@@ -56,6 +56,8 @@ enum MovementType {
   incoming_receipt
   incoming_cancel
   incoming_transfer
+  transfer_reserve
+  transfer_release
 }
 
 enum PoStatus {
@@ -78,6 +80,8 @@ enum PaymentStatus {
 }
 
 enum StockTransferStatus {
+  nhap
+  cho_chuyen
   dang_chuyen
   da_nhan
   huy
@@ -693,12 +697,13 @@ model GoodsReceipt {
   createdAt         DateTime           @default(now()) @map("created_at")
   receivedAt        DateTime?          @map("received_at")
 
-  supplier      Supplier           @relation(fields: [supplierId], references: [id])
-  warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
-  purchaseOrder PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
-  createdBy     User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
-  assignedTo    User?              @relation("ReiAssignedTo", fields: [assignedToId], references: [id])
-  items         GoodsReceiptItem[]
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
+  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
+  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  createdBy       User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
+  assignedTo      User?              @relation("ReiAssignedTo", fields: [assignedToId], references: [id])
+  items           GoodsReceiptItem[]
+  purchaseReturns PurchaseReturn[]
 
   @@map("goods_receipts")
 }
@@ -727,11 +732,12 @@ model StockTransfer {
   code            String              @unique
   fromWarehouseId BigInt              @map("from_warehouse_id")
   toWarehouseId   BigInt              @map("to_warehouse_id")
-  status          StockTransferStatus @default(dang_chuyen)
+  status          StockTransferStatus @default(nhap)
   note            String?
   totalQuantity   Int                 @default(0) @map("total_quantity")
   createdById     BigInt              @map("created_by")
   createdAt       DateTime            @default(now()) @map("created_at")
+  shippedAt       DateTime?           @map("shipped_at")
   receivedAt      DateTime?           @map("received_at")
   receivedById    BigInt?             @map("received_by")
 
@@ -761,21 +767,24 @@ model StockTransferItem {
 // --- Trả hàng nhập (US4) ---
 
 model PurchaseReturn {
-  id            BigInt       @id @default(autoincrement())
-  code          String       @unique
-  supplierId    BigInt       @map("supplier_id")
-  warehouseId   BigInt       @map("warehouse_id")
-  totalQuantity Int          @default(0) @map("total_quantity")
-  totalAmount   Decimal      @default(0) @map("total_amount") @db.Decimal(18, 2)
-  refundStatus  RefundStatus @default(chua_hoan_tien) @map("refund_status")
-  refundedAt    DateTime?    @map("refunded_at")
-  createdById   BigInt       @map("created_by")
-  createdAt     DateTime     @default(now()) @map("created_at")
+  id             BigInt       @id @default(autoincrement())
+  code           String       @unique
+  supplierId     BigInt       @map("supplier_id")
+  warehouseId    BigInt       @map("warehouse_id")
+  // Đơn nhập hàng gốc — có giá trị khi tạo phiếu trả "theo đơn", null khi trả tự do
+  goodsReceiptId BigInt?      @map("goods_receipt_id")
+  totalQuantity  Int          @default(0) @map("total_quantity")
+  totalAmount    Decimal      @default(0) @map("total_amount") @db.Decimal(18, 2)
+  refundStatus   RefundStatus @default(chua_hoan_tien) @map("refund_status")
+  refundedAt     DateTime?    @map("refunded_at")
+  createdById    BigInt       @map("created_by")
+  createdAt      DateTime     @default(now()) @map("created_at")
 
-  supplier  Supplier             @relation(fields: [supplierId], references: [id])
-  warehouse Warehouse            @relation(fields: [warehouseId], references: [id])
-  createdBy User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
-  items     PurchaseReturnItem[]
+  supplier     Supplier             @relation(fields: [supplierId], references: [id])
+  warehouse    Warehouse            @relation(fields: [warehouseId], references: [id])
+  goodsReceipt GoodsReceipt?        @relation(fields: [goodsReceiptId], references: [id])
+  createdBy    User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
+  items        PurchaseReturnItem[]
 
   @@map("purchase_returns")
 }

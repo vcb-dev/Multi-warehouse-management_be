@@ -131,6 +131,8 @@ type PvnWithRelations = PurchaseReturn & {
   })[];
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
+  goodsReceipt?: { code: string } | null;
+  createdBy?: { name: string | null; email: string } | null;
 };
 
 export function serializePurchaseReturn(pvn: PvnWithRelations) {
@@ -142,6 +144,9 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
     supplier_name: pvn.supplier?.name,
     warehouse_id: pvn.warehouseId.toString(),
     warehouse_code: pvn.warehouse?.code,
+    goods_receipt_id: pvn.goodsReceiptId?.toString() ?? null,
+    goods_receipt_code: pvn.goodsReceipt?.code ?? null,
+    created_by_name: pvn.createdBy?.name ?? pvn.createdBy?.email ?? null,
     total_quantity: pvn.totalQuantity,
     total_amount: pvn.totalAmount.toString(),
     refund_status: pvn.refundStatus,

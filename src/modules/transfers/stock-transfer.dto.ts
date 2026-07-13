@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -33,6 +34,11 @@ export class CreateStockTransferDto {
   @IsNotEmpty()
   to_warehouse_id!: string;
 
+  /** Mã phiếu tự nhập — bỏ trống thì hệ thống tự sinh (STN000001, ...) */
+  @IsOptional()
+  @IsString()
+  code?: string;
+
   @IsOptional()
   @IsString()
   note?: string;
@@ -41,6 +47,34 @@ export class CreateStockTransferDto {
   @ValidateNested({ each: true })
   @Type(() => StnItemDto)
   items!: StnItemDto[];
+}
+
+/** Sửa phiếu chuyển — chỉ áp dụng cho phiếu ở trạng thái nháp */
+export class UpdateStockTransferDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  from_warehouse_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  to_warehouse_id?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StnItemDto)
+  items?: StnItemDto[];
+}
+
+export class StnTransitionDto {
+  @IsIn(['submit', 'ship'])
+  action!: 'submit' | 'ship';
 }
 
 export class ListStockTransfersQueryDto {
