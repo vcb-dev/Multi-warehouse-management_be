@@ -22,7 +22,11 @@ import { serializePurchaseOrder } from './purchasing.serializer';
 const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
 
 const poInclude = {
-  items: { include: { variant: { select: { sku: true } } } },
+  items: {
+    include: {
+      variant: { select: { sku: true, product: { select: { name: true } } } },
+    },
+  },
   supplier: { select: { code: true, name: true } },
   warehouse: { select: { code: true, name: true } },
   branch: { select: { code: true, name: true } },

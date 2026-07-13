@@ -9,7 +9,9 @@ import {
 } from '@prisma/client';
 
 type PoWithItems = PurchaseOrder & {
-  items: (PurchaseOrderItem & { variant?: { sku: string } })[];
+  items: (PurchaseOrderItem & {
+    variant?: { sku: string; product?: { name: string } };
+  })[];
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
   branch?: { code: string; name: string };
@@ -19,6 +21,7 @@ type ReiWithItems = GoodsReceipt & {
   items: (GoodsReceiptItem & {
     variant?: { sku: string };
     lot?: { code: string };
+    purchaseOrder?: { code: string } | null;
   })[];
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
@@ -49,6 +52,7 @@ export function serializePurchaseOrder(po: PoWithItems) {
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
+      product_name: item.variant?.product?.name,
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
       received_quantity: item.receivedQuantity,
@@ -82,6 +86,7 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     assigned_to_name: rei.assignedTo?.name ?? rei.assignedTo?.email ?? null,
     expected_receipt_at: rei.expectedReceiptAt?.toISOString() ?? null,
     invoice_at: rei.invoiceAt?.toISOString() ?? null,
+    invoice_symbol: rei.invoiceSymbol ?? null,
     order_code: rei.orderCode ?? null,
     reference_code: rei.referenceCode ?? null,
     created_at: rei.createdAt.toISOString(),
@@ -92,6 +97,8 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
       sku: item.variant?.sku,
       lot_id: item.lotId.toString(),
       lot_code: item.lot?.code,
+      purchase_order_id: item.purchaseOrderId?.toString() ?? null,
+      purchase_order_code: item.purchaseOrder?.code ?? null,
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
     })),
@@ -124,6 +131,8 @@ type PvnWithRelations = PurchaseReturn & {
   })[];
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
+  goodsReceipt?: { code: string } | null;
+  createdBy?: { name: string | null; email: string } | null;
 };
 
 export function serializePurchaseReturn(pvn: PvnWithRelations) {
@@ -135,6 +144,9 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
     supplier_name: pvn.supplier?.name,
     warehouse_id: pvn.warehouseId.toString(),
     warehouse_code: pvn.warehouse?.code,
+    goods_receipt_id: pvn.goodsReceiptId?.toString() ?? null,
+    goods_receipt_code: pvn.goodsReceipt?.code ?? null,
+    created_by_name: pvn.createdBy?.name ?? pvn.createdBy?.email ?? null,
     total_quantity: pvn.totalQuantity,
     total_amount: pvn.totalAmount.toString(),
     refund_status: pvn.refundStatus,
