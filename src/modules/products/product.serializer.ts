@@ -6,25 +6,37 @@ function dec(v: Prisma.Decimal | null | undefined): number | null {
   return Number(v);
 }
 
-export function serializeProductListItem(p: {
-  id: bigint;
-  slug: string;
-  name: string;
-  imageUrl: string | null;
-  brand: string | null;
-  productType: string | null;
-  unit: string | null;
-  tags: string[];
-  isPublished: boolean;
-  variants: { sku: string; price: Prisma.Decimal }[];
-}) {
+export function serializeProductListItem(
+  p: {
+    id: bigint;
+    slug: string;
+    name: string;
+    imageUrl: string | null;
+    brand: string | null;
+    productType: string | null;
+    unit: string | null;
+    tags: string[];
+    isPublished: boolean;
+    variants: { sku: string; price: Prisma.Decimal }[];
+  },
+  opts?: { searchQuery?: string },
+) {
+  const skus = p.variants.map((v) => v.sku);
   const prices = p.variants.map((v) => Number(v.price));
+  const searchQ = opts?.searchQuery?.trim().toLowerCase();
+  const matchedSku = searchQ
+    ? (skus.find((sku) => sku.toLowerCase().includes(searchQ)) ?? null)
+    : null;
+
   return {
     id: p.id.toString(),
     slug: p.slug,
     name: p.name,
     image_url: p.imageUrl,
-    default_sku: p.variants[0]?.sku ?? null,
+    default_sku: skus[0] ?? null,
+    skus,
+    variant_count: skus.length,
+    matched_sku: matchedSku,
     brand: p.brand,
     product_type: p.productType,
     unit: p.unit,

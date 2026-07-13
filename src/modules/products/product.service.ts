@@ -74,7 +74,7 @@ export class ProductService {
           variants: {
             where: { enabled: true },
             orderBy: { id: 'asc' },
-            take: 1,
+            select: { sku: true, price: true },
           },
         },
       }),
@@ -82,7 +82,9 @@ export class ProductService {
     ]);
 
     return {
-      data: rows.map(serializeProductListItem),
+      data: rows.map((row) =>
+        serializeProductListItem(row, { searchQuery: query.q }),
+      ),
       total,
       page,
       page_size: pageSize,
