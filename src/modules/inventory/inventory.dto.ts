@@ -26,6 +26,11 @@ export class ListInventoryQueryDto {
   @IsString()
   variant_id?: string;
 
+  /** Danh sách variant_id, phân tách dấu phẩy — dùng để giới hạn kết quả về đúng tập sản phẩm cho trước (VD: sản phẩm có trong PO của NCC) */
+  @IsOptional()
+  @IsString()
+  variant_ids?: string;
+
   @IsOptional()
   @IsString()
   q?: string;

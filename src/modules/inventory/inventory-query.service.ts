@@ -7,6 +7,16 @@ import { serializeLevel, serializeMovement } from './inventory.serializer';
 
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD ?? 5);
 
+function parseVariantIds(value?: string): bigint[] | undefined {
+  if (!value?.trim()) return undefined;
+  const ids = value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .map((v) => BigInt(v));
+  return ids.length ? ids : undefined;
+}
+
 @Injectable()
 export class InventoryQueryService {
   constructor(private prisma: PrismaService) {}
@@ -118,6 +128,11 @@ export class InventoryQueryService {
       where.id = BigInt(query.variant_id);
     }
 
+    const variantIds = parseVariantIds(query.variant_ids);
+    if (variantIds) {
+      where.id = { in: variantIds };
+    }
+
     if (query.q?.trim()) {
       const q = query.q.trim();
       where.OR = [
@@ -196,6 +211,11 @@ export class InventoryQueryService {
 
     if (query.variant_id) {
       where.variantId = BigInt(query.variant_id);
+    }
+
+    const variantIds = parseVariantIds(query.variant_ids);
+    if (variantIds) {
+      where.variantId = { in: variantIds };
     }
 
     if (query.low_stock) {

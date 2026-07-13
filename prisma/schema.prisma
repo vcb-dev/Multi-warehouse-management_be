@@ -647,9 +647,10 @@ model PurchaseOrder {
   supplier      Supplier            @relation(fields: [supplierId], references: [id])
   branch        Branch              @relation(fields: [branchId], references: [id])
   warehouse     Warehouse           @relation(fields: [warehouseId], references: [id])
-  createdBy     User                @relation("PoCreatedBy", fields: [createdById], references: [id])
-  items         PurchaseOrderItem[]
-  goodsReceipts GoodsReceipt[]
+  createdBy         User                @relation("PoCreatedBy", fields: [createdById], references: [id])
+  items             PurchaseOrderItem[]
+  goodsReceipts     GoodsReceipt[]
+  goodsReceiptItems GoodsReceiptItem[]
 
   @@map("purchase_orders")
 }
@@ -685,6 +686,7 @@ model GoodsReceipt {
   assignedToId      BigInt?            @map("assigned_to")
   expectedReceiptAt DateTime?          @map("expected_receipt_at")
   invoiceAt         DateTime?          @map("invoice_at")
+  invoiceSymbol     String?            @map("invoice_symbol")
   orderCode         String?            @map("order_code")
   referenceCode     String?            @map("reference_code")
   createdById       BigInt             @map("created_by")
@@ -702,16 +704,18 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptItem {
-  id             BigInt  @id @default(autoincrement())
-  goodsReceiptId BigInt  @map("goods_receipt_id")
-  variantId      BigInt  @map("variant_id")
-  lotId          BigInt  @map("lot_id")
-  quantity       Int
-  unitPrice      Decimal @map("unit_price") @db.Decimal(18, 2)
+  id              BigInt  @id @default(autoincrement())
+  goodsReceiptId  BigInt  @map("goods_receipt_id")
+  variantId       BigInt  @map("variant_id")
+  lotId           BigInt  @map("lot_id")
+  purchaseOrderId BigInt? @map("purchase_order_id")
+  quantity        Int
+  unitPrice       Decimal @map("unit_price") @db.Decimal(18, 2)
 
-  goodsReceipt GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  variant      ProductVariant @relation(fields: [variantId], references: [id])
-  lot          Lot            @relation(fields: [lotId], references: [id])
+  goodsReceipt  GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  lot           Lot            @relation(fields: [lotId], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
 
   @@map("goods_receipt_items")
 }
