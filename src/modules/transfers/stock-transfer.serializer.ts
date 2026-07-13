@@ -1,15 +1,27 @@
-import { StockTransfer, StockTransferItem } from '@prisma/client';
+import { Prisma, StockTransfer, StockTransferItem } from '@prisma/client';
 
 type StnWithRelations = StockTransfer & {
   items: (StockTransferItem & {
-    variant?: { sku: string };
+    variant?: {
+      sku: string;
+      cost?: Prisma.Decimal;
+      product?: { name: string };
+    };
     lot?: { code: string };
   })[];
   fromWarehouse?: { code: string; name: string };
   toWarehouse?: { code: string; name: string };
+  createdBy?: { name: string | null; email: string } | null;
 };
 
 export function serializeStockTransfer(stn: StnWithRelations) {
+  // Giá trị chuyển là ƯỚC TÍNH theo giá vốn HIỆN TẠI của sản phẩm — hệ thống
+  // không lưu giá vốn tại thời điểm chuyển, nên đây không phải số lịch sử.
+  const transferValue = stn.items.reduce((sum, item) => {
+    const cost = Number(item.variant?.cost ?? 0);
+    return sum + cost * item.quantity;
+  }, 0);
+
   return {
     id: stn.id.toString(),
     code: stn.code,
@@ -22,12 +34,17 @@ export function serializeStockTransfer(stn: StnWithRelations) {
     status: stn.status,
     note: stn.note,
     total_quantity: stn.totalQuantity,
+    transfer_value: transferValue.toString(),
+    created_by_name: stn.createdBy?.name ?? stn.createdBy?.email ?? null,
     created_at: stn.createdAt.toISOString(),
+    shipped_at: stn.shippedAt?.toISOString() ?? null,
     received_at: stn.receivedAt?.toISOString() ?? null,
     items: stn.items.map((item) => ({
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
+      product_name: item.variant?.product?.name,
+      cost: item.variant?.cost?.toString(),
       lot_id: item.lotId.toString(),
       lot_code: item.lot?.code,
       quantity: item.quantity,
@@ -36,6 +53,8 @@ export function serializeStockTransfer(stn: StnWithRelations) {
 }
 
 export const STN_STATUS_LABELS: Record<string, string> = {
+  nhap: 'Phiếu nháp',
+  cho_chuyen: 'Chờ chuyển',
   dang_chuyen: 'Đang chuyển',
   da_nhan: 'Đã nhận',
   huy: 'Hủy',

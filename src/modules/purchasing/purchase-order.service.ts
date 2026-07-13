@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { VoucherService } from '../vouchers/voucher.service';
 import {
   CreatePurchaseOrderDto,
   ListPurchaseOrdersQueryDto,
@@ -21,17 +22,26 @@ import { serializePurchaseOrder } from './purchasing.serializer';
 const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
 
 const poInclude = {
-  items: { include: { variant: { select: { sku: true } } } },
+  items: {
+    include: {
+      variant: { select: { sku: true, product: { select: { name: true } } } },
+    },
+  },
   supplier: { select: { code: true, name: true } },
   warehouse: { select: { code: true, name: true } },
   branch: { select: { code: true, name: true } },
 } satisfies Prisma.PurchaseOrderInclude;
+
+type PoForTransition = Prisma.PurchaseOrderGetPayload<{
+  include: { items: true; supplier: { select: { name: true } } };
+}>;
 
 @Injectable()
 export class PurchaseOrderService {
   constructor(
     private prisma: PrismaService,
     private inventory: InventoryService,
+    private vouchers: VoucherService,
   ) {}
 
   async list(query: ListPurchaseOrdersQueryDto) {
@@ -90,6 +100,15 @@ export class PurchaseOrderService {
       0,
     );
 
+    const depositAmount = dto.deposit_amount ?? 0;
+    if (depositAmount > totalAmount) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Tiền cọc không được vượt quá giá trị đơn đặt hàng',
+        422,
+      );
+    }
+
     const code = await this.generatePoCode();
 
     const po = await this.prisma.$transaction(async (tx) => {
@@ -102,6 +121,7 @@ export class PurchaseOrderService {
           status: PoStatus.don_nhap,
           totalQuantity,
           totalAmount,
+          depositAmount,
           createdById: user.userId,
           items: {
             create: dto.items.map((item) => ({
@@ -177,6 +197,20 @@ export class PurchaseOrderService {
       };
     }
 
+    if (dto.deposit_amount !== undefined) {
+      const effectiveTotal = dto.items
+        ? (data.totalAmount as number)
+        : Number(po.totalAmount);
+      if (dto.deposit_amount > effectiveTotal) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Tiền cọc không được vượt quá giá trị đơn đặt hàng',
+          422,
+        );
+      }
+      data.depositAmount = dto.deposit_amount;
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.purchaseOrder.update({
         where: { id },
@@ -207,7 +241,7 @@ export class PurchaseOrderService {
   ) {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
-      include: { items: true },
+      include: { items: true, supplier: { select: { name: true } } },
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
 
@@ -262,10 +296,7 @@ export class PurchaseOrderService {
     }
   }
 
-  private async submit(
-    po: Prisma.PurchaseOrderGetPayload<{ include: { items: true } }>,
-    user: AuthUser,
-  ) {
+  private async submit(po: PoForTransition, user: AuthUser) {
     if (po.status !== PoStatus.don_nhap) {
       throw new BusinessException(
         'INVALID_TRANSITION',
@@ -305,6 +336,21 @@ export class PurchaseOrderService {
           metadata: { code: po.code },
         },
       });
+
+      if (Number(po.depositAmount) > 0) {
+        await this.vouchers.createPayment(
+          {
+            branchId: po.branchId,
+            amount: Number(po.depositAmount),
+            createdById: user.userId,
+            sourceDocument: po.code,
+            referenceType: 'purchase_order',
+            referenceId: po.id,
+            reason: `Tiền cọc đặt hàng nhập — NCC ${po.supplier.name}`,
+          },
+          tx,
+        );
+      }
     }, TX_OPTIONS);
 
     return this.findOne(po.id);

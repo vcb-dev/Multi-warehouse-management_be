@@ -87,6 +87,12 @@ export class VoucherService {
         { sourceDocument: { contains: query.q.trim(), mode: 'insensitive' } },
       ];
     }
+    if (query.date_from || query.date_to) {
+      where.recordedAt = {
+        ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+        ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+      };
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.voucher.findMany({

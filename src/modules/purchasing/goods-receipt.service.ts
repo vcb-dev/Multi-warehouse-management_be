@@ -18,7 +18,11 @@ import {
   ListGoodsReceiptsQueryDto,
 } from './purchasing.dto';
 import { serializeGoodsReceipt } from './purchasing.serializer';
-import { generateSupplierLotCode, nextSupplierLotSequence, supplierLotPrefix } from './lot-code.util';
+import {
+  generateSupplierLotCode,
+  nextSupplierLotSequence,
+  supplierLotPrefix,
+} from './lot-code.util';
 
 // DB ở xa (Supabase qua pooler) + transaction lặp qua nhiều dòng sản phẩm dễ
 // vượt timeout mặc định 5s của Prisma interactive transaction.
@@ -29,6 +33,7 @@ const reiInclude = {
     include: {
       variant: { select: { sku: true } },
       lot: { select: { code: true } },
+      purchaseOrder: { select: { code: true } },
     },
   },
   supplier: { select: { code: true, name: true } },
@@ -56,6 +61,13 @@ export class GoodsReceiptService {
     }
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
+    }
+    if (query.payment_status) {
+      const statuses = query.payment_status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) as PaymentStatus[];
+      if (statuses.length) where.paymentStatus = { in: statuses };
     }
     if (query.date_from || query.date_to) {
       where.createdAt = {
@@ -101,47 +113,90 @@ export class GoodsReceiptService {
       );
     }
 
+    if (!dto.invoice_symbol?.trim()) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ký hiệu hóa đơn là bắt buộc',
+        422,
+      );
+    }
+
     const supplier = await this.getActiveSupplier(BigInt(dto.supplier_id));
     this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
 
-    let purchaseOrder: Prisma.PurchaseOrderGetPayload<{
-      include: { items: true };
-    }> | null = null;
+    // Gom PO tham chiếu: từng dòng có thể gắn PO riêng, dòng không gắn thì
+    // dùng PO chung của phiếu (nếu có).
+    const poIds = new Set<string>();
+    if (dto.purchase_order_id) poIds.add(dto.purchase_order_id);
+    for (const item of dto.items) {
+      if (item.purchase_order_id) poIds.add(item.purchase_order_id);
+    }
 
-    if (dto.purchase_order_id) {
-      purchaseOrder = await this.prisma.purchaseOrder.findUnique({
-        where: { id: BigInt(dto.purchase_order_id) },
+    const poMap = new Map<
+      string,
+      Prisma.PurchaseOrderGetPayload<{ include: { items: true } }>
+    >();
+    for (const poId of poIds) {
+      const po = await this.prisma.purchaseOrder.findUnique({
+        where: { id: BigInt(poId) },
         include: { items: true },
       });
-      if (!purchaseOrder) {
+      if (!po) {
         throw new BusinessException(
           'VALIDATION_ERROR',
           'PO không tồn tại',
           422,
         );
       }
-      if (purchaseOrder.status !== PoStatus.cho_nhap) {
+      if (po.status !== PoStatus.cho_nhap) {
         throw new BusinessException(
           'VALIDATION_ERROR',
-          'PO phải ở trạng thái chờ nhập',
+          `PO ${po.code} phải ở trạng thái chờ nhập`,
           422,
         );
       }
-      if (purchaseOrder.supplierId !== BigInt(dto.supplier_id)) {
+      if (po.supplierId !== BigInt(dto.supplier_id)) {
         throw new BusinessException(
           'VALIDATION_ERROR',
-          'NCC không khớp với PO',
+          `NCC không khớp với PO ${po.code}`,
           422,
         );
       }
-      if (purchaseOrder.warehouseId !== BigInt(dto.warehouse_id)) {
+      if (po.warehouseId !== BigInt(dto.warehouse_id)) {
         throw new BusinessException(
           'VALIDATION_ERROR',
-          'Kho không khớp với PO',
+          `Kho không khớp với PO ${po.code}`,
+          422,
+        );
+      }
+      poMap.set(poId, po);
+    }
+
+    // Bắt buộc mỗi dòng gắn một PO, và sản phẩm phải có mặt trên PO đó
+    for (const item of dto.items) {
+      const poId = item.purchase_order_id ?? dto.purchase_order_id;
+      if (!poId) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Mỗi dòng sản phẩm phải gắn với một đơn đặt hàng (PO)',
+          422,
+        );
+      }
+      const po = poMap.get(poId)!;
+      if (!po.items.some((i) => i.variantId === BigInt(item.variant_id))) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Sản phẩm ${item.variant_id} không có trên PO ${po.code}`,
           422,
         );
       }
     }
+
+    // PO gắn ở header: giữ giá trị client gửi; nếu mọi dòng cùng quy về đúng
+    // 1 PO thì gắn luôn để hiển thị "nhập theo PO" và cấn trừ cọc như cũ.
+    // Nhiều PO khác nhau trên cùng phiếu → header để trống, cọc không tự cấn.
+    const headerPoId =
+      dto.purchase_order_id ?? (poIds.size === 1 ? [...poIds][0] : undefined);
 
     const code = await this.generateReiCode();
 
@@ -156,9 +211,7 @@ export class GoodsReceiptService {
           code,
           supplierId: BigInt(dto.supplier_id),
           warehouseId: BigInt(dto.warehouse_id),
-          purchaseOrderId: dto.purchase_order_id
-            ? BigInt(dto.purchase_order_id)
-            : null,
+          purchaseOrderId: headerPoId ? BigInt(headerPoId) : null,
           status: GoodsReceiptStatus.chua_nhap,
           paymentStatus: PaymentStatus.chua_thanh_toan,
           createdById: user.userId,
@@ -167,6 +220,7 @@ export class GoodsReceiptService {
             ? new Date(dto.expected_receipt_at)
             : null,
           invoiceAt: dto.invoice_at ? new Date(dto.invoice_at) : null,
+          invoiceSymbol: dto.invoice_symbol?.trim() || null,
           orderCode: dto.order_code?.trim() || null,
           referenceCode: dto.reference_code?.trim() || null,
           discountAmount: dto.discount_amount ?? 0,
@@ -176,11 +230,13 @@ export class GoodsReceiptService {
 
       for (const item of dto.items) {
         const lot = await this.upsertLot(tx, item, lotCode);
+        const itemPoId = item.purchase_order_id ?? headerPoId;
         await tx.goodsReceiptItem.create({
           data: {
             goodsReceiptId: receipt.id,
             variantId: BigInt(item.variant_id),
             lotId: lot.id,
+            purchaseOrderId: itemPoId ? BigInt(itemPoId) : null,
             quantity: item.quantity,
             unitPrice: item.unit_price,
           },
@@ -209,10 +265,7 @@ export class GoodsReceiptService {
   async confirm(id: bigint, user: AuthUser) {
     const rei = await this.prisma.goodsReceipt.findUnique({
       where: { id },
-      include: {
-        items: true,
-        purchaseOrder: { include: { items: true } },
-      },
+      include: { items: true },
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
     if (rei.status === GoodsReceiptStatus.da_nhap) {
@@ -236,43 +289,67 @@ export class GoodsReceiptService {
     let amountDue = 0;
 
     await this.prisma.$transaction(async (tx) => {
-      const poItemMap = new Map(
-        rei.purchaseOrder?.items.map((i) => [i.variantId.toString(), i]) ?? [],
+      // PO hiệu lực của từng dòng: PO gắn riêng trên dòng, fallback về PO
+      // chung của phiếu (dữ liệu cũ chỉ gắn header).
+      const poIdOf = (item: (typeof rei.items)[number]) =>
+        item.purchaseOrderId ?? rei.purchaseOrderId;
+
+      const poIds = [
+        ...new Set(
+          rei.items
+            .map((i) => poIdOf(i)?.toString())
+            .filter((v): v is string => !!v),
+        ),
+      ];
+
+      const pos = await tx.purchaseOrder.findMany({
+        where: { id: { in: poIds.map((v) => BigInt(v)) } },
+        include: { items: true },
+      });
+      // key: `${poId}:${variantId}`
+      const poItemMap = new Map<string, (typeof pos)[number]['items'][number]>(
+        pos.flatMap((po) =>
+          po.items.map((i): [string, typeof i] => [
+            `${po.id}:${i.variantId}`,
+            i,
+          ]),
+        ),
       );
 
-      // Gom theo variant để validate incoming còn lại trên PO
-      const qtyByVariant = new Map<string, number>();
+      // Gom theo (PO, variant) để validate incoming còn lại trên từng PO
+      const qtyByPoVariant = new Map<string, number>();
       for (const item of rei.items) {
-        const key = item.variantId.toString();
-        qtyByVariant.set(key, (qtyByVariant.get(key) ?? 0) + item.quantity);
+        const poId = poIdOf(item);
+        if (!poId) continue;
+        const key = `${poId}:${item.variantId}`;
+        qtyByPoVariant.set(key, (qtyByPoVariant.get(key) ?? 0) + item.quantity);
       }
 
-      if (rei.purchaseOrderId) {
-        for (const [variantId, qty] of qtyByVariant) {
-          const poItem = poItemMap.get(variantId);
-          if (!poItem) {
-            throw new BusinessException(
-              'VALIDATION_ERROR',
-              `Variant ${variantId} không có trên PO`,
-              422,
-            );
-          }
-          const remaining = poItem.quantity - poItem.receivedQuantity;
-          if (qty > remaining) {
-            throw new BusinessException(
-              'INCOMING_EXCEEDS_PO',
-              `Số lượng nhập vượt incoming còn lại (còn ${remaining}, nhập ${qty})`,
-              422,
-            );
-          }
+      for (const [key, qty] of qtyByPoVariant) {
+        const poItem = poItemMap.get(key);
+        if (!poItem) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Variant ${key.split(':')[1]} không có trên PO`,
+            422,
+          );
+        }
+        const remaining = poItem.quantity - poItem.receivedQuantity;
+        if (qty > remaining) {
+          throw new BusinessException(
+            'INCOMING_EXCEEDS_PO',
+            `Số lượng nhập vượt incoming còn lại (còn ${remaining}, nhập ${qty})`,
+            422,
+          );
         }
       }
 
       for (const item of rei.items) {
         amountDue += item.quantity * Number(item.unitPrice);
         const movements: Parameters<InventoryService['applyMovements']>[0] = [];
+        const itemPoId = poIdOf(item);
 
-        if (rei.purchaseOrderId) {
+        if (itemPoId) {
           movements.push({
             variantId: item.variantId,
             warehouseId: rei.warehouseId,
@@ -302,8 +379,8 @@ export class GoodsReceiptService {
         const result = await this.inventory.applyMovements(movements, tx);
         movementIds.push(...result.movementIds);
 
-        if (rei.purchaseOrderId) {
-          const poItem = poItemMap.get(item.variantId.toString());
+        if (itemPoId) {
+          const poItem = poItemMap.get(`${itemPoId}:${item.variantId}`);
           if (poItem) {
             await tx.purchaseOrderItem.update({
               where: { id: poItem.id },
@@ -319,18 +396,48 @@ export class GoodsReceiptService {
       amountDue =
         amountDue - Number(rei.discountAmount) + Number(rei.extraCost);
 
+      // Cấn trừ tiền cọc đã đóng trên PO (nếu phiếu nhập gắn với PO có cọc)
+      let depositApplied = 0;
+      if (rei.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findUnique({
+          where: { id: rei.purchaseOrderId },
+          select: { depositAmount: true },
+        });
+        if (po && Number(po.depositAmount) > 0) {
+          const used = await tx.goodsReceipt.aggregate({
+            _sum: { depositApplied: true },
+            where: {
+              purchaseOrderId: rei.purchaseOrderId,
+              id: { not: rei.id },
+            },
+          });
+          const available =
+            Number(po.depositAmount) - Number(used._sum.depositApplied ?? 0);
+          depositApplied = Math.min(Math.max(available, 0), amountDue);
+        }
+      }
+      const paymentStatus =
+        depositApplied >= amountDue && amountDue > 0
+          ? PaymentStatus.da_thanh_toan
+          : depositApplied > 0
+            ? PaymentStatus.mot_phan
+            : PaymentStatus.chua_thanh_toan;
+
       await tx.goodsReceipt.update({
         where: { id: rei.id },
         data: {
           status: GoodsReceiptStatus.da_nhap,
           amountDue,
           receivedAt: new Date(),
+          depositApplied,
+          paidAmount: depositApplied,
+          paymentStatus,
         },
       });
 
-      if (rei.purchaseOrderId) {
+      for (const poId of poIds) {
         await this.poService.tryCompleteIfFullyReceived(
-          rei.purchaseOrderId,
+          BigInt(poId),
           user.userId,
           tx,
         );
@@ -347,6 +454,20 @@ export class GoodsReceiptService {
           createdById: user.userId,
         },
       });
+
+      if (depositApplied > 0) {
+        await tx.supplierLedgerEntry.create({
+          data: {
+            supplierId: rei.supplierId,
+            referenceType: 'payment',
+            referenceCode: rei.code,
+            transactionLabel: 'Trừ cọc',
+            reason: 'Trừ tiền cọc đặt hàng nhập',
+            amount: depositApplied,
+            createdById: user.userId,
+          },
+        });
+      }
 
       await tx.activityLog.create({
         data: {

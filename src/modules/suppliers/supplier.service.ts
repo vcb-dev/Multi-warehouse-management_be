@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { VoucherService } from '../vouchers/voucher.service';
 import { serializeLedgerEntry } from '../purchasing/purchasing.serializer';
 import {
   generateSupplierLotCode,
@@ -18,6 +19,7 @@ import {
 import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
+  CreateSupplierPaymentDto,
   ListSuppliersQueryDto,
   ListSupplierLedgerQueryDto,
   SupplierAddressDto,
@@ -26,9 +28,16 @@ import {
 } from './supplier.dto';
 import { serializeSupplier } from './supplier.serializer';
 
+// DB ở xa (Supabase qua pooler) + phân bổ thanh toán lặp qua nhiều phiếu nhập
+// dễ vượt timeout mặc định 5s của Prisma interactive transaction.
+const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
+
 @Injectable()
 export class SupplierService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private vouchers: VoucherService,
+  ) {}
 
   async list(query: ListSuppliersQueryDto) {
     const page = query.page ?? 1;
@@ -51,6 +60,51 @@ export class SupplierService {
       page,
       page_size: pageSize,
     };
+  }
+
+  /** Danh sách công nợ mọi NCC — dùng cho màn Công nợ tổng, không cần chọn NCC trước */
+  async listDebts() {
+    const [ledgerAgg, outstandingAgg, suppliers] = await Promise.all([
+      this.prisma.supplierLedgerEntry.groupBy({
+        by: ['supplierId'],
+        _sum: { amount: true },
+      }),
+      this.prisma.goodsReceipt.groupBy({
+        by: ['supplierId'],
+        where: {
+          status: GoodsReceiptStatus.da_nhap,
+          paymentStatus: { not: PaymentStatus.da_thanh_toan },
+        },
+        _count: true,
+      }),
+      this.prisma.supplier.findMany({
+        where: { isActive: true },
+        select: { id: true, code: true, name: true },
+      }),
+    ]);
+
+    const balanceMap = new Map(
+      ledgerAgg.map((r) => [r.supplierId.toString(), Number(r._sum.amount ?? 0)]),
+    );
+    const countMap = new Map(
+      outstandingAgg.map((r) => [r.supplierId.toString(), r._count]),
+    );
+
+    const rows = suppliers
+      .map((s) => {
+        const key = s.id.toString();
+        return {
+          supplier_id: key,
+          code: s.code,
+          name: s.name,
+          debt_balance: (balanceMap.get(key) ?? 0).toString(),
+          outstanding_count: countMap.get(key) ?? 0,
+        };
+      })
+      .filter((r) => Number(r.debt_balance) !== 0 || r.outstanding_count > 0)
+      .sort((a, b) => Number(a.debt_balance) - Number(b.debt_balance));
+
+    return { data: rows };
   }
 
   async findOne(id: bigint) {
@@ -400,6 +454,122 @@ export class SupplierService {
     });
 
     return { data: serializeLedgerEntry(entry) };
+  }
+
+  /**
+   * Thanh toán đợt — trả dứt điểm 1 nhóm phiếu nhập được chọn cụ thể (tick chọn
+   * trên màn Công nợ) trong 1 lần, tạo 1 phiếu chi + 1 dòng sổ công nợ duy nhất.
+   */
+  async createPayment(
+    id: bigint,
+    dto: CreateSupplierPaymentDto,
+    user: AuthUser,
+  ) {
+    const supplier = await this.findOneOrThrow(id);
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: BigInt(dto.branch_id) },
+    });
+    if (!branch || !branch.isActive) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chi nhánh không hợp lệ',
+        422,
+      );
+    }
+
+    const reiIds = dto.goods_receipt_ids.map((v) => BigInt(v));
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const receipts = await tx.goodsReceipt.findMany({
+        where: { id: { in: reiIds } },
+      });
+
+      if (receipts.length !== reiIds.length) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Có phiếu nhập không tồn tại',
+          422,
+        );
+      }
+      for (const rei of receipts) {
+        if (rei.supplierId !== id) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Phiếu ${rei.code} không thuộc NCC này`,
+            422,
+          );
+        }
+        if (rei.status !== GoodsReceiptStatus.da_nhap) {
+          throw new BusinessException(
+            'INVALID_TRANSITION',
+            `Phiếu ${rei.code} chưa ở trạng thái đã nhập`,
+            409,
+          );
+        }
+        if (rei.paymentStatus === PaymentStatus.da_thanh_toan) {
+          throw new BusinessException(
+            'INVALID_TRANSITION',
+            `Phiếu ${rei.code} đã thanh toán đủ`,
+            409,
+          );
+        }
+      }
+
+      const total = receipts.reduce(
+        (sum, rei) => sum + (Number(rei.amountDue) - Number(rei.paidAmount)),
+        0,
+      );
+
+      for (const rei of receipts) {
+        await tx.goodsReceipt.update({
+          where: { id: rei.id },
+          data: {
+            paidAmount: rei.amountDue,
+            paymentStatus: PaymentStatus.da_thanh_toan,
+          },
+        });
+      }
+
+      const voucher = await this.vouchers.createPayment(
+        {
+          branchId: branch.id,
+          amount: total,
+          createdById: user.userId,
+          sourceDocument: supplier.code,
+          referenceType: 'supplier_payment',
+          referenceId: supplier.id,
+          reason:
+            dto.note?.trim() ||
+            `Thanh toán đợt (${receipts.map((r) => r.code).join(', ')}) — NCC ${supplier.name}`,
+        },
+        tx,
+      );
+
+      const ledgerEntry = await tx.supplierLedgerEntry.create({
+        data: {
+          supplierId: id,
+          referenceType: SupplierLedgerReferenceType.payment,
+          referenceCode: voucher.code,
+          transactionLabel: 'Thanh toán đợt',
+          reason:
+            dto.note?.trim() ||
+            `Thanh toán đợt: ${receipts.map((r) => r.code).join(', ')}`,
+          amount: total,
+          createdById: user.userId,
+        },
+        include: { createdBy: { select: { name: true, email: true } } },
+      });
+
+      return { voucher, ledgerEntry };
+    }, TX_OPTIONS);
+
+    return {
+      data: {
+        voucher: result.voucher,
+        ledger_entry: serializeLedgerEntry(result.ledgerEntry),
+      },
+    };
   }
 
   private async findOneOrThrow(id: bigint) {

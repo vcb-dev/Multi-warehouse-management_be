@@ -161,4 +161,10 @@ export class PurchasingController {
   confirmRefund(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.pvn.confirmRefund(BigInt(id), user);
   }
+
+  @Get('purchase-returns/:id/history')
+  @RequirePermission('purchasing:manage', 'inventory:view')
+  getPvnHistory(@Param('id') id: string) {
+    return this.activityLog.getHistory('purchase_return', BigInt(id));
+  }
 }

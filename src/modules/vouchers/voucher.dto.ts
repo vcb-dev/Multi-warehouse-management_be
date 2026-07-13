@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class ListVouchersQueryDto {
   @IsOptional()
@@ -13,6 +20,14 @@ export class ListVouchersQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
 
   @IsOptional()
   @IsInt()

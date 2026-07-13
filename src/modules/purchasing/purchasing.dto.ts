@@ -44,6 +44,12 @@ export class CreatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items!: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class UpdatePurchaseOrderDto {
@@ -67,6 +73,12 @@ export class UpdatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items?: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class PoTransitionDto {
@@ -116,6 +128,11 @@ export class ReiItemDto {
   @IsNotEmpty()
   variant_id!: string;
 
+  /** PO gắn riêng cho dòng này — ưu tiên hơn purchase_order_id của cả phiếu */
+  @IsOptional()
+  @IsString()
+  purchase_order_id?: string;
+
   @ValidateNested()
   @Type(() => LotInputDto)
   lot!: LotInputDto;
@@ -154,6 +171,11 @@ export class CreateGoodsReceiptDto {
   @IsOptional()
   @IsDateString()
   invoice_at?: string;
+
+  /** Ký hiệu hóa đơn NCC — VD: 2C26MYY */
+  @IsOptional()
+  @IsString()
+  invoice_symbol?: string;
 
   @IsOptional()
   @IsString()
@@ -197,6 +219,11 @@ export class ListGoodsReceiptsQueryDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  /** Danh sách trạng thái thanh toán, phân tách dấu phẩy — VD: chua_thanh_toan,mot_phan */
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
 
   @IsOptional()
   @IsDateString()
@@ -246,6 +273,11 @@ export class CreatePurchaseReturnDto {
   @IsString()
   @IsNotEmpty()
   warehouse_id!: string;
+
+  /** Có giá trị khi tạo "trả hàng nhập theo đơn" — gắn phiếu trả với đúng đơn nhập gốc */
+  @IsOptional()
+  @IsString()
+  goods_receipt_id?: string;
 
   @IsArray()
   @ValidateNested({ each: true })
