@@ -16,6 +16,7 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
+  CreateSupplierPaymentDto,
   ListSuppliersQueryDto,
   ListSupplierLedgerQueryDto,
   SupplierSummaryQueryDto,
@@ -40,6 +41,12 @@ export class SupplierController {
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSupplierDto) {
     return this.suppliers.create(dto);
+  }
+
+  @Get('debts')
+  @RequirePermission('purchasing:manage')
+  listDebts() {
+    return this.suppliers.listDebts();
   }
 
   @Get(':id')
@@ -87,5 +94,16 @@ export class SupplierController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.suppliers.createDebtAdjustment(BigInt(id), dto, user);
+  }
+
+  @Post(':id/payments')
+  @RequirePermission('purchasing:manage')
+  @HttpCode(HttpStatus.CREATED)
+  createPayment(
+    @Param('id') id: string,
+    @Body() dto: CreateSupplierPaymentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.suppliers.createPayment(BigInt(id), dto, user);
   }
 }

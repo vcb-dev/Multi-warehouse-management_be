@@ -57,6 +57,13 @@ export class GoodsReceiptService {
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
     }
+    if (query.payment_status) {
+      const statuses = query.payment_status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) as PaymentStatus[];
+      if (statuses.length) where.paymentStatus = { in: statuses };
+    }
     if (query.date_from || query.date_to) {
       where.createdAt = {
         ...(query.date_from ? { gte: new Date(query.date_from) } : {}),

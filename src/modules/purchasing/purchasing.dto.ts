@@ -210,6 +210,11 @@ export class ListGoodsReceiptsQueryDto {
   @IsString()
   supplier_id?: string;
 
+  /** Danh sách trạng thái thanh toán, phân tách dấu phẩy — VD: chua_thanh_toan,mot_phan */
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
+
   @IsOptional()
   @IsDateString()
   date_from?: string;
