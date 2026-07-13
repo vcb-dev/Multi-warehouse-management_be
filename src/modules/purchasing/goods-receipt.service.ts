@@ -57,6 +57,13 @@ export class GoodsReceiptService {
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
     }
+    if (query.payment_status) {
+      const statuses = query.payment_status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) as PaymentStatus[];
+      if (statuses.length) where.paymentStatus = { in: statuses };
+    }
     if (query.date_from || query.date_to) {
       where.createdAt = {
         ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
@@ -319,12 +326,42 @@ export class GoodsReceiptService {
       amountDue =
         amountDue - Number(rei.discountAmount) + Number(rei.extraCost);
 
+      // Cấn trừ tiền cọc đã đóng trên PO (nếu phiếu nhập gắn với PO có cọc)
+      let depositApplied = 0;
+      if (rei.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findUnique({
+          where: { id: rei.purchaseOrderId },
+          select: { depositAmount: true },
+        });
+        if (po && Number(po.depositAmount) > 0) {
+          const used = await tx.goodsReceipt.aggregate({
+            _sum: { depositApplied: true },
+            where: {
+              purchaseOrderId: rei.purchaseOrderId,
+              id: { not: rei.id },
+            },
+          });
+          const available =
+            Number(po.depositAmount) - Number(used._sum.depositApplied ?? 0);
+          depositApplied = Math.min(Math.max(available, 0), amountDue);
+        }
+      }
+      const paymentStatus =
+        depositApplied >= amountDue && amountDue > 0
+          ? PaymentStatus.da_thanh_toan
+          : depositApplied > 0
+            ? PaymentStatus.mot_phan
+            : PaymentStatus.chua_thanh_toan;
+
       await tx.goodsReceipt.update({
         where: { id: rei.id },
         data: {
           status: GoodsReceiptStatus.da_nhap,
           amountDue,
           receivedAt: new Date(),
+          depositApplied,
+          paidAmount: depositApplied,
+          paymentStatus,
         },
       });
 
@@ -347,6 +384,20 @@ export class GoodsReceiptService {
           createdById: user.userId,
         },
       });
+
+      if (depositApplied > 0) {
+        await tx.supplierLedgerEntry.create({
+          data: {
+            supplierId: rei.supplierId,
+            referenceType: 'payment',
+            referenceCode: rei.code,
+            transactionLabel: 'Trừ cọc',
+            reason: 'Trừ tiền cọc đặt hàng nhập',
+            amount: depositApplied,
+            createdById: user.userId,
+          },
+        });
+      }
 
       await tx.activityLog.create({
         data: {

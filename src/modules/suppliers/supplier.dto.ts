@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -198,4 +199,19 @@ export class CreateDebtAdjustmentDto {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+}
+
+export class CreateSupplierPaymentDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  goods_receipt_ids!: string[];
+
+  @IsString()
+  @IsNotEmpty()
+  branch_id!: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

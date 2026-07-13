@@ -44,6 +44,12 @@ export class CreatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items!: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class UpdatePurchaseOrderDto {
@@ -67,6 +73,12 @@ export class UpdatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PoItemDto)
   items?: PoItemDto[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deposit_amount?: number;
 }
 
 export class PoTransitionDto {
@@ -197,6 +209,11 @@ export class ListGoodsReceiptsQueryDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  /** Danh sách trạng thái thanh toán, phân tách dấu phẩy — VD: chua_thanh_toan,mot_phan */
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
 
   @IsOptional()
   @IsDateString()
