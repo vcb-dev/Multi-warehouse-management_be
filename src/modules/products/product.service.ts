@@ -17,6 +17,9 @@ import {
 } from './product.serializer';
 import { VariantService } from './variant.service';
 
+/** SP nhiều variant + DB remote — syncVariants có thể > 5s mặc định của Prisma */
+const PRODUCT_TX_TIMEOUT_MS = 30_000;
+
 @Injectable()
 export class ProductService {
   constructor(
@@ -39,9 +42,17 @@ export class ProductService {
         },
       ];
     }
-    if (query.brand) where.brand = query.brand;
-    if (query.product_type) where.productType = query.product_type;
-    if (query.is_published !== undefined) where.isPublished = query.is_published;
+    if (query.brand?.trim()) {
+      where.brand = { contains: query.brand.trim(), mode: 'insensitive' };
+    }
+    if (query.product_type?.trim()) {
+      where.productType = {
+        contains: query.product_type.trim(),
+        mode: 'insensitive',
+      };
+    }
+    if (query.is_published !== undefined)
+      where.isPublished = query.is_published;
     if (query.category_id) {
       where.categories = { some: { categoryId: BigInt(query.category_id) } };
     }
@@ -66,7 +77,7 @@ export class ProductService {
           variants: {
             where: { enabled: true },
             orderBy: { id: 'asc' },
-            take: 1,
+            select: { sku: true, price: true },
           },
         },
       }),
@@ -74,7 +85,9 @@ export class ProductService {
     ]);
 
     return {
-      data: rows.map(serializeProductListItem),
+      data: rows.map((row) =>
+        serializeProductListItem(row, { searchQuery: query.q }),
+      ),
       total,
       page,
       page_size: pageSize,
@@ -207,13 +220,17 @@ export class ProductService {
       });
 
       return p;
-    });
+    }, { timeout: PRODUCT_TX_TIMEOUT_MS });
 
     const count = await this.repo.client.productVariant.count({
       where: { productId: product.id, enabled: true },
     });
 
-    return { id: product.id.toString(), slug: product.slug, variant_count: count };
+    return {
+      id: product.id.toString(),
+      slug: product.slug,
+      variant_count: count,
+    };
   }
 
   async update(id: bigint, dto: UpdateProductDto, user: AuthUser) {
@@ -230,7 +247,9 @@ export class ProductService {
         where: { id },
         data: {
           ...(dto.name ? { name: dto.name.trim() } : {}),
-          ...(dto.brand !== undefined ? { brand: dto.brand?.trim() || null } : {}),
+          ...(dto.brand !== undefined
+            ? { brand: dto.brand?.trim() || null }
+            : {}),
           ...(dto.product_type !== undefined
             ? { productType: dto.product_type?.trim() || null }
             : {}),
@@ -316,7 +335,13 @@ export class ProductService {
       }
 
       if (dto.options && dto.variants) {
-        await this.syncVariants(tx, id, existing.slug, dto.options, dto.variants);
+        await this.syncVariants(
+          tx,
+          id,
+          existing.slug,
+          dto.options,
+          dto.variants,
+        );
       }
 
       await this.categories.evaluateAutoForProduct(tx, id);
@@ -329,12 +354,16 @@ export class ProductService {
           entityId: id,
         },
       });
-    });
+    }, { timeout: PRODUCT_TX_TIMEOUT_MS });
 
     return this.findOne(id);
   }
 
-  async getInventory(id: bigint, query: ProductInventoryQueryDto, user: AuthUser) {
+  async getInventory(
+    id: bigint,
+    query: ProductInventoryQueryDto,
+    user: AuthUser,
+  ) {
     const product = await this.repo.findById(id);
     if (!product) throw new NotFoundException('Không tìm thấy sản phẩm');
 
@@ -400,9 +429,7 @@ export class ProductService {
       const key = this.variants.optionKey(optionValues);
       const input = byKey.get(key);
       return {
-        sku:
-          input?.sku ??
-          this.variants.suggestSku(slug, optionValues),
+        sku: this.variants.suggestSku(slug, optionValues),
         price: input?.price ?? 0,
         cost: input?.cost,
         compareAtPrice: input?.compare_at_price,
@@ -413,6 +440,14 @@ export class ProductService {
         optionValues,
       };
     });
+  }
+
+  private sortedOptionValues(
+    optionValues: { optionId: bigint; value: string }[],
+  ): string[] {
+    return [...optionValues]
+      .sort((a, b) => Number(a.optionId - b.optionId))
+      .map((ov) => ov.value);
   }
 
   private async syncVariants(
@@ -429,10 +464,10 @@ export class ProductService {
 
     const existingByKey = new Map<string, (typeof existingVariants)[0]>();
     for (const ev of existingVariants) {
-      const vals = ev.optionValues
-        .sort((a, b) => Number(a.optionId - b.optionId))
-        .map((ov) => ov.value);
-      existingByKey.set(this.variants.optionKey(vals), ev);
+      existingByKey.set(
+        this.variants.optionKey(this.sortedOptionValues(ev.optionValues)),
+        ev,
+      );
     }
 
     await tx.variantOptionValue.deleteMany({
@@ -440,31 +475,40 @@ export class ProductService {
     });
     await tx.productOption.deleteMany({ where: { productId } });
 
-    const optionRecords = [];
-    for (let i = 0; i < options.length; i++) {
-      const opt = await tx.productOption.create({
-        data: {
+    if (options.length) {
+      await tx.productOption.createMany({
+        data: options.map((o, i) => ({
           productId,
-          name: options[i].name.trim(),
+          name: o.name.trim(),
           position: i,
-        },
+        })),
       });
-      optionRecords.push({ ...options[i], id: opt.id });
     }
+    const optionRecords = await tx.productOption.findMany({
+      where: { productId },
+      orderBy: { position: 'asc' },
+    });
 
     const desired = this.buildVariantRows(slug, options, variants);
     const desiredKeys = new Set(
       desired.map((d) => this.variants.optionKey(d.optionValues)),
     );
 
+    const optionValueRows: {
+      variantId: bigint;
+      optionId: bigint;
+      value: string;
+    }[] = [];
+
     for (const d of desired) {
       const key = this.variants.optionKey(d.optionValues);
       const match = existingByKey.get(key);
-      if (match) {
+      let variantId: bigint;
+
+      if (match && match.sku === d.sku) {
         await tx.productVariant.update({
           where: { id: match.id },
           data: {
-            sku: d.sku,
             price: d.price,
             cost: d.cost ?? match.cost,
             compareAtPrice: d.compareAtPrice,
@@ -473,16 +517,21 @@ export class ProductService {
             enabled: true,
           },
         });
-        for (let i = 0; i < optionRecords.length; i++) {
-          await tx.variantOptionValue.create({
-            data: {
-              variantId: match.id,
-              optionId: optionRecords[i].id,
-              value: d.optionValues[i],
-            },
-          });
-        }
+        variantId = match.id;
       } else {
+        if (match) {
+          const blocked = await this.repo.variantIdsBlockedFromDelete(tx, [
+            match.id,
+          ]);
+          if (blocked.has(match.id)) {
+            throw new BusinessException(
+              'VARIANT_IN_USE',
+              `Không thể đổi SKU phiên bản ${match.sku} — đã phát sinh tồn kho hoặc chứng từ`,
+              409,
+            );
+          }
+          await this.repo.deleteVariants(tx, [match.id]);
+        }
         const created = await tx.productVariant.create({
           data: {
             productId,
@@ -494,35 +543,46 @@ export class ProductService {
             imageUrl: d.imageUrl,
           },
         });
-        for (let i = 0; i < optionRecords.length; i++) {
-          await tx.variantOptionValue.create({
-            data: {
-              variantId: created.id,
-              optionId: optionRecords[i].id,
-              value: d.optionValues[i],
-            },
-          });
-        }
+        variantId = created.id;
+      }
+
+      for (let i = 0; i < optionRecords.length; i++) {
+        optionValueRows.push({
+          variantId,
+          optionId: optionRecords[i].id,
+          value: d.optionValues[i],
+        });
       }
     }
 
-    for (const ev of existingVariants) {
-      const vals = ev.optionValues.map((ov) => ov.value);
-      const key = this.variants.optionKey(vals);
-      if (!desiredKeys.has(key)) {
-        const inUse = await this.repo.variantHasInventory(ev.id);
-        if (inUse) {
-          throw new BusinessException(
-            'VARIANT_IN_USE',
-            `Không thể xóa phiên bản ${ev.sku} — còn tồn kho`,
-            409,
-          );
-        }
-        await tx.productVariant.update({
-          where: { id: ev.id },
-          data: { enabled: false },
-        });
+    if (optionValueRows.length) {
+      await tx.variantOptionValue.createMany({ data: optionValueRows });
+    }
+
+    const toRemove = existingVariants.filter((ev) => {
+      const key = this.variants.optionKey(
+        this.sortedOptionValues(ev.optionValues),
+      );
+      return !desiredKeys.has(key);
+    });
+
+    if (toRemove.length) {
+      const blocked = await this.repo.variantIdsBlockedFromDelete(
+        tx,
+        toRemove.map((v) => v.id),
+      );
+      const blockedVariant = toRemove.find((v) => blocked.has(v.id));
+      if (blockedVariant) {
+        throw new BusinessException(
+          'VARIANT_IN_USE',
+          `Không thể xóa phiên bản ${blockedVariant.sku} — đã phát sinh tồn kho hoặc chứng từ`,
+          409,
+        );
       }
+      await this.repo.deleteVariants(
+        tx,
+        toRemove.map((v) => v.id),
+      );
     }
   }
 

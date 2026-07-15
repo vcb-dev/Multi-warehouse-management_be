@@ -3,22 +3,12 @@ import { CategoryConditionType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { slugify } from '../products/product.serializer';
+import {
+  type AutoConditions,
+  CreateCategoryDto,
+} from './category.dto';
 
-export type AutoConditions = {
-  brand?: string;
-  product_type?: string;
-  tags?: string[];
-};
-
-export type CreateCategoryDto = {
-  name: string;
-  description?: string;
-  parent_id?: string;
-  image_url?: string;
-  condition_type: 'manual' | 'auto';
-  auto_conditions?: AutoConditions;
-  sales_channels?: string[];
-};
+export type { AutoConditions, CreateCategoryDto };
 
 export type CategoryTreeNode = {
   id: string;
@@ -49,7 +39,15 @@ export class CategoryService {
   async create(dto: CreateCategoryDto) {
     const slug = await this.uniqueSlug(slugify(dto.name));
     if (dto.parent_id) {
-      await this.assertNoCycle(BigInt(dto.parent_id), null);
+      const parentId = BigInt(dto.parent_id);
+      const parent = await this.prisma.category.findUnique({
+        where: { id: parentId },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new NotFoundException('Không tìm thấy danh mục cha');
+      }
+      await this.assertNoCycle(parentId, null);
     }
 
     const row = await this.prisma.category.create({
@@ -60,7 +58,7 @@ export class CategoryService {
         parentId: dto.parent_id ? BigInt(dto.parent_id) : null,
         imageUrl: dto.image_url || null,
         conditionType: dto.condition_type as CategoryConditionType,
-        autoConditions: dto.auto_conditions ?? undefined,
+        autoConditions: (dto.auto_conditions as AutoConditions | undefined) ?? undefined,
         salesChannels: dto.sales_channels ?? [],
       },
     });

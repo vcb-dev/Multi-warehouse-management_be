@@ -30,20 +30,23 @@ export class VariantService {
     return result;
   }
 
-  /** Sinh SKU gợi ý từ slug + option values */
+  /** Chuẩn hoá 1 phần SKU: lowercase, giữ tiếng Việt, nối bằng dấu gạch */
+  slugPart(text: string): string {
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40);
+  }
+
+  /** Sinh SKU từ slug SP + giá trị thuộc tính theo thứ tự option */
   suggestSku(productSlug: string, optionValues: string[]): string {
-    const suffix = optionValues
-      .map((v) =>
-        v
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-zA-Z0-9]+/g, '-')
-          .toUpperCase()
-          .slice(0, 12),
-      )
-      .join('-');
-    const base = productSlug.toUpperCase().replace(/[^A-Z0-9]+/g, '-');
-    return suffix ? `${base}-${suffix}` : base;
+    const base = this.slugPart(productSlug || 'san-pham');
+    if (!optionValues.length) return base;
+    const suffix = optionValues.map((v) => this.slugPart(v)).join('-');
+    return `${base}-${suffix}`;
   }
 
   optionKey(values: string[]): string {
