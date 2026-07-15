@@ -2,16 +2,29 @@ import {
   Controller,
   Get,
   Param,
+  Post,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import type { Response } from 'express';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
   ListInventoryQueryDto,
   ListLotsQueryDto,
   ListMovementsQueryDto,
 } from './inventory.dto';
+import {
+  InventoryExportService,
+  InventoryImportService,
+} from './inventory-import-export.service';
 import { InventoryQueryService } from './inventory-query.service';
 import { ReconcileService } from './reconcile.service';
 
@@ -22,6 +35,8 @@ export class InventoryController {
   constructor(
     private query: InventoryQueryService,
     private reconcile: ReconcileService,
+    private exporter: InventoryExportService,
+    private importer: InventoryImportService,
   ) {}
 
   @Get('reconcile')
@@ -38,8 +53,44 @@ export class InventoryController {
 
   @Get('lots')
   @RequirePermission('inventory:view')
-  lots(@Query() query: ListLotsQueryDto) {
-    return this.query.listLots(BigInt(query.variant_id));
+  lots(@Query() query: ListLotsQueryDto, @CurrentUser() user: AuthUser) {
+    if (query.variant_id) {
+      return this.query.listLotsForVariant(BigInt(query.variant_id));
+    }
+    return this.query.listLots(query, user);
+  }
+
+  @Get('export')
+  @RequirePermission('inventory:view')
+  async export(
+    @Query() query: ListInventoryQueryDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.exporter.exportExcel(query, user);
+    res.setHeader('Content-Disposition', 'attachment; filename="ton-kho.xlsx"');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.send(buffer);
+  }
+
+  @Post('import')
+  @RequirePermission('inventory:receive')
+  @UseInterceptors(FileInterceptor('file'))
+  async import(
+    @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
+    @Query('warehouse_id') warehouseId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file?.buffer) {
+      return { updated: 0, errors: [{ row: 0, message: 'Thiếu file' }] };
+    }
+    if (!warehouseId) {
+      return { updated: 0, errors: [{ row: 0, message: 'Thiếu kho áp dụng' }] };
+    }
+    return this.importer.importExcel(file.buffer, BigInt(warehouseId), user);
   }
 
   @Get(':variantId/movements')
