@@ -68,7 +68,10 @@ function parseBool(raw: string): boolean {
 
 function parseTags(raw: string): string[] {
   if (!raw) return [];
-  return raw.split(/[,;]/).map((t) => t.trim()).filter(Boolean);
+  return raw
+    .split(/[,;]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 @Injectable()
@@ -83,7 +86,11 @@ export class ProductImportService {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
     const sheet = workbook.worksheets[0];
     if (!sheet) {
-      return { created: 0, updated: 0, errors: [{ row: 0, message: 'Sheet trống' }] };
+      return {
+        created: 0,
+        updated: 0,
+        errors: [{ row: 0, message: 'Sheet trống' }],
+      };
     }
 
     const cols = buildColumnMap(sheet);
@@ -123,7 +130,8 @@ export class ProductImportService {
           option_values: [] as string[],
           sku,
           price: price || 0,
-          compare_at_price: cellNum(row, cols.get('compare_at_price')) || undefined,
+          compare_at_price:
+            cellNum(row, cols.get('compare_at_price')) || undefined,
           cost: cellNum(row, cols.get('cost')) || undefined,
           barcode: cellStr(row, cols.get('barcode')) || undefined,
         };
@@ -178,7 +186,7 @@ export class ProductExportService {
   ) {}
 
   async exportExcel(query: ListProductsQueryDto) {
-    const where = this.products.buildListWhere(query);
+    const where = await this.products.buildListWhere(query);
     const products = await this.repo.client.product.findMany({
       where,
       orderBy: { updatedAt: 'desc' },

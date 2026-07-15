@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
 
@@ -53,7 +54,7 @@ export class InventoryQueryService {
   ) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where = this.buildLevelWhere(query, user);
+    const where = await this.buildLevelWhere(query, user);
 
     const [rows, total] = await Promise.all([
       this.prisma.inventoryLevel.findMany({
@@ -87,7 +88,7 @@ export class InventoryQueryService {
       where: { id: warehouseId },
     });
 
-    const variantWhere = this.buildVariantWhere(query, warehouseId);
+    const variantWhere = await this.buildVariantWhere(query, warehouseId);
 
     const [variants, total] = await Promise.all([
       this.prisma.productVariant.findMany({
@@ -137,10 +138,10 @@ export class InventoryQueryService {
     return { data, total, page, page_size: pageSize };
   }
 
-  private buildVariantWhere(
+  private async buildVariantWhere(
     query: ListInventoryQueryDto,
     warehouseId: bigint,
-  ): Prisma.ProductVariantWhereInput {
+  ): Promise<Prisma.ProductVariantWhereInput> {
     const where: Prisma.ProductVariantWhereInput = {};
 
     if (query.variant_id) {
@@ -153,11 +154,8 @@ export class InventoryQueryService {
     }
 
     if (query.q?.trim()) {
-      const q = query.q.trim();
-      where.OR = [
-        { sku: { contains: q, mode: 'insensitive' } },
-        { product: { name: { contains: q, mode: 'insensitive' } } },
-      ];
+      const ids = await findVariantIdsByQuery(this.prisma, query.q.trim());
+      appendAnd(where, { id: { in: ids } });
     }
 
     if (query.low_stock) {
@@ -230,10 +228,10 @@ export class InventoryQueryService {
     };
   }
 
-  private buildLevelWhere(
+  private async buildLevelWhere(
     query: ListInventoryQueryDto,
     user: AuthUser,
-  ): Prisma.InventoryLevelWhereInput {
+  ): Promise<Prisma.InventoryLevelWhereInput> {
     const where: Prisma.InventoryLevelWhereInput = {};
 
     where.warehouseId = { in: user.warehouseIds };
@@ -258,13 +256,8 @@ export class InventoryQueryService {
     }
 
     if (query.q?.trim()) {
-      const q = query.q.trim();
-      where.variant = {
-        OR: [
-          { sku: { contains: q, mode: 'insensitive' } },
-          { product: { name: { contains: q, mode: 'insensitive' } } },
-        ],
-      };
+      const ids = await findVariantIdsByQuery(this.prisma, query.q.trim());
+      appendAnd(where, { variantId: { in: ids } });
     }
 
     return where;
