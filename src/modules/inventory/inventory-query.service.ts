@@ -17,6 +17,16 @@ function parseVariantIds(value?: string): bigint[] | undefined {
   return ids.length ? ids : undefined;
 }
 
+function appendAnd<W extends { AND?: unknown }>(
+  where: W,
+  clause: object,
+): void {
+  (where as { AND?: unknown[] }).AND = [
+    ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+    clause,
+  ];
+}
+
 @Injectable()
 export class InventoryQueryService {
   constructor(private prisma: PrismaService) {}
@@ -26,6 +36,15 @@ export class InventoryQueryService {
       return this.listByWarehouse(query, user);
     }
     return this.listExistingLevels(query, user);
+  }
+
+  /** Lấy toàn bộ dòng khớp filter (không phân trang) — dùng cho Xuất file */
+  async exportRows(query: ListInventoryQueryDto, user: AuthUser) {
+    const unpaginated = { ...query, page: 1, page_size: 100000 };
+    const { data } = query.warehouse_id
+      ? await this.listByWarehouse(unpaginated, user)
+      : await this.listExistingLevels(unpaginated, user);
+    return data;
   }
 
   private async listExistingLevels(
@@ -59,10 +78,7 @@ export class InventoryQueryService {
   }
 
   /** Khi chọn kho: hiển thị mọi variant (kể cả chưa có inventory_level) */
-  private async listByWarehouse(
-    query: ListInventoryQueryDto,
-    user: AuthUser,
-  ) {
+  private async listByWarehouse(query: ListInventoryQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
     const warehouseId = BigInt(query.warehouse_id!);
@@ -99,8 +115,11 @@ export class InventoryQueryService {
       return {
         variant_id: v.id.toString(),
         warehouse_id: warehouseId.toString(),
+        product_id: v.productId.toString(),
         sku: v.sku,
         product_name: v.product.name,
+        image_url: v.imageUrl ?? v.product.imageUrl ?? null,
+        unit: v.product.unit ?? null,
         warehouse_code: warehouse.code,
         warehouse_name: warehouse.name,
         on_hand: 0,
@@ -142,19 +161,29 @@ export class InventoryQueryService {
     }
 
     if (query.low_stock) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-        {
-          OR: [
-            { inventoryLevels: { none: { warehouseId } } },
-            {
-              inventoryLevels: {
-                some: { warehouseId, available: { lte: LOW_STOCK_THRESHOLD } },
-              },
+      appendAnd(where, {
+        OR: [
+          { inventoryLevels: { none: { warehouseId } } },
+          {
+            inventoryLevels: {
+              some: { warehouseId, available: { lte: LOW_STOCK_THRESHOLD } },
             },
-          ],
-        },
-      ];
+          },
+        ],
+      });
+    }
+
+    if (query.stock_status === 'in_stock') {
+      appendAnd(where, {
+        inventoryLevels: { some: { warehouseId, available: { gt: 0 } } },
+      });
+    } else if (query.stock_status === 'out_of_stock') {
+      appendAnd(where, {
+        OR: [
+          { inventoryLevels: { none: { warehouseId } } },
+          { inventoryLevels: { some: { warehouseId, available: { lte: 0 } } } },
+        ],
+      });
     }
 
     return where;
@@ -222,6 +251,12 @@ export class InventoryQueryService {
       where.available = { lte: LOW_STOCK_THRESHOLD };
     }
 
+    if (query.stock_status === 'in_stock') {
+      where.available = { gt: 0 };
+    } else if (query.stock_status === 'out_of_stock') {
+      where.available = { lte: 0 };
+    }
+
     if (query.q?.trim()) {
       const q = query.q.trim();
       where.variant = {
@@ -235,7 +270,81 @@ export class InventoryQueryService {
     return where;
   }
 
-  async listLots(variantId: bigint) {
+  async listLots(
+    query: {
+      variant_id?: string;
+      warehouse_id?: string;
+      q?: string;
+      page?: number;
+      page_size?: number;
+    },
+    user: AuthUser,
+  ) {
+    const page = query.page ?? 1;
+    const pageSize = query.page_size ?? 20;
+
+    const where: Prisma.LotWhereInput = {};
+    if (query.variant_id) {
+      where.variantId = BigInt(query.variant_id);
+    }
+    if (query.warehouse_id) {
+      where.variant = {
+        inventoryLevels: { some: { warehouseId: BigInt(query.warehouse_id) } },
+      };
+    } else {
+      where.variant = {
+        inventoryLevels: { some: { warehouseId: { in: user.warehouseIds } } },
+      };
+    }
+    if (query.q?.trim()) {
+      const q = query.q.trim();
+      where.OR = [
+        { code: { contains: q, mode: 'insensitive' } },
+        { variant: { sku: { contains: q, mode: 'insensitive' } } },
+        {
+          variant: { product: { name: { contains: q, mode: 'insensitive' } } },
+        },
+      ];
+    }
+
+    const [rows, total, sums] = await Promise.all([
+      this.prisma.lot.findMany({
+        where,
+        include: { variant: { include: { product: true } } },
+        orderBy: [{ expiredAt: 'asc' }, { code: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.lot.count({ where }),
+      this.prisma.inventoryMovement.groupBy({
+        by: ['lotId'],
+        where: { lotId: { not: null }, bucket: 'on_hand' },
+        _sum: { change: true },
+      }),
+    ]);
+
+    const qtyByLot = new Map(
+      sums.map((s) => [s.lotId!.toString(), s._sum.change ?? 0]),
+    );
+
+    return {
+      data: rows.map((l) => ({
+        id: l.id.toString(),
+        code: l.code,
+        variant_id: l.variantId.toString(),
+        sku: l.variant.sku,
+        product_name: l.variant.product.name,
+        quantity: qtyByLot.get(l.id.toString()) ?? 0,
+        manufactured_at: l.manufacturedAt?.toISOString().slice(0, 10) ?? null,
+        expired_at: l.expiredAt?.toISOString().slice(0, 10) ?? null,
+      })),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  async listLotsForVariant(variantId: bigint) {
     const rows = await this.prisma.lot.findMany({
       where: { variantId },
       orderBy: [{ expiredAt: 'asc' }, { code: 'asc' }],

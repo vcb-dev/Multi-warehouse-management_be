@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -39,6 +40,10 @@ export class ListInventoryQueryDto {
   @Transform(({ value }) => toBoolean(value))
   @IsBoolean()
   low_stock?: boolean;
+
+  @IsOptional()
+  @IsIn(['in_stock', 'out_of_stock'])
+  stock_status?: 'in_stock' | 'out_of_stock';
 
   @IsOptional()
   @Type(() => Number)
@@ -84,7 +89,28 @@ export class ListMovementsQueryDto {
 }
 
 export class ListLotsQueryDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  variant_id!: string;
+  variant_id?: string;
+
+  @IsOptional()
+  @IsString()
+  warehouse_id?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page_size?: number = 20;
 }

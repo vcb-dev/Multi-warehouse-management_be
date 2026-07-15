@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { InventoryController } from './inventory.controller';
+import {
+  InventoryExportService,
+  InventoryImportService,
+} from './inventory-import-export.service';
 import { InventoryQueryService } from './inventory-query.service';
 import { InventoryRepository } from './inventory.repository';
 import { InventoryService } from './inventory.service';
@@ -12,6 +16,8 @@ import { ReconcileService } from './reconcile.service';
     InventoryRepository,
     InventoryService,
     InventoryQueryService,
+    InventoryExportService,
+    InventoryImportService,
     ReconcileService,
     ReconcileScheduler,
   ],
