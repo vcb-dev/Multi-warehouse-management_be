@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
+import { findProductIdsByQuery } from '../../common/search/unaccent-search';
 import { CategoryService } from '../categories/category.service';
 import {
   CreateProductDto,
@@ -28,19 +29,14 @@ export class ProductService {
     private categories: CategoryService,
   ) {}
 
-  buildListWhere(query: ListProductsQueryDto): Prisma.ProductWhereInput {
+  async buildListWhere(
+    query: ListProductsQueryDto,
+  ): Promise<Prisma.ProductWhereInput> {
     const where: Prisma.ProductWhereInput = {};
 
     if (query.q?.trim()) {
-      where.OR = [
-        { name: { contains: query.q.trim(), mode: 'insensitive' } },
-        { brand: { contains: query.q.trim(), mode: 'insensitive' } },
-        {
-          variants: {
-            some: { sku: { contains: query.q.trim(), mode: 'insensitive' } },
-          },
-        },
-      ];
+      const ids = await findProductIdsByQuery(this.repo.client, query.q.trim());
+      where.id = { in: ids };
     }
     if (query.brand?.trim()) {
       where.brand = { contains: query.brand.trim(), mode: 'insensitive' };
@@ -66,7 +62,7 @@ export class ProductService {
   async list(query: ListProductsQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where = this.buildListWhere(query);
+    const where = await this.buildListWhere(query);
     const [rows, total] = await Promise.all([
       this.repo.client.product.findMany({
         where,
@@ -115,112 +111,115 @@ export class ProductService {
 
     const variantRows = this.buildVariantRows(slug, options, dto.variants);
 
-    const product = await this.repo.client.$transaction(async (tx) => {
-      const p = await tx.product.create({
-        data: {
-          name: dto.name.trim(),
-          slug,
-          brand: dto.brand?.trim() || null,
-          productType: dto.product_type?.trim() || null,
-          unit: dto.unit?.trim() || null,
-          tags: dto.tags ?? [],
-          isPublished: dto.is_published ?? false,
-          description: dto.description?.trim() || null,
-          shortDescription: dto.short_description?.trim() || null,
-          imageUrl: dto.image_urls?.[0] ?? null,
-          seoTitle: dto.seo_title?.trim() || null,
-          seoDescription: dto.seo_description?.trim() || null,
-          taxable: dto.taxable ?? true,
-          taxIndustryGroup: dto.tax_industry_group?.trim() || null,
-          trackInventory: dto.track_inventory ?? true,
-          allowBackorder: dto.allow_backorder ?? false,
-          requiresShipping: dto.requires_shipping ?? true,
-        },
-      });
-
-      if (dto.image_urls?.length) {
-        await tx.productImage.createMany({
-          data: dto.image_urls.map((url, i) => ({
-            productId: p.id,
-            url,
-            position: i,
-            isPrimary: i === 0,
-          })),
-        });
-      }
-
-      if (dto.sales_channels?.length) {
-        await tx.productSalesChannel.createMany({
-          data: dto.sales_channels.map((channel) => ({
-            productId: p.id,
-            channel,
-          })),
-        });
-      }
-
-      if (dto.category_ids?.length) {
-        await tx.productCategory.createMany({
-          data: dto.category_ids.map((cid) => ({
-            productId: p.id,
-            categoryId: BigInt(cid),
-          })),
-        });
-      }
-
-      const optionRecords = [];
-      for (let i = 0; i < options.length; i++) {
-        const opt = await tx.productOption.create({
+    const product = await this.repo.client.$transaction(
+      async (tx) => {
+        const p = await tx.product.create({
           data: {
-            productId: p.id,
-            name: options[i].name.trim(),
-            position: i,
-          },
-        });
-        optionRecords.push({ ...options[i], id: opt.id });
-      }
-
-      for (const vr of variantRows) {
-        const variant = await tx.productVariant.create({
-          data: {
-            productId: p.id,
-            sku: vr.sku,
-            price: vr.price,
-            cost: vr.cost ?? 0,
-            compareAtPrice: vr.compareAtPrice,
-            barcode: vr.barcode,
-            imageUrl: vr.imageUrl,
-            weight: vr.weight,
-            weightUnit: vr.weightUnit,
+            name: dto.name.trim(),
+            slug,
+            brand: dto.brand?.trim() || null,
+            productType: dto.product_type?.trim() || null,
+            unit: dto.unit?.trim() || null,
+            tags: dto.tags ?? [],
+            isPublished: dto.is_published ?? false,
+            description: dto.description?.trim() || null,
+            shortDescription: dto.short_description?.trim() || null,
+            imageUrl: dto.image_urls?.[0] ?? null,
+            seoTitle: dto.seo_title?.trim() || null,
+            seoDescription: dto.seo_description?.trim() || null,
+            taxable: dto.taxable ?? true,
+            taxIndustryGroup: dto.tax_industry_group?.trim() || null,
+            trackInventory: dto.track_inventory ?? true,
+            allowBackorder: dto.allow_backorder ?? false,
+            requiresShipping: dto.requires_shipping ?? true,
           },
         });
 
-        if (optionRecords.length) {
-          for (let i = 0; i < optionRecords.length; i++) {
-            await tx.variantOptionValue.create({
-              data: {
-                variantId: variant.id,
-                optionId: optionRecords[i].id,
-                value: vr.optionValues[i],
-              },
-            });
+        if (dto.image_urls?.length) {
+          await tx.productImage.createMany({
+            data: dto.image_urls.map((url, i) => ({
+              productId: p.id,
+              url,
+              position: i,
+              isPrimary: i === 0,
+            })),
+          });
+        }
+
+        if (dto.sales_channels?.length) {
+          await tx.productSalesChannel.createMany({
+            data: dto.sales_channels.map((channel) => ({
+              productId: p.id,
+              channel,
+            })),
+          });
+        }
+
+        if (dto.category_ids?.length) {
+          await tx.productCategory.createMany({
+            data: dto.category_ids.map((cid) => ({
+              productId: p.id,
+              categoryId: BigInt(cid),
+            })),
+          });
+        }
+
+        const optionRecords = [];
+        for (let i = 0; i < options.length; i++) {
+          const opt = await tx.productOption.create({
+            data: {
+              productId: p.id,
+              name: options[i].name.trim(),
+              position: i,
+            },
+          });
+          optionRecords.push({ ...options[i], id: opt.id });
+        }
+
+        for (const vr of variantRows) {
+          const variant = await tx.productVariant.create({
+            data: {
+              productId: p.id,
+              sku: vr.sku,
+              price: vr.price,
+              cost: vr.cost ?? 0,
+              compareAtPrice: vr.compareAtPrice,
+              barcode: vr.barcode,
+              imageUrl: vr.imageUrl,
+              weight: vr.weight,
+              weightUnit: vr.weightUnit,
+            },
+          });
+
+          if (optionRecords.length) {
+            for (let i = 0; i < optionRecords.length; i++) {
+              await tx.variantOptionValue.create({
+                data: {
+                  variantId: variant.id,
+                  optionId: optionRecords[i].id,
+                  value: vr.optionValues[i],
+                },
+              });
+            }
           }
         }
-      }
 
-      await this.categories.evaluateAutoForProduct(tx, p.id);
+        await this.categories.evaluateAutoForProduct(tx, p.id);
 
-      await tx.activityLog.create({
-        data: {
-          userId: user.userId,
-          action: 'product.create',
-          entityType: 'product',
-          entityId: p.id,
-          metadata: { name: p.name, slug: p.slug },
-        },
-      });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'product.create',
+            entityType: 'product',
+            entityId: p.id,
+            metadata: { name: p.name, slug: p.slug },
+          },
+        });
 
-      return p;
-    }, { timeout: PRODUCT_TX_TIMEOUT_MS });
+        return p;
+      },
+      { timeout: PRODUCT_TX_TIMEOUT_MS },
+    );
 
     const count = await this.repo.client.productVariant.count({
       where: { productId: product.id, enabled: true },
@@ -242,119 +241,124 @@ export class ProductService {
     const toCheck = newSkus.filter((s) => !keepSkus.includes(s));
     await this.validateSkus(toCheck, id);
 
-    await this.repo.client.$transaction(async (tx) => {
-      await tx.product.update({
-        where: { id },
-        data: {
-          ...(dto.name ? { name: dto.name.trim() } : {}),
-          ...(dto.brand !== undefined
-            ? { brand: dto.brand?.trim() || null }
-            : {}),
-          ...(dto.product_type !== undefined
-            ? { productType: dto.product_type?.trim() || null }
-            : {}),
-          ...(dto.unit !== undefined ? { unit: dto.unit?.trim() || null } : {}),
-          ...(dto.tags ? { tags: dto.tags } : {}),
-          ...(dto.is_published !== undefined
-            ? { isPublished: dto.is_published }
-            : {}),
-          ...(dto.description !== undefined
-            ? { description: dto.description?.trim() || null }
-            : {}),
-          ...(dto.short_description !== undefined
-            ? { shortDescription: dto.short_description?.trim() || null }
-            : {}),
-          ...(dto.seo_title !== undefined
-            ? { seoTitle: dto.seo_title?.trim() || null }
-            : {}),
-          ...(dto.seo_description !== undefined
-            ? { seoDescription: dto.seo_description?.trim() || null }
-            : {}),
-          ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
-          ...(dto.tax_industry_group !== undefined
-            ? { taxIndustryGroup: dto.tax_industry_group?.trim() || null }
-            : {}),
-          ...(dto.track_inventory !== undefined
-            ? { trackInventory: dto.track_inventory }
-            : {}),
-          ...(dto.allow_backorder !== undefined
-            ? { allowBackorder: dto.allow_backorder }
-            : {}),
-          ...(dto.requires_shipping !== undefined
-            ? { requiresShipping: dto.requires_shipping }
-            : {}),
-        },
-      });
-
-      if (dto.image_urls) {
-        await tx.productImage.deleteMany({ where: { productId: id } });
-        if (dto.image_urls.length) {
-          await tx.productImage.createMany({
-            data: dto.image_urls.map((url, i) => ({
-              productId: id,
-              url,
-              position: i,
-              isPrimary: i === 0,
-            })),
-          });
-          await tx.product.update({
-            where: { id },
-            data: { imageUrl: dto.image_urls[0] },
-          });
-        }
-      }
-
-      if (dto.sales_channels) {
-        await tx.productSalesChannel.deleteMany({ where: { productId: id } });
-        if (dto.sales_channels.length) {
-          await tx.productSalesChannel.createMany({
-            data: dto.sales_channels.map((channel) => ({
-              productId: id,
-              channel,
-            })),
-          });
-        }
-      }
-
-      if (dto.category_ids) {
-        await tx.productCategory.deleteMany({
-          where: {
-            productId: id,
-            category: { conditionType: 'manual' },
+    await this.repo.client.$transaction(
+      async (tx) => {
+        await tx.product.update({
+          where: { id },
+          data: {
+            ...(dto.name ? { name: dto.name.trim() } : {}),
+            ...(dto.brand !== undefined
+              ? { brand: dto.brand?.trim() || null }
+              : {}),
+            ...(dto.product_type !== undefined
+              ? { productType: dto.product_type?.trim() || null }
+              : {}),
+            ...(dto.unit !== undefined
+              ? { unit: dto.unit?.trim() || null }
+              : {}),
+            ...(dto.tags ? { tags: dto.tags } : {}),
+            ...(dto.is_published !== undefined
+              ? { isPublished: dto.is_published }
+              : {}),
+            ...(dto.description !== undefined
+              ? { description: dto.description?.trim() || null }
+              : {}),
+            ...(dto.short_description !== undefined
+              ? { shortDescription: dto.short_description?.trim() || null }
+              : {}),
+            ...(dto.seo_title !== undefined
+              ? { seoTitle: dto.seo_title?.trim() || null }
+              : {}),
+            ...(dto.seo_description !== undefined
+              ? { seoDescription: dto.seo_description?.trim() || null }
+              : {}),
+            ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
+            ...(dto.tax_industry_group !== undefined
+              ? { taxIndustryGroup: dto.tax_industry_group?.trim() || null }
+              : {}),
+            ...(dto.track_inventory !== undefined
+              ? { trackInventory: dto.track_inventory }
+              : {}),
+            ...(dto.allow_backorder !== undefined
+              ? { allowBackorder: dto.allow_backorder }
+              : {}),
+            ...(dto.requires_shipping !== undefined
+              ? { requiresShipping: dto.requires_shipping }
+              : {}),
           },
         });
-        if (dto.category_ids.length) {
-          await tx.productCategory.createMany({
-            data: dto.category_ids.map((cid) => ({
-              productId: id,
-              categoryId: BigInt(cid),
-            })),
-            skipDuplicates: true,
-          });
+
+        if (dto.image_urls) {
+          await tx.productImage.deleteMany({ where: { productId: id } });
+          if (dto.image_urls.length) {
+            await tx.productImage.createMany({
+              data: dto.image_urls.map((url, i) => ({
+                productId: id,
+                url,
+                position: i,
+                isPrimary: i === 0,
+              })),
+            });
+            await tx.product.update({
+              where: { id },
+              data: { imageUrl: dto.image_urls[0] },
+            });
+          }
         }
-      }
 
-      if (dto.options && dto.variants) {
-        await this.syncVariants(
-          tx,
-          id,
-          existing.slug,
-          dto.options,
-          dto.variants,
-        );
-      }
+        if (dto.sales_channels) {
+          await tx.productSalesChannel.deleteMany({ where: { productId: id } });
+          if (dto.sales_channels.length) {
+            await tx.productSalesChannel.createMany({
+              data: dto.sales_channels.map((channel) => ({
+                productId: id,
+                channel,
+              })),
+            });
+          }
+        }
 
-      await this.categories.evaluateAutoForProduct(tx, id);
+        if (dto.category_ids) {
+          await tx.productCategory.deleteMany({
+            where: {
+              productId: id,
+              category: { conditionType: 'manual' },
+            },
+          });
+          if (dto.category_ids.length) {
+            await tx.productCategory.createMany({
+              data: dto.category_ids.map((cid) => ({
+                productId: id,
+                categoryId: BigInt(cid),
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
 
-      await tx.activityLog.create({
-        data: {
-          userId: user.userId,
-          action: 'product.update',
-          entityType: 'product',
-          entityId: id,
-        },
-      });
-    }, { timeout: PRODUCT_TX_TIMEOUT_MS });
+        if (dto.options && dto.variants) {
+          await this.syncVariants(
+            tx,
+            id,
+            existing.slug,
+            dto.options,
+            dto.variants,
+          );
+        }
+
+        await this.categories.evaluateAutoForProduct(tx, id);
+
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'product.update',
+            entityType: 'product',
+            entityId: id,
+          },
+        });
+      },
+      { timeout: PRODUCT_TX_TIMEOUT_MS },
+    );
 
     return this.findOne(id);
   }
