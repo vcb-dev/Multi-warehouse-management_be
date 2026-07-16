@@ -8,6 +8,11 @@ import {
 } from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
+import {
+  InventoryNxtService,
+  NxtRowInput,
+  rootProductCode,
+} from './inventory-nxt.service';
 
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD ?? 5);
 
@@ -33,7 +38,37 @@ function appendAnd<W extends { AND?: unknown }>(
 
 @Injectable()
 export class InventoryQueryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private nxt: InventoryNxtService,
+  ) {}
+
+  /** Gộp extras NXT vào các dòng đã serialize (khóa `${variant_id}:${warehouse_id}`) */
+  private async withNxtExtras<
+    T extends {
+      variant_id: string;
+      warehouse_id: string;
+      product_id: string;
+      sku: string;
+      on_hand: number;
+      committed: number;
+    },
+  >(rows: T[], query: ListInventoryQueryDto) {
+    const from = query.date_from ? new Date(query.date_from) : undefined;
+    const inputs: NxtRowInput[] = rows.map((r) => ({
+      variantId: BigInt(r.variant_id),
+      warehouseId: BigInt(r.warehouse_id),
+      productId: BigInt(r.product_id),
+      onHand: r.on_hand,
+      committed: r.committed,
+    }));
+    const extras = await this.nxt.enrich(inputs, from);
+    return rows.map((r) => ({
+      ...r,
+      ma_sp: rootProductCode(r.sku),
+      ...extras.get(`${r.variant_id}:${r.warehouse_id}`)!,
+    }));
+  }
 
   async listInventory(query: ListInventoryQueryDto, user: AuthUser) {
     if (query.warehouse_id) {
@@ -74,7 +109,7 @@ export class InventoryQueryService {
     ]);
 
     return {
-      data: rows.map(serializeLevel),
+      data: await this.withNxtExtras(rows.map(serializeLevel), query),
       total,
       page,
       page_size: pageSize,
@@ -138,7 +173,12 @@ export class InventoryQueryService {
       };
     });
 
-    return { data, total, page, page_size: pageSize };
+    return {
+      data: await this.withNxtExtras(data, query),
+      total,
+      page,
+      page_size: pageSize,
+    };
   }
 
   private async buildVariantWhere(
