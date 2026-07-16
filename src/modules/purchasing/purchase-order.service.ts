@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
 import {
   CreatePurchaseOrderDto,
@@ -306,7 +307,7 @@ export class PurchaseOrderService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      for (const item of po.items) {
+      for (const item of sortForLocking(po.items)) {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
@@ -426,7 +427,7 @@ export class PurchaseOrderService {
     userId: bigint,
     tx: Prisma.TransactionClient,
   ) {
-    for (const item of po.items) {
+    for (const item of sortForLocking(po.items)) {
       const remaining = item.quantity - item.receivedQuantity;
       if (remaining <= 0) continue;
 

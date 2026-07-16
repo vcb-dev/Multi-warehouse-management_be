@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
-import { InventoryBucket, MovementType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ListInventoryQueryDto } from './inventory.dto';
@@ -128,24 +127,14 @@ export class InventoryImportService {
           continue;
         }
 
-        const level = await this.prisma.inventoryLevel.findUnique({
-          where: {
-            variantId_warehouseId: { variantId: variant.id, warehouseId },
-          },
-        });
-        const currentOnHand = level?.onHand ?? 0;
-        const change = targetOnHand - currentOnHand;
-        if (change === 0) continue;
-
-        await this.inventory.applyMovement({
+        const result = await this.inventory.adjustOnHandTo({
           variantId: variant.id,
           warehouseId,
-          bucket: InventoryBucket.on_hand,
-          change,
-          type: MovementType.adjust,
+          targetOnHand,
           referenceType: 'import',
           createdById: user.userId,
         });
+        if (!result) continue;
         updated += 1;
       } catch (e) {
         errors.push({

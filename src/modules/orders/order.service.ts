@@ -15,6 +15,7 @@ import {
   InsufficientStockException,
 } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from './customer-debt.service';
@@ -469,7 +470,7 @@ export class OrderService {
           },
         });
 
-        for (const item of resolvedItems) {
+        for (const item of sortForLocking(resolvedItems)) {
           this.inventory.assertWarehouseAccess(user, item.warehouseId);
           await this.inventory.applyMovement(
             {
@@ -588,7 +589,7 @@ export class OrderService {
         );
       }
       await this.repo.client.$transaction(async (tx) => {
-        for (const item of order.items) {
+        for (const item of sortForLocking(order.items)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -636,7 +637,7 @@ export class OrderService {
         );
       }
       await this.repo.client.$transaction(async (tx) => {
-        for (const item of order.items) {
+        for (const item of sortForLocking(order.items)) {
           await this.inventory.applyMovements(
             [
               {

@@ -37,6 +37,24 @@ export type LevelState = {
   incoming: number;
 };
 
+/**
+ * Sắp items theo (variantId, warehouseId) để mọi transaction khóa các dòng
+ * inventory_levels theo cùng một thứ tự — hai chứng từ chứa cùng cặp biến thể
+ * theo thứ tự ngược nhau sẽ không deadlock.
+ */
+export function sortForLocking<
+  T extends { variantId: bigint; warehouseId?: bigint },
+>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => {
+    if (a.variantId !== b.variantId) {
+      return a.variantId < b.variantId ? -1 : 1;
+    }
+    const aw = a.warehouseId ?? 0n;
+    const bw = b.warehouseId ?? 0n;
+    return aw < bw ? -1 : aw > bw ? 1 : 0;
+  });
+}
+
 export function computeAvailable(level: {
   onHand: number;
   committed: number;
