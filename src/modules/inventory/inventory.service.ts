@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { InventoryBucket, Prisma } from '@prisma/client';
+import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -12,6 +12,13 @@ import {
   setBucketValue,
   LevelState,
 } from './inventory.types';
+
+/**
+ * FOR UPDATE xếp hàng chờ khi nhiều giao dịch tranh cùng một dòng tồn — thời
+ * gian chờ khóa tính vào timeout của transaction, nên mặc định 5s của Prisma
+ * quá ngắn khi hàng đợi dài (bị hủy với P2028 dù không có gì sai).
+ */
+const MOVEMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
 @Injectable()
 export class InventoryService {
@@ -29,8 +36,9 @@ export class InventoryService {
     if (tx) {
       return this.applyMovementsInternal(tx, [input]);
     }
-    return this.prisma.$transaction((client) =>
-      this.applyMovementsInternal(client, [input]),
+    return this.prisma.$transaction(
+      (client) => this.applyMovementsInternal(client, [input]),
+      MOVEMENT_TX_OPTIONS,
     );
   }
 
@@ -38,9 +46,52 @@ export class InventoryService {
     if (tx) {
       return this.applyMovementsInternal(tx, inputs);
     }
-    return this.prisma.$transaction((client) =>
-      this.applyMovementsInternal(client, inputs),
+    return this.prisma.$transaction(
+      (client) => this.applyMovementsInternal(client, inputs),
+      MOVEMENT_TX_OPTIONS,
     );
+  }
+
+  /**
+   * Đặt on_hand về đúng giá trị đích (điều chỉnh kiểu "set", dùng cho import).
+   * Khóa dòng tồn TRƯỚC khi tính delta nên số liệu không thể bị giao dịch khác
+   * chen vào giữa lúc đọc và lúc ghi. Trả về null nếu tồn đã đúng giá trị đích.
+   */
+  adjustOnHandTo(
+    input: {
+      variantId: bigint;
+      warehouseId: bigint;
+      targetOnHand: number;
+      referenceType?: string;
+      referenceId?: bigint;
+      createdById?: bigint;
+    },
+    tx?: Prisma.TransactionClient,
+  ) {
+    const run = async (client: Prisma.TransactionClient) => {
+      await this.ensureLevelLocked(client, input.variantId, input.warehouseId);
+      const level = await this.getLevelState(
+        client,
+        input.variantId,
+        input.warehouseId,
+      );
+      const change = input.targetOnHand - level.onHand;
+      if (change === 0) return null;
+      return this.applyMovementsInternal(client, [
+        {
+          variantId: input.variantId,
+          warehouseId: input.warehouseId,
+          bucket: InventoryBucket.on_hand,
+          change,
+          type: MovementType.adjust,
+          referenceType: input.referenceType,
+          referenceId: input.referenceId,
+          createdById: input.createdById,
+        },
+      ]);
+    };
+    if (tx) return run(tx);
+    return this.prisma.$transaction(run, MOVEMENT_TX_OPTIONS);
   }
 
   private async applyMovementsInternal(

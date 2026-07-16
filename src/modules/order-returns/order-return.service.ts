@@ -13,6 +13,7 @@ import {
 } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../orders/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
@@ -163,7 +164,7 @@ export class OrderReturnService {
       });
 
       if (restock) {
-        for (const item of ret.items) {
+        for (const item of sortForLocking(ret.items)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,

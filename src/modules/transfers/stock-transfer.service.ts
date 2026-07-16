@@ -10,6 +10,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import {
   CreateStockTransferDto,
   ListStockTransfersQueryDto,
@@ -278,7 +279,7 @@ export class StockTransferService {
     await this.validateAvailability(stn.items, stn.fromWarehouseId);
 
     await this.prisma.$transaction(async (tx) => {
-      for (const item of stn.items) {
+      for (const item of sortForLocking(stn.items)) {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
@@ -325,7 +326,7 @@ export class StockTransferService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      for (const item of stn.items) {
+      for (const item of sortForLocking(stn.items)) {
         await this.inventory.applyMovements(
           [
             {
@@ -411,7 +412,7 @@ export class StockTransferService {
     this.inventory.assertWarehouseAccess(user, stn.toWarehouseId);
 
     await this.prisma.$transaction(async (tx) => {
-      for (const item of stn.items) {
+      for (const item of sortForLocking(stn.items)) {
         await this.inventory.applyMovements(
           [
             {
@@ -506,7 +507,7 @@ export class StockTransferService {
       if (stn.status === StockTransferStatus.cho_chuyen) {
         // Đang giữ chỗ (committed) — hủy chỉ cần giải phóng chỗ giữ, hàng
         // chưa từng rời kho chuyển nên không có gì để hoàn ở on_hand/incoming.
-        for (const item of stn.items) {
+        for (const item of sortForLocking(stn.items)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -525,7 +526,7 @@ export class StockTransferService {
       } else {
         // dang_chuyen: hàng đã thật sự rời kho chuyển — hoàn on_hand kho
         // chuyển, gỡ "hàng đang về" tại kho nhận.
-        for (const item of stn.items) {
+        for (const item of sortForLocking(stn.items)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,

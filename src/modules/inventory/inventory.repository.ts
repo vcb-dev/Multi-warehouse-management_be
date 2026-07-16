@@ -27,6 +27,9 @@ export class InventoryRepository {
     `;
   }
 
+  // createMany + skipDuplicates sinh INSERT ... ON CONFLICT DO NOTHING:
+  // hai request đầu tiên cùng tạo dòng tồn cho một (biến thể, kho) mới
+  // sẽ không đụng lỗi trùng khóa chính.
   createLevel(
     tx: Prisma.TransactionClient,
     variantId: bigint,
@@ -34,7 +37,7 @@ export class InventoryRepository {
     price?: Prisma.Decimal,
     cost?: Prisma.Decimal,
   ) {
-    return tx.inventoryLevel.create({
+    return tx.inventoryLevel.createMany({
       data: {
         variantId,
         warehouseId,
@@ -47,6 +50,7 @@ export class InventoryRepository {
         price: price ?? 0,
         cost: cost ?? 0,
       },
+      skipDuplicates: true,
     });
   }
 

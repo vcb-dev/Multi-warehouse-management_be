@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
 import {
   CreatePurchaseReturnDto,
@@ -126,7 +127,7 @@ export class PurchaseReturnService {
         include: { items: true },
       });
 
-      for (const item of record.items) {
+      for (const item of sortForLocking(record.items)) {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,

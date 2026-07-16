@@ -408,6 +408,7 @@ model ProductVariant {
   draftOrderItems  DraftOrderItem[]
   orderReturnItems OrderReturnItem[]
 
+  @@index([productId])
   @@map("product_variants")
 }
 
@@ -420,6 +421,7 @@ model VariantOptionValue {
   option  ProductOption  @relation(fields: [optionId], references: [id], onDelete: Cascade)
 
   @@id([variantId, optionId])
+  @@index([optionId])
   @@map("variant_option_values")
 }
 
@@ -451,6 +453,7 @@ model ProductCategory {
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@id([productId, categoryId])
+  @@index([categoryId])
   @@map("product_categories")
 }
 
@@ -516,6 +519,7 @@ model InventoryLevel {
 
   // PK (variant_id, warehouse_id) — index T046
   @@id([variantId, warehouseId])
+  @@index([warehouseId])
   @@map("inventory_levels")
 }
 
@@ -656,6 +660,9 @@ model PurchaseOrder {
   goodsReceipts     GoodsReceipt[]
   goodsReceiptItems GoodsReceiptItem[]
 
+  @@index([supplierId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
   @@map("purchase_orders")
 }
 
@@ -671,6 +678,7 @@ model PurchaseOrderItem {
   variant       ProductVariant @relation(fields: [variantId], references: [id])
 
   @@unique([purchaseOrderId, variantId])
+  @@index([variantId])
   @@map("purchase_order_items")
 }
 
@@ -705,6 +713,10 @@ model GoodsReceipt {
   items           GoodsReceiptItem[]
   purchaseReturns PurchaseReturn[]
 
+  @@index([supplierId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([purchaseOrderId])
   @@map("goods_receipts")
 }
 
@@ -722,6 +734,8 @@ model GoodsReceiptItem {
   lot           Lot            @relation(fields: [lotId], references: [id])
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
 
+  @@index([goodsReceiptId])
+  @@index([variantId])
   @@map("goods_receipt_items")
 }
 
@@ -747,6 +761,9 @@ model StockTransfer {
   receivedBy    User?               @relation("StnReceivedBy", fields: [receivedById], references: [id])
   items         StockTransferItem[]
 
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+  @@index([createdAt])
   @@map("stock_transfers")
 }
 
@@ -761,6 +778,8 @@ model StockTransferItem {
   variant       ProductVariant @relation(fields: [variantId], references: [id])
   lot           Lot            @relation(fields: [lotId], references: [id])
 
+  @@index([stockTransferId])
+  @@index([variantId])
   @@map("stock_transfer_items")
 }
 
@@ -786,6 +805,9 @@ model PurchaseReturn {
   createdBy    User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
   items        PurchaseReturnItem[]
 
+  @@index([supplierId, createdAt])
+  @@index([goodsReceiptId])
+  @@index([createdAt])
   @@map("purchase_returns")
 }
 
@@ -801,6 +823,8 @@ model PurchaseReturnItem {
   variant        ProductVariant @relation(fields: [variantId], references: [id])
   lot            Lot            @relation(fields: [lotId], references: [id])
 
+  @@index([purchaseReturnId])
+  @@index([variantId])
   @@map("purchase_return_items")
 }
 
@@ -888,6 +912,9 @@ model Order {
   fromDraft  DraftOrder?   @relation("DraftConverted")
 
   @@index([branchId, status, orderedAt])
+  @@index([orderedAt])
+  @@index([customerId])
+  @@index([assignedToId])
   @@map("orders")
 }
 
@@ -907,6 +934,9 @@ model OrderItem {
   variant   ProductVariant @relation(fields: [variantId], references: [id])
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
 
+  @@index([orderId])
+  @@index([variantId])
+  @@index([warehouseId])
   @@map("order_items")
 }
 
@@ -937,6 +967,8 @@ model DraftOrder {
   convertedOrder Order?           @relation("DraftConverted", fields: [convertedOrderId], references: [id])
   items          DraftOrderItem[]
 
+  @@index([status, createdAt])
+  @@index([customerId])
   @@map("draft_orders")
 }
 
@@ -955,6 +987,9 @@ model DraftOrderItem {
   variant    ProductVariant @relation(fields: [variantId], references: [id])
   warehouse  Warehouse      @relation(fields: [warehouseId], references: [id])
 
+  @@index([draftOrderId])
+  @@index([variantId])
+  @@index([warehouseId])
   @@map("draft_order_items")
 }
 
@@ -972,6 +1007,8 @@ model OrderReturn {
   createdBy User              @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
   items     OrderReturnItem[]
 
+  @@index([orderId])
+  @@index([createdAt])
   @@map("order_returns")
 }
 
@@ -990,6 +1027,9 @@ model OrderReturnItem {
   variant     ProductVariant @relation(fields: [variantId], references: [id])
   warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
 
+  @@index([orderReturnId])
+  @@index([variantId])
+  @@index([warehouseId])
   @@map("order_return_items")
 }
 

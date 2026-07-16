@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
 import { PurchaseOrderService } from './purchase-order.service';
 import {
@@ -344,7 +345,7 @@ export class GoodsReceiptService {
         }
       }
 
-      for (const item of rei.items) {
+      for (const item of sortForLocking(rei.items)) {
         amountDue += item.quantity * Number(item.unitPrice);
         const movements: Parameters<InventoryService['applyMovements']>[0] = [];
         const itemPoId = poIdOf(item);
