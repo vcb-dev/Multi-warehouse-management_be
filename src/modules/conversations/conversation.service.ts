@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { findConversationIdsByQuery } from '../../common/search/unaccent-search';
 import {
   CreateConversationDto,
   CreateMessageDto,
@@ -18,11 +19,11 @@ export class ConversationService {
 
     const where: Prisma.ConversationWhereInput = {};
     if (query.search?.trim()) {
-      const q = query.search.trim();
-      where.OR = [
-        { customerName: { contains: q, mode: 'insensitive' } },
-        { customerPhone: { contains: q, mode: 'insensitive' } },
-      ];
+      const ids = await findConversationIdsByQuery(
+        this.prisma,
+        query.search.trim(),
+      );
+      where.id = { in: ids };
     }
 
     const [rows, total] = await Promise.all([

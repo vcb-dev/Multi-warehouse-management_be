@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
 import { CustomerDebtService } from './customer-debt.service';
 import {
   CreateCustomerDebtAdjustmentDto,
@@ -24,14 +25,7 @@ export class CustomersController {
     const term = q?.trim();
     const rows = await this.prisma.customer.findMany({
       where: term
-        ? {
-            OR: [
-              { phone: { contains: term } },
-              { email: { contains: term, mode: 'insensitive' } },
-              { firstName: { contains: term, mode: 'insensitive' } },
-              { lastName: { contains: term, mode: 'insensitive' } },
-            ],
-          }
+        ? { id: { in: await findCustomerIdsByQuery(this.prisma, term) } }
         : undefined,
       take: 20,
       orderBy: { id: 'desc' },

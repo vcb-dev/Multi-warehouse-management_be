@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { findSupplierIdsByQuery } from '../../common/search/unaccent-search';
 import { VoucherService } from '../vouchers/voucher.service';
 import { serializeLedgerEntry } from '../purchasing/purchasing.serializer';
 import {
@@ -42,7 +43,7 @@ export class SupplierService {
   async list(query: ListSuppliersQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where = this.buildWhere(query);
+    const where = await this.buildWhere(query);
 
     const [rows, total] = await Promise.all([
       this.prisma.supplier.findMany({
@@ -578,7 +579,9 @@ export class SupplierService {
     return row;
   }
 
-  private buildWhere(query: ListSuppliersQueryDto): Prisma.SupplierWhereInput {
+  private async buildWhere(
+    query: ListSuppliersQueryDto,
+  ): Promise<Prisma.SupplierWhereInput> {
     const where: Prisma.SupplierWhereInput = {};
 
     if (query.is_active !== undefined) {
@@ -588,14 +591,8 @@ export class SupplierService {
     }
 
     if (query.q?.trim()) {
-      const q = query.q.trim();
-      where.OR = [
-        { code: { contains: q, mode: 'insensitive' } },
-        { name: { contains: q, mode: 'insensitive' } },
-        { email: { contains: q, mode: 'insensitive' } },
-        { phone: { contains: q, mode: 'insensitive' } },
-        { taxCode: { contains: q, mode: 'insensitive' } },
-      ];
+      const ids = await findSupplierIdsByQuery(this.prisma, query.q.trim());
+      where.id = { in: ids };
     }
 
     return where;
