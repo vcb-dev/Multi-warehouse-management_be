@@ -4,6 +4,7 @@ import {
   InventoryExportService,
   InventoryImportService,
 } from './inventory-import-export.service';
+import { InventoryNxtService } from './inventory-nxt.service';
 import { InventoryQueryService } from './inventory-query.service';
 import { InventoryRepository } from './inventory.repository';
 import { InventoryService } from './inventory.service';
@@ -15,6 +16,7 @@ import { ReconcileService } from './reconcile.service';
   providers: [
     InventoryRepository,
     InventoryService,
+    InventoryNxtService,
     InventoryQueryService,
     InventoryExportService,
     InventoryImportService,

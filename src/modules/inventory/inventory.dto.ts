@@ -45,6 +45,11 @@ export class ListInventoryQueryDto {
   @IsIn(['in_stock', 'out_of_stock'])
   stock_status?: 'in_stock' | 'out_of_stock';
 
+  /** Đầu kỳ NXT (ISO date) — mặc định đầu tháng hiện tại; kỳ kết thúc ở hiện tại */
+  @IsOptional()
+  @IsString()
+  date_from?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
