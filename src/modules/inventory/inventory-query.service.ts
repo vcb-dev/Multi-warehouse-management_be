@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
+import {
+  findVariantIdsByQuery,
+  findLotIdsByQuery,
+} from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
 
@@ -290,14 +293,8 @@ export class InventoryQueryService {
       };
     }
     if (query.q?.trim()) {
-      const q = query.q.trim();
-      where.OR = [
-        { code: { contains: q, mode: 'insensitive' } },
-        { variant: { sku: { contains: q, mode: 'insensitive' } } },
-        {
-          variant: { product: { name: { contains: q, mode: 'insensitive' } } },
-        },
-      ];
+      const ids = await findLotIdsByQuery(this.prisma, query.q.trim());
+      where.id = { in: ids };
     }
 
     const [rows, total, sums] = await Promise.all([

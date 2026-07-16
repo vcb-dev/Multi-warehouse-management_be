@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { assertAnyWarehouseAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
 import {
   BusinessException,
   InsufficientStockException,
@@ -91,15 +92,8 @@ export class OrderService {
       where.tags = { has: query.tags.trim() };
     }
     if (query.q?.trim()) {
-      where.OR = [
-        { code: { contains: query.q.trim(), mode: 'insensitive' } },
-        { phone: { contains: query.q.trim() } },
-        {
-          items: {
-            some: { sku: { contains: query.q.trim(), mode: 'insensitive' } },
-          },
-        },
-      ];
+      const ids = await findOrderIdsByQuery(this.repo.client, query.q.trim());
+      where.id = { in: ids };
     }
 
     const [rows, total] = await Promise.all([
