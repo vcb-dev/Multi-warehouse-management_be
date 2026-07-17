@@ -15,10 +15,6 @@ export class StnItemDto {
   @IsNotEmpty()
   variant_id!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  lot_id!: string;
-
   @Type(() => Number)
   @IsInt()
   @Min(1)

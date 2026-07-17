@@ -24,7 +24,6 @@ describeIfDb('US3 stock transfer (integration)', () => {
   let fromWarehouseId: bigint;
   let toWarehouseId: bigint;
   let variantId: bigint;
-  let lotId: bigint;
   let userId: bigint;
 
   beforeAll(async () => {
@@ -46,13 +45,6 @@ describeIfDb('US3 stock transfer (integration)', () => {
     toWarehouseId = warehouses[1].id;
     variantId = variant.id;
     userId = user.id;
-
-    const lot = await prisma.lot.upsert({
-      where: { variantId_code: { variantId, code: 'STN-TEST-LOT' } },
-      create: { variantId, code: 'STN-TEST-LOT' },
-      update: {},
-    });
-    lotId = lot.id;
 
     const levelBeforeSeed = await prisma.inventoryLevel.findUnique({
       where: { variantId_warehouseId: { variantId, warehouseId: fromWarehouseId } },
@@ -101,7 +93,6 @@ describeIfDb('US3 stock transfer (integration)', () => {
         items: [
           {
             variant_id: variantId.toString(),
-            lot_id: lotId.toString(),
             quantity: 5,
           },
         ],
@@ -159,7 +150,6 @@ describeIfDb('US3 stock transfer (integration)', () => {
         items: [
           {
             variant_id: variantId.toString(),
-            lot_id: lotId.toString(),
             quantity: 3,
           },
         ],

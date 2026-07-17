@@ -20,7 +20,6 @@ type PoWithItems = PurchaseOrder & {
 type ReiWithItems = GoodsReceipt & {
   items: (GoodsReceiptItem & {
     variant?: { sku: string };
-    lot?: { code: string };
     purchaseOrder?: { code: string } | null;
   })[];
   supplier?: { code: string; name: string };
@@ -95,8 +94,6 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
-      lot_id: item.lotId.toString(),
-      lot_code: item.lot?.code,
       purchase_order_id: item.purchaseOrderId?.toString() ?? null,
       purchase_order_code: item.purchaseOrder?.code ?? null,
       quantity: item.quantity,
@@ -127,7 +124,6 @@ export const PAYMENT_STATUS_LABELS: Record<string, string> = {
 type PvnWithRelations = PurchaseReturn & {
   items: (PurchaseReturnItem & {
     variant?: { sku: string };
-    lot?: { code: string };
   })[];
   supplier?: { code: string; name: string };
   warehouse?: { code: string; name: string };
@@ -156,8 +152,6 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
-      lot_id: item.lotId.toString(),
-      lot_code: item.lot?.code,
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
     })),

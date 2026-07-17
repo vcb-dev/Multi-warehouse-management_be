@@ -7,7 +7,6 @@ type StnWithRelations = StockTransfer & {
       cost?: Prisma.Decimal;
       product?: { name: string };
     };
-    lot?: { code: string };
   })[];
   fromWarehouse?: { code: string; name: string };
   toWarehouse?: { code: string; name: string };
@@ -45,8 +44,6 @@ export function serializeStockTransfer(stn: StnWithRelations) {
       sku: item.variant?.sku,
       product_name: item.variant?.product?.name,
       cost: item.variant?.cost?.toString(),
-      lot_id: item.lotId.toString(),
-      lot_code: item.lot?.code,
       quantity: item.quantity,
     })),
   };

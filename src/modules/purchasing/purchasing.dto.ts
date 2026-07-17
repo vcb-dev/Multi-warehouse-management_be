@@ -108,21 +108,6 @@ export class ListPurchaseOrdersQueryDto {
   page_size?: number = 20;
 }
 
-export class LotInputDto {
-  // Mã lô nay do hệ thống tự sinh theo NCC khi tạo phiếu nhập, field này bỏ qua nếu có gửi lên.
-  @IsOptional()
-  @IsString()
-  code?: string;
-
-  @IsOptional()
-  @IsDateString()
-  manufactured_at?: string;
-
-  @IsOptional()
-  @IsDateString()
-  expired_at?: string;
-}
-
 export class ReiItemDto {
   @IsString()
   @IsNotEmpty()
@@ -132,10 +117,6 @@ export class ReiItemDto {
   @IsOptional()
   @IsString()
   purchase_order_id?: string;
-
-  @ValidateNested()
-  @Type(() => LotInputDto)
-  lot!: LotInputDto;
 
   @Type(() => Number)
   @IsInt()
@@ -250,10 +231,6 @@ export class PvnItemDto {
   @IsString()
   @IsNotEmpty()
   variant_id!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  lot_id!: string;
 
   @Type(() => Number)
   @IsInt()
