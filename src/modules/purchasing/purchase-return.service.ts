@@ -22,7 +22,6 @@ const pvnInclude = {
   items: {
     include: {
       variant: { select: { sku: true } },
-      lot: { select: { code: true } },
     },
   },
   supplier: { select: { code: true, name: true } },
@@ -118,7 +117,6 @@ export class PurchaseReturnService {
           items: {
             create: dto.items.map((item) => ({
               variantId: BigInt(item.variant_id),
-              lotId: BigInt(item.lot_id),
               quantity: item.quantity,
               unitPrice: item.unit_price,
             })),
@@ -137,7 +135,6 @@ export class PurchaseReturnService {
             type: MovementType.return_out,
             referenceType: 'purchase_return',
             referenceId: record.id,
-            lotId: item.lotId,
             createdById: user.userId,
           },
           tx,
@@ -250,30 +247,6 @@ export class PurchaseReturnService {
     };
   }
 
-  /** Số lượng đã nhập của lô tại kho (từ REI đã xác nhận) trừ đã trả */
-  async getReturnableQty(lotId: bigint, warehouseId: bigint) {
-    const received = await this.prisma.goodsReceiptItem.aggregate({
-      where: {
-        lotId,
-        goodsReceipt: {
-          warehouseId,
-          status: GoodsReceiptStatus.da_nhap,
-        },
-      },
-      _sum: { quantity: true },
-    });
-
-    const returned = await this.prisma.purchaseReturnItem.aggregate({
-      where: {
-        lotId,
-        purchaseReturn: { warehouseId },
-      },
-      _sum: { quantity: true },
-    });
-
-    return (received._sum.quantity ?? 0) - (returned._sum.quantity ?? 0);
-  }
-
   /** "Trả theo đơn" — đơn nhập gốc phải đã nhập kho và khớp đúng NCC/kho đang trả */
   private async validateGoodsReceiptRef(
     goodsReceiptId: bigint,
@@ -314,36 +287,31 @@ export class PurchaseReturnService {
     return goodsReceiptId;
   }
 
+  /** Không còn theo dõi theo lô — chỉ đảm bảo không trả vượt tồn hiện có tại kho */
   private async validateReturnQuantities(
     items: CreatePurchaseReturnDto['items'],
     warehouseId: bigint,
   ) {
-    const qtyByLot = new Map<string, number>();
+    const qtyByVariant = new Map<string, number>();
     for (const item of items) {
-      const lot = await this.prisma.lot.findUnique({
-        where: { id: BigInt(item.lot_id) },
-      });
-      if (!lot || lot.variantId !== BigInt(item.variant_id)) {
-        throw new BusinessException(
-          'VALIDATION_ERROR',
-          'Lô không khớp với phiên bản',
-          422,
-        );
-      }
-
-      const key = item.lot_id;
-      qtyByLot.set(key, (qtyByLot.get(key) ?? 0) + item.quantity);
+      const key = item.variant_id;
+      qtyByVariant.set(key, (qtyByVariant.get(key) ?? 0) + item.quantity);
     }
 
-    for (const [lotId, qty] of qtyByLot) {
-      const returnable = await this.getReturnableQty(
-        BigInt(lotId),
-        warehouseId,
-      );
-      if (qty > returnable) {
+    for (const [variantId, qty] of qtyByVariant) {
+      const level = await this.prisma.inventoryLevel.findUnique({
+        where: {
+          variantId_warehouseId: {
+            variantId: BigInt(variantId),
+            warehouseId,
+          },
+        },
+      });
+      const available = level?.available ?? 0;
+      if (qty > available) {
         throw new BusinessException(
           'RETURN_EXCEEDS_RECEIPT',
-          `Trả vượt số đã nhập của lô (còn trả được ${returnable}, yêu cầu ${qty})`,
+          `Trả vượt tồn khả dụng tại kho (còn ${available}, yêu cầu ${qty})`,
           409,
         );
       }

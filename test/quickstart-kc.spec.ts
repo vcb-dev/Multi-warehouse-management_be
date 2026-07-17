@@ -44,8 +44,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
   let warehouseK2: bigint;
   let variantId: bigint;
   let userId: bigint;
-  let lotCode: string;
-  let lotId: bigint;
 
   const adminUser = () => ({
     userId,
@@ -87,7 +85,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     warehouseK2 = warehouses[1].id;
     variantId = variant.id;
     userId = user.id;
-    lotCode = `KC-LOT-${Date.now()}`;
   });
 
   afterAll(async () => {
@@ -167,7 +164,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
             variant_id: variantId.toString(),
             quantity: 20,
             unit_price: 50000,
-            lot: { code: lotCode, manufactured_at: '2025-01-01' },
           },
         ],
       },
@@ -181,11 +177,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     });
     expect(level?.incoming).toBe(0);
     expect(level?.onHand).toBeGreaterThanOrEqual(20);
-
-    const lot = await prisma.lot.findFirstOrThrow({
-      where: { variantId, code: lotCode },
-    });
-    lotId = lot.id;
 
     const movements = await prisma.inventoryMovement.findMany({
       where: {
@@ -216,7 +207,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
         items: [
           {
             variant_id: variantId.toString(),
-            lot_id: lotId.toString(),
             quantity: 5,
           },
         ],
@@ -260,7 +250,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
         items: [
           {
             variant_id: variantId.toString(),
-            lot_id: lotId.toString(),
             quantity: 3,
             unit_price: 50000,
           },
@@ -292,7 +281,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
           items: [
             {
               variant_id: variantId.toString(),
-              lot_id: lotId.toString(),
               quantity: 18,
               unit_price: 50000,
             },
@@ -310,11 +298,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
   it('KC6 — SAME_WAREHOUSE, FORBIDDEN_SCOPE, hủy STN', async () => {
     const auth = adminUser();
-    const lot = await prisma.lot.upsert({
-      where: { variantId_code: { variantId, code: `${lotCode}-STN-CANCEL` } },
-      create: { variantId, code: `${lotCode}-STN-CANCEL` },
-      update: {},
-    });
 
     const levelBeforeSetup = await prisma.inventoryLevel.findUnique({
       where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
@@ -337,7 +320,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
           items: [
             {
               variant_id: variantId.toString(),
-              lot_id: lot.id.toString(),
               quantity: 1,
             },
           ],
@@ -370,7 +352,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
         items: [
           {
             variant_id: variantId.toString(),
-            lot_id: lot.id.toString(),
             quantity: 2,
           },
         ],

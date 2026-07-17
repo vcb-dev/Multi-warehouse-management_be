@@ -89,7 +89,6 @@ export class InventoryRepository {
       data: {
         variantId: input.variantId,
         warehouseId: input.warehouseId,
-        lotId: input.lotId,
         bucket: input.bucket,
         change: input.change,
         type: input.type,

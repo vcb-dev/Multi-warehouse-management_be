@@ -24,7 +24,6 @@ const stnInclude = {
       variant: {
         select: { sku: true, cost: true, product: { select: { name: true } } },
       },
-      lot: { select: { code: true } },
     },
   },
   fromWarehouse: { select: { code: true, name: true } },
@@ -108,10 +107,6 @@ export class StockTransferService {
     this.inventory.assertWarehouseAccess(user, fromId);
 
     await this.validateWarehouses(fromId, toId);
-    // Phiếu nháp chưa cam kết gì nên chỉ kiểm tra lô khớp phiên bản — tồn kho
-    // khả dụng được kiểm tra ở bước "submit" (giữ chỗ), giống các nháp khác
-    // trong hệ thống không nên ràng buộc tồn kho ngay từ lúc tạo.
-    await this.validateLotMatch(dto.items);
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
     const code = await this.resolveCode(dto.code);
@@ -129,7 +124,6 @@ export class StockTransferService {
           items: {
             create: dto.items.map((item) => ({
               variantId: BigInt(item.variant_id),
-              lotId: BigInt(item.lot_id),
               quantity: item.quantity,
             })),
           },
@@ -194,9 +188,6 @@ export class StockTransferService {
       this.inventory.assertWarehouseAccess(user, fromId);
     }
     await this.validateWarehouses(fromId, toId);
-    if (dto.items) {
-      await this.validateLotMatch(dto.items);
-    }
 
     const data: Prisma.StockTransferUpdateInput = {};
     if (dto.from_warehouse_id) {
@@ -214,7 +205,6 @@ export class StockTransferService {
         deleteMany: {},
         create: dto.items.map((item) => ({
           variantId: BigInt(item.variant_id),
-          lotId: BigInt(item.lot_id),
           quantity: item.quantity,
         })),
       };
@@ -289,7 +279,6 @@ export class StockTransferService {
             type: MovementType.transfer_reserve,
             referenceType: 'stock_transfer',
             referenceId: stn.id,
-            lotId: item.lotId,
             createdById: user.userId,
           },
           tx,
@@ -337,7 +326,6 @@ export class StockTransferService {
               type: MovementType.transfer_release,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
             {
@@ -348,7 +336,6 @@ export class StockTransferService {
               type: MovementType.transfer_out,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
           ],
@@ -365,7 +352,6 @@ export class StockTransferService {
             type: MovementType.incoming_transfer,
             referenceType: 'stock_transfer',
             referenceId: stn.id,
-            lotId: item.lotId,
             createdById: user.userId,
           },
           tx,
@@ -423,7 +409,6 @@ export class StockTransferService {
               type: MovementType.incoming_receipt,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
             {
@@ -434,7 +419,6 @@ export class StockTransferService {
               type: MovementType.transfer_in,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
           ],
@@ -517,7 +501,6 @@ export class StockTransferService {
               type: MovementType.transfer_release,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
             tx,
@@ -536,7 +519,6 @@ export class StockTransferService {
               type: MovementType.transfer_in,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
             tx,
@@ -551,7 +533,6 @@ export class StockTransferService {
               type: MovementType.incoming_cancel,
               referenceType: 'stock_transfer',
               referenceId: stn.id,
-              lotId: item.lotId,
               createdById: user.userId,
             },
             tx,
@@ -585,21 +566,6 @@ export class StockTransferService {
     ]);
     if (!from?.isActive || !to?.isActive) {
       throw new BusinessException('VALIDATION_ERROR', 'Kho không hợp lệ', 422);
-    }
-  }
-
-  private async validateLotMatch(items: CreateStockTransferDto['items']) {
-    for (const item of items) {
-      const lot = await this.prisma.lot.findUnique({
-        where: { id: BigInt(item.lot_id) },
-      });
-      if (!lot || lot.variantId !== BigInt(item.variant_id)) {
-        throw new BusinessException(
-          'VALIDATION_ERROR',
-          'Lô không khớp với phiên bản',
-          422,
-        );
-      }
     }
   }
 

@@ -166,7 +166,6 @@ export class ProductRepository {
     await db.priceListItem.deleteMany({
       where: { variantId: { in: variantIds } },
     });
-    await db.lot.deleteMany({ where: { variantId: { in: variantIds } } });
     await db.productVariant.deleteMany({
       where: { id: { in: variantIds } },
     });

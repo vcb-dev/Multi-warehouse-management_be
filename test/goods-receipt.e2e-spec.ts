@@ -91,7 +91,6 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
             variant_id: variantId.toString(),
             quantity: 10,
             unit_price: 50000,
-            lot: { code: 'LOT-TEST-001', manufactured_at: '2025-01-01' },
           },
         ],
       },

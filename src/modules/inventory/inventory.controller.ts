@@ -18,7 +18,6 @@ import {
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
   ListInventoryQueryDto,
-  ListLotsQueryDto,
   ListMovementsQueryDto,
 } from './inventory.dto';
 import {
@@ -49,15 +48,6 @@ export class InventoryController {
   @RequirePermission('inventory:view')
   list(@Query() query: ListInventoryQueryDto, @CurrentUser() user: AuthUser) {
     return this.query.listInventory(query, user);
-  }
-
-  @Get('lots')
-  @RequirePermission('inventory:view')
-  lots(@Query() query: ListLotsQueryDto, @CurrentUser() user: AuthUser) {
-    if (query.variant_id) {
-      return this.query.listLotsForVariant(BigInt(query.variant_id));
-    }
-    return this.query.listLots(query, user);
   }
 
   @Get('export')

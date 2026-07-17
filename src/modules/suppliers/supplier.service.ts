@@ -13,11 +13,6 @@ import { findSupplierIdsByQuery } from '../../common/search/unaccent-search';
 import { VoucherService } from '../vouchers/voucher.service';
 import { serializeLedgerEntry } from '../purchasing/purchasing.serializer';
 import {
-  generateSupplierLotCode,
-  nextSupplierLotSequence,
-  supplierLotPrefix,
-} from '../purchasing/lot-code.util';
-import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
   CreateSupplierPaymentDto,
@@ -416,14 +411,6 @@ export class SupplierService {
         closing_balance: (openingBalance + decreased - increased).toString(),
       },
     };
-  }
-
-  /** Xem trước mã lô sẽ được sinh cho phiếu nhập tiếp theo của NCC này */
-  async getNextLotCode(id: bigint) {
-    const supplier = await this.findOneOrThrow(id);
-    const prefix = supplierLotPrefix(supplier.name);
-    const sequence = await nextSupplierLotSequence(this.prisma, prefix);
-    return { data: { code: generateSupplierLotCode(supplier.name, sequence) } };
   }
 
   async createDebtAdjustment(

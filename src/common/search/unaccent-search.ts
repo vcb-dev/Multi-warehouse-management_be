@@ -106,20 +106,3 @@ export async function findOrderIdsByQuery(
   return rows.map((r) => r.id);
 }
 
-/** Lot.id khớp mã lô, SKU biến thể, hoặc tên sản phẩm */
-export async function findLotIdsByQuery(
-  prisma: PrismaService,
-  q: string,
-): Promise<bigint[]> {
-  const pattern = `%${q}%`;
-  const rows = await prisma.$queryRaw<{ id: bigint }[]>`
-    SELECT l.id
-    FROM lots l
-    JOIN product_variants v ON v.id = l.variant_id
-    JOIN products p ON p.id = v.product_id
-    WHERE unaccent(l.code) ILIKE unaccent(${pattern})
-       OR unaccent(v.sku) ILIKE unaccent(${pattern})
-       OR unaccent(p.name) ILIKE unaccent(${pattern})
-  `;
-  return rows.map((r) => r.id);
-}

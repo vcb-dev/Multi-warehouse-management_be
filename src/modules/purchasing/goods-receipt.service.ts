@@ -19,11 +19,6 @@ import {
   ListGoodsReceiptsQueryDto,
 } from './purchasing.dto';
 import { serializeGoodsReceipt } from './purchasing.serializer';
-import {
-  generateSupplierLotCode,
-  nextSupplierLotSequence,
-  supplierLotPrefix,
-} from './lot-code.util';
 
 // DB ở xa (Supabase qua pooler) + transaction lặp qua nhiều dòng sản phẩm dễ
 // vượt timeout mặc định 5s của Prisma interactive transaction.
@@ -33,7 +28,6 @@ const reiInclude = {
   items: {
     include: {
       variant: { select: { sku: true } },
-      lot: { select: { code: true } },
       purchaseOrder: { select: { code: true } },
     },
   },
@@ -202,11 +196,6 @@ export class GoodsReceiptService {
     const code = await this.generateReiCode();
 
     const rei = await this.prisma.$transaction(async (tx) => {
-      // Mã lô tự sinh theo NCC, dùng chung cho mọi dòng SP trong phiếu nhập này
-      const prefix = supplierLotPrefix(supplier.name);
-      const sequence = await nextSupplierLotSequence(tx, prefix);
-      const lotCode = generateSupplierLotCode(supplier.name, sequence);
-
       const receipt = await tx.goodsReceipt.create({
         data: {
           code,
@@ -230,13 +219,11 @@ export class GoodsReceiptService {
       });
 
       for (const item of dto.items) {
-        const lot = await this.upsertLot(tx, item, lotCode);
         const itemPoId = item.purchase_order_id ?? headerPoId;
         await tx.goodsReceiptItem.create({
           data: {
             goodsReceiptId: receipt.id,
             variantId: BigInt(item.variant_id),
-            lotId: lot.id,
             purchaseOrderId: itemPoId ? BigInt(itemPoId) : null,
             quantity: item.quantity,
             unitPrice: item.unit_price,
@@ -359,7 +346,6 @@ export class GoodsReceiptService {
             type: MovementType.incoming_receipt,
             referenceType: 'goods_receipt',
             referenceId: rei.id,
-            lotId: item.lotId,
             createdById: user.userId,
           });
         }
@@ -372,7 +358,6 @@ export class GoodsReceiptService {
           type: MovementType.receipt,
           referenceType: 'goods_receipt',
           referenceId: rei.id,
-          lotId: item.lotId,
           createdById: user.userId,
           cost: item.unitPrice,
         });
@@ -618,37 +603,6 @@ export class GoodsReceiptService {
     }, TX_OPTIONS);
 
     return { id: rei.id.toString(), deleted: true };
-  }
-
-  private async upsertLot(
-    tx: Prisma.TransactionClient,
-    item: CreateGoodsReceiptDto['items'][0],
-    code: string,
-  ) {
-    const variantId = BigInt(item.variant_id);
-    const manufacturedAt = item.lot.manufactured_at
-      ? new Date(item.lot.manufactured_at)
-      : null;
-    const expiredAt = item.lot.expired_at
-      ? new Date(item.lot.expired_at)
-      : null;
-
-    if (manufacturedAt && expiredAt && expiredAt < manufacturedAt) {
-      throw new BusinessException('VALIDATION_ERROR', 'HSD phải >= NSX', 422);
-    }
-
-    return tx.lot.upsert({
-      where: {
-        variantId_code: { variantId, code },
-      },
-      create: {
-        variantId,
-        code,
-        manufacturedAt,
-        expiredAt,
-      },
-      update: {},
-    });
   }
 
   private async getActiveSupplier(id: bigint) {

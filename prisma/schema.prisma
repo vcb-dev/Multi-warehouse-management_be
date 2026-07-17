@@ -398,7 +398,6 @@ model ProductVariant {
   optionValues     VariantOptionValue[]
   inventoryLevels  InventoryLevel[]
   movements        InventoryMovement[]
-  lots             Lot[]
   poItems          PurchaseOrderItem[]
   reiItems         GoodsReceiptItem[]
   stnItems         StockTransferItem[]
@@ -527,7 +526,6 @@ model InventoryMovement {
   id            BigInt          @id @default(autoincrement())
   variantId     BigInt          @map("variant_id")
   warehouseId   BigInt          @map("warehouse_id")
-  lotId         BigInt?         @map("lot_id")
   bucket        InventoryBucket
   change        Int
   type          MovementType
@@ -538,28 +536,10 @@ model InventoryMovement {
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
-  lot       Lot?           @relation(fields: [lotId], references: [id])
   createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
 
   @@index([variantId, warehouseId, bucket, createdAt]) // T046
   @@map("inventory_movements")
-}
-
-model Lot {
-  id             BigInt    @id @default(autoincrement())
-  code           String
-  variantId      BigInt    @map("variant_id")
-  manufacturedAt DateTime? @map("manufactured_at") @db.Date
-  expiredAt      DateTime? @map("expired_at") @db.Date
-
-  variant   ProductVariant       @relation(fields: [variantId], references: [id])
-  movements InventoryMovement[]
-  reiItems  GoodsReceiptItem[]
-  stnItems  StockTransferItem[]
-  pvnItems  PurchaseReturnItem[]
-
-  @@unique([variantId, code])
-  @@map("lots")
 }
 
 model ActivityLog {
@@ -724,14 +704,12 @@ model GoodsReceiptItem {
   id              BigInt  @id @default(autoincrement())
   goodsReceiptId  BigInt  @map("goods_receipt_id")
   variantId       BigInt  @map("variant_id")
-  lotId           BigInt  @map("lot_id")
   purchaseOrderId BigInt? @map("purchase_order_id")
   quantity        Int
   unitPrice       Decimal @map("unit_price") @db.Decimal(18, 2)
 
   goodsReceipt  GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
-  lot           Lot            @relation(fields: [lotId], references: [id])
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
 
   @@index([goodsReceiptId])
@@ -771,12 +749,10 @@ model StockTransferItem {
   id              BigInt @id @default(autoincrement())
   stockTransferId BigInt @map("stock_transfer_id")
   variantId       BigInt @map("variant_id")
-  lotId           BigInt @map("lot_id")
   quantity        Int
 
   stockTransfer StockTransfer  @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
-  lot           Lot            @relation(fields: [lotId], references: [id])
 
   @@index([stockTransferId])
   @@index([variantId])
@@ -815,13 +791,11 @@ model PurchaseReturnItem {
   id               BigInt  @id @default(autoincrement())
   purchaseReturnId BigInt  @map("purchase_return_id")
   variantId        BigInt  @map("variant_id")
-  lotId            BigInt  @map("lot_id")
   quantity         Int
   unitPrice        Decimal @map("unit_price") @db.Decimal(18, 2)
 
   purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
   variant        ProductVariant @relation(fields: [variantId], references: [id])
-  lot            Lot            @relation(fields: [lotId], references: [id])
 
   @@index([purchaseReturnId])
   @@index([variantId])

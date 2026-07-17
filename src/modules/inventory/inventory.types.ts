@@ -10,7 +10,6 @@ export type ApplyMovementInput = {
   bucket: InventoryBucket;
   change: number;
   type: MovementType;
-  lotId?: bigint;
   referenceType?: string;
   referenceId?: bigint;
   createdById?: bigint;

@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import {
-  findVariantIdsByQuery,
-  findLotIdsByQuery,
-} from '../../common/search/unaccent-search';
+import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
 import {
@@ -306,87 +303,4 @@ export class InventoryQueryService {
     return where;
   }
 
-  async listLots(
-    query: {
-      variant_id?: string;
-      warehouse_id?: string;
-      q?: string;
-      page?: number;
-      page_size?: number;
-    },
-    user: AuthUser,
-  ) {
-    const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
-
-    const where: Prisma.LotWhereInput = {};
-    if (query.variant_id) {
-      where.variantId = BigInt(query.variant_id);
-    }
-    if (query.warehouse_id) {
-      where.variant = {
-        inventoryLevels: { some: { warehouseId: BigInt(query.warehouse_id) } },
-      };
-    } else {
-      where.variant = {
-        inventoryLevels: { some: { warehouseId: { in: user.warehouseIds } } },
-      };
-    }
-    if (query.q?.trim()) {
-      const ids = await findLotIdsByQuery(this.prisma, query.q.trim());
-      where.id = { in: ids };
-    }
-
-    const [rows, total, sums] = await Promise.all([
-      this.prisma.lot.findMany({
-        where,
-        include: { variant: { include: { product: true } } },
-        orderBy: [{ expiredAt: 'asc' }, { code: 'asc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.lot.count({ where }),
-      this.prisma.inventoryMovement.groupBy({
-        by: ['lotId'],
-        where: { lotId: { not: null }, bucket: 'on_hand' },
-        _sum: { change: true },
-      }),
-    ]);
-
-    const qtyByLot = new Map(
-      sums.map((s) => [s.lotId!.toString(), s._sum.change ?? 0]),
-    );
-
-    return {
-      data: rows.map((l) => ({
-        id: l.id.toString(),
-        code: l.code,
-        variant_id: l.variantId.toString(),
-        sku: l.variant.sku,
-        product_name: l.variant.product.name,
-        quantity: qtyByLot.get(l.id.toString()) ?? 0,
-        manufactured_at: l.manufacturedAt?.toISOString().slice(0, 10) ?? null,
-        expired_at: l.expiredAt?.toISOString().slice(0, 10) ?? null,
-      })),
-      total,
-      page,
-      page_size: pageSize,
-    };
-  }
-
-  async listLotsForVariant(variantId: bigint) {
-    const rows = await this.prisma.lot.findMany({
-      where: { variantId },
-      orderBy: [{ expiredAt: 'asc' }, { code: 'asc' }],
-    });
-    return {
-      data: rows.map((l) => ({
-        id: l.id.toString(),
-        code: l.code,
-        variant_id: l.variantId.toString(),
-        manufactured_at: l.manufacturedAt?.toISOString().slice(0, 10) ?? null,
-        expired_at: l.expiredAt?.toISOString().slice(0, 10) ?? null,
-      })),
-    };
-  }
 }

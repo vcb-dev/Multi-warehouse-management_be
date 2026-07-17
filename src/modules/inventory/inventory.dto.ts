@@ -5,7 +5,6 @@ import {
   IsEnum,
   IsIn,
   IsInt,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Min,
@@ -93,29 +92,3 @@ export class ListMovementsQueryDto {
   page_size?: number = 20;
 }
 
-export class ListLotsQueryDto {
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  variant_id?: string;
-
-  @IsOptional()
-  @IsString()
-  warehouse_id?: string;
-
-  @IsOptional()
-  @IsString()
-  q?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page_size?: number = 20;
-}
