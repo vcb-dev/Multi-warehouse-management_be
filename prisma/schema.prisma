@@ -1,5 +1,5 @@
-// Prisma schema — Module Quản lý kho (006) + stub sản phẩm
-// Chi tiết: specs/006-quan-ly-kho/data-model.md
+// Prisma schema tổng — Warehouse + CQA CRM (shared database)
+// Chi tiết kho: specs/006-quan-ly-kho/data-model.md
 
 generator client {
   provider = "prisma-client-js"
@@ -129,16 +129,45 @@ enum VoucherType {
 
 // --- Auth & config ---
 
+// --- CQA multi-tenant ---
+
+model Tenant {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(100)
+  domain       String?  @db.VarChar
+  logoUrl      String?  @map("logo_url") @db.VarChar
+  primaryColor String?  @map("primary_color") @db.VarChar
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users        User[]
+  chatAudits   ChatAudit[]
+  configs      FacebookCskhConfig[]
+  sessions     FacebookOAuthSession[]
+  jobs         CskhJobRun[]
+  monitors     CskhMonitorItem[]
+  convs        CskhInboxConversation[]
+  messages     CskhInboxMessage[]
+  inboxLabels  CskhInboxLabel[]
+
+  @@map("tenants")
+}
+
 model User {
   id           BigInt        @id @default(autoincrement())
   email        String        @unique
   passwordHash String?       @map("password_hash")
   name         String?
   phone        String?
-  roles        UserRole[]
+  avatarUrl    String?       @map("avatar_url")
+  tenantId     String?       @map("tenant_id") @db.Uuid
+  roles        UserRole[]    @default([])
   status       AccountStatus @default(active)
   isActive     Boolean       @default(true) @map("is_active")
   createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   warehouses             UserWarehouse[]
   warehouseRoles         UserWarehouseRole[]
@@ -162,6 +191,9 @@ model User {
   customerLedgerEntries  CustomerLedgerEntry[]    @relation("CustomerLedgerCreatedBy")
   conversationsAssigned  Conversation[]           @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]    @relation("ConversationMessageAuthor")
+  chatAudits             ChatAudit[]
+  inboxLabels            CskhInboxLabel[]
+  inboxConvViews         CskhInboxConversationView[]
 
   @@map("users")
 }
@@ -1063,4 +1095,213 @@ model ConversationMessage {
 
   @@index([conversationId, createdAt])
   @@map("conversation_messages")
+}
+
+// --- CQA CSKH / Facebook inbox ---
+
+model ChatAudit {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       BigInt?  @map("user_id")
+  agentName    String?  @map("agent_name") @db.VarChar
+  customerName String?  @map("customer_name") @db.VarChar
+  channel      String?  @db.VarChar
+  score        Int      @default(0)
+  feedback     String?  @db.Text
+  transcript   Json?
+  metadata     Json?
+  tenantId     String?  @map("tenant_id") @db.Uuid
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("chat_audits")
+}
+
+model FacebookCskhConfig {
+  id              String   @id @default(uuid()) @db.Uuid
+  pageId          String   @unique @map("page_id")
+  pageName        String?  @map("page_name") @db.VarChar
+  pageAccessToken String   @map("page_access_token") @db.Text
+  enabled         Boolean  @default(true)
+  metadata        Json?
+  tenantId        String?  @map("tenant_id") @db.Uuid
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("facebook_cskh_configs")
+}
+
+model FacebookOAuthSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  fbUserId        String    @unique @map("fb_user_id")
+  fbUserName      String?   @map("fb_user_name") @db.VarChar
+  userAccessToken String    @map("user_access_token") @db.Text
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  metadata        Json?
+  tenantId        String?   @map("tenant_id") @db.Uuid
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("facebook_oauth_sessions")
+}
+
+model CskhJobRun {
+  id           String            @id @default(uuid()) @db.Uuid
+  type         String
+  status       String            @default("running")
+  summary      Json?
+  error        String?           @db.Text
+  tenantId     String?           @map("tenant_id") @db.Uuid
+  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startedAt    DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime?         @map("finished_at") @db.Timestamptz(6)
+  monitorItems CskhMonitorItem[]
+
+  @@map("cskh_job_runs")
+}
+
+model CskhMonitorItem {
+  id             String     @id @default(uuid()) @db.Uuid
+  jobRunId       String     @map("job_run_id") @db.Uuid
+  pageId         String     @map("page_id")
+  pageName       String?    @map("page_name") @db.VarChar
+  conversationId String     @map("conversation_id")
+  customerName   String?    @map("customer_name") @db.VarChar
+  lastMessage    String?    @map("last_message") @db.Text
+  needsReply     Boolean    @default(true) @map("needs_reply")
+  tenantId       String?    @map("tenant_id") @db.Uuid
+  tenant         Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedAt      DateTime?  @map("updated_at") @db.Timestamptz(6)
+  jobRun         CskhJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
+
+  @@map("cskh_monitor_items")
+}
+
+model CskhInboxConversation {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  pageId             String                       @map("page_id")
+  pageName           String?                      @map("page_name") @db.VarChar
+  fbConversationId   String?                      @map("fb_conversation_id") @db.VarChar
+  participantPsid    String                       @map("participant_psid")
+  customerName       String?                      @map("customer_name") @db.VarChar
+  customerPictureUrl String?                      @map("customer_picture_url") @db.VarChar
+  lastMessage        String?                      @map("last_message") @db.Text
+  lastMessageAt      DateTime?                    @map("last_message_at") @db.Timestamptz(6)
+  unreadCount        Int                          @default(0) @map("unread_count")
+  awaitingLabel      Boolean                      @default(false) @map("awaiting_label")
+  fromAd             Boolean                      @default(false) @map("from_ad")
+  adId               String?                      @map("ad_id") @db.VarChar
+  adTitle            String?                      @map("ad_title") @db.VarChar
+  referralSource     String?                      @map("referral_source") @db.VarChar
+  referralAt         DateTime?                    @map("referral_at") @db.Timestamptz(6)
+  tenantId           String?                      @map("tenant_id") @db.Uuid
+  tenant             Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages           CskhInboxMessage[]
+  labelAssignments   CskhInboxConversationLabel[]
+  views              CskhInboxConversationView[]
+
+  @@unique([pageId, participantPsid])
+  @@index([tenantId, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@index([pageId, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, fromAd, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@map("cskh_inbox_conversations")
+}
+
+model CskhInboxMessage {
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  fbMessageId    String?               @unique @map("fb_message_id") @db.VarChar
+  direction      String
+  senderType     String                @map("sender_type")
+  text           String                @db.Text
+  messageType    String                @default("text") @map("message_type")
+  attachmentUrl  String?               @map("attachment_url") @db.Text
+  tenantId       String?               @map("tenant_id") @db.Uuid
+  tenant         Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sentAt         DateTime              @default(now()) @map("sent_at") @db.Timestamptz(6)
+  status         String                @default("sent")
+  conversation   CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([conversationId, sentAt(sort: Desc)])
+  @@index([sentAt(sort: Desc)])
+  @@index([direction, sentAt(sort: Desc)])
+  @@map("cskh_inbox_messages")
+}
+
+model CskhInboxLabel {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String   @db.VarChar(80)
+  color       String   @default("#6366f1") @db.VarChar(20)
+  type        String   @db.VarChar(20)
+  userId      BigInt?  @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  assignments CskhInboxConversationLabel[]
+
+  @@unique([tenantId, type, userId])
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type, sortOrder])
+  @@map("cskh_inbox_labels")
+}
+
+model CskhInboxConversationLabel {
+  id               String                @id @default(uuid()) @db.Uuid
+  conversationId   String                @map("conversation_id") @db.Uuid
+  labelId          String                @map("label_id") @db.Uuid
+  assignedByUserId BigInt?               @map("assigned_by_user_id")
+  assignedAt       DateTime              @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  conversation     CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  label            CskhInboxLabel        @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, labelId])
+  @@index([conversationId])
+  @@index([labelId])
+  @@map("cskh_inbox_conversation_labels")
+}
+
+model CskhInboxConversationView {
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  userId         BigInt                @map("user_id")
+  viewedAt       DateTime              @default(now()) @map("viewed_at") @db.Timestamptz(6)
+  conversation   CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([conversationId, viewedAt(sort: Desc)])
+  @@map("cskh_inbox_conversation_views")
+}
+
+model CskhPageAdSpendDaily {
+  id                     String   @id @default(uuid()) @db.Uuid
+  pageId                 String   @map("page_id")
+  statDate               String   @map("stat_date") @db.VarChar(10)
+  spend                  Float?
+  currency               String?  @db.VarChar(8)
+  messagingConversations Int?     @map("messaging_conversations")
+  costPerConversation    Float?   @map("cost_per_conversation")
+  adAccountId            String?  @map("ad_account_id")
+  adAccountName          String?  @map("ad_account_name") @db.VarChar
+  unavailableReason      String?  @map("unavailable_reason") @db.VarChar(64)
+  tenantId               String?  @map("tenant_id") @db.Uuid
+  syncedAt               DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([pageId, statDate])
+  @@index([statDate])
+  @@index([tenantId, statDate])
+  @@map("cskh_page_ad_spend_daily")
 }
