@@ -6,8 +6,10 @@ uploads
 !.env.example
 coverage
 .git
+.github
 *.md
 test
 .vscode
 .cursor
+tsconfig.build.tsbuildinfo
 pnpm-workspace.yaml

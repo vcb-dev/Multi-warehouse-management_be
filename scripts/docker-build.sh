@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-IMAGE_NAME="${IMAGE_NAME:-sapo-backend}"
+IMAGE_NAME="${IMAGE_NAME:-viejhaf/warehouse-be}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 
