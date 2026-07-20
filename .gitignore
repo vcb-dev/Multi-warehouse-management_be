@@ -17,3 +17,6 @@ sapo-backend-*.tar.gz
 # Uploaded runtime files
 uploads/
 .cursor/rules/*.mdc
+
+# Local pnpm allowBuilds overrides (not a workspace file)
+pnpm-allowBuilds.local.yaml
