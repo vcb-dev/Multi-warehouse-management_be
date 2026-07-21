@@ -32,4 +32,5 @@ EXPOSE 3001
 
 # Auto-migrate khi start (idempotent; Prisma advisory lock nếu nhiều replica).
 # CI/CD cũng chạy migrate deploy trước khi redeploy — xem docs/RAILWAY_CICD.md
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/src/main"]
+# DIRECT_URL fallback = DATABASE_URL nếu Railway chỉ set 1 URL.
+CMD ["sh", "-c", "export DIRECT_URL=\"${DIRECT_URL:-$DATABASE_URL}\" && ./node_modules/.bin/prisma migrate deploy && node dist/src/main"]

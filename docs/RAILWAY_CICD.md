@@ -16,8 +16,7 @@ Repo → **Settings → Secrets and variables → Actions**
 
 | Secret | Giá trị |
 |--------|---------|
-| `DATABASE_URL` | Postgres URL (pooler / runtime) — giống Railway |
-| `DIRECT_URL` | Postgres URL session mode — dùng cho migrate |
+| `DATABASE_URL` | Postgres URL — giống Railway (migrate cũng dùng URL này) |
 | `RAILWAY_TOKEN` | Project Token (Railway → Project → Settings → Tokens) |
 | `RAILWAY_SERVICE_API` | Service ID của warehouse-be trên Railway |
 | `DOCKERHUB_USERNAME` | Username Docker Hub (vd `viejhaf`) |
@@ -40,7 +39,8 @@ Repo → **Settings → Secrets and variables → Actions**
 2. Image: `viejhaf/warehouse-be:latest`
 3. Healthcheck Path: `/api/health`
 4. Variables (xem `.env.railway.example`):
-   - `DATABASE_URL`, `DIRECT_URL`
+   - `DATABASE_URL` (bắt buộc)
+   - Nếu schema còn `directUrl`: set thêm `DIRECT_URL` = cùng giá trị `DATABASE_URL` (hoặc bỏ dòng `directUrl` trong schema)
    - `JWT_SECRET`, `JWT_EXPIRES_IN`
    - `CORS_ORIGIN`, `APP_PUBLIC_URL`, `PUBLIC_UPLOAD_URL`
 5. Container start: `prisma migrate deploy && node dist/src/main`

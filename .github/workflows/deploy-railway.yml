@@ -46,18 +46,18 @@ jobs:
       - name: Validate DB secrets
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: |
-          if [ -z "$DATABASE_URL" ] || [ -z "$DIRECT_URL" ]; then
-            echo "::error::Thiếu GitHub secrets DATABASE_URL và/hoặc DIRECT_URL (cần để migrate trước deploy)"
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Thiếu GitHub secret DATABASE_URL (cần để migrate trước deploy)"
             exit 1
           fi
           echo "DB secrets OK"
 
+      # Schema vẫn khai báo directUrl — map cùng DATABASE_URL (không cần secret DIRECT_URL riêng)
       - name: Migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DATABASE_URL }}
         run: pnpm exec prisma migrate deploy
 
   build-and-push:
