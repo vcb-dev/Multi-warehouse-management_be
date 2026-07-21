@@ -1,3 +1,8 @@
+# Build/deploy mặc định cho service API trên Railway.
+# Production nên deploy từ Docker Hub image (xem docs/RAILWAY_CICD.md):
+#   viejhaf/warehouse-be:latest
+# thay vì build trực tiếp từ GitHub.
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"

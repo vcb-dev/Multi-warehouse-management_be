@@ -31,7 +31,7 @@
     "db:deploy:supabase": "prisma migrate deploy && prisma db seed",
     "db:test-connection": "node scripts/test-db-connection.mjs",
     "docker:build": "bash scripts/docker-build.sh",
-    "docker:save": "docker save sapo-backend:latest | gzip > sapo-backend-latest.tar.gz"
+    "docker:save": "docker save viejhaf/warehouse-be:latest | gzip > warehouse-be-latest.tar.gz"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

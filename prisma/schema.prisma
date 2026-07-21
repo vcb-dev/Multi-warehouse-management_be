@@ -1,5 +1,5 @@
-// Prisma schema — Module Quản lý kho (006) + stub sản phẩm
-// Chi tiết: specs/006-quan-ly-kho/data-model.md
+// Prisma schema tổng — Warehouse + CQA CRM (shared database)
+// Chi tiết kho: specs/006-quan-ly-kho/data-model.md
 
 generator client {
   provider = "prisma-client-js"
@@ -129,46 +129,71 @@ enum VoucherType {
 
 // --- Auth & config ---
 
+// --- CQA multi-tenant ---
+
+model Tenant {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(100)
+  domain       String?  @db.VarChar
+  logoUrl      String?  @map("logo_url") @db.VarChar
+  primaryColor String?  @map("primary_color") @db.VarChar
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users       User[]
+  chatAudits  ChatAudit[]
+  configs     FacebookCskhConfig[]
+  sessions    FacebookOAuthSession[]
+  jobs        CskhJobRun[]
+  monitors    CskhMonitorItem[]
+  convs       CskhInboxConversation[]
+  messages    CskhInboxMessage[]
+  inboxLabels CskhInboxLabel[]
+
+  @@map("tenants")
+}
+
 model User {
   id           BigInt        @id @default(autoincrement())
   email        String        @unique
   passwordHash String?       @map("password_hash")
   name         String?
   phone        String?
-  roles        UserRole[]
-  status       AccountStatus @default(active)
-  isActive     Boolean       @default(true) @map("is_active")
   avatarUrl    String?       @map("avatar_url")
   tenantId     String?       @map("tenant_id") @db.Uuid
+  roles        UserRole[]    @default([])
+  status       AccountStatus @default(active)
+  isActive     Boolean       @default(true) @map("is_active")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
-  tenant                     Tenant?                     @relation(fields: [tenantId], references: [id])
-  warehouses                 UserWarehouse[]
-  warehouseRoles             UserWarehouseRole[]
-  permissionOverrides        UserPermissionOverride[]
-  invitations                UserInvitation[]
-  inventoryMoves             InventoryMovement[]         @relation("MovementCreatedBy")
-  activityLogs               ActivityLog[]
-  assignedSuppliers          Supplier[]                  @relation("SupplierAssignedTo")
-  purchaseOrders             PurchaseOrder[]             @relation("PoCreatedBy")
-  goodsReceipts              GoodsReceipt[]              @relation("ReiCreatedBy")
-  goodsReceiptsAssigned      GoodsReceipt[]              @relation("ReiAssignedTo")
-  stockTransfersCreated      StockTransfer[]             @relation("StnCreatedBy")
-  stockTransfersReceived     StockTransfer[]             @relation("StnReceivedBy")
-  purchaseReturns            PurchaseReturn[]            @relation("PvnCreatedBy")
-  ordersCreated              Order[]                     @relation("OrderCreatedBy")
-  ordersAssigned             Order[]                     @relation("OrderAssignedTo")
-  orderReturns               OrderReturn[]               @relation("OrderReturnCreatedBy")
-  draftOrders                DraftOrder[]                @relation("DraftOrderCreatedBy")
-  vouchersCreated            Voucher[]                   @relation("VoucherCreatedBy")
-  supplierLedgerEntries      SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
-  customerLedgerEntries      CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
-  conversationsAssigned      Conversation[]              @relation("ConversationAssignedTo")
-  conversationMessages       ConversationMessage[]       @relation("ConversationMessageAuthor")
-  chatAudits                 ChatAudit[]
-  cskhInboxConversationViews CskhInboxConversationView[]
-  cskhInboxLabels            CskhInboxLabel[]
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  warehouses             UserWarehouse[]
+  warehouseRoles         UserWarehouseRole[]
+  permissionOverrides    UserPermissionOverride[]
+  invitations            UserInvitation[]
+  inventoryMoves         InventoryMovement[]         @relation("MovementCreatedBy")
+  activityLogs           ActivityLog[]
+  assignedSuppliers      Supplier[]                  @relation("SupplierAssignedTo")
+  purchaseOrders         PurchaseOrder[]             @relation("PoCreatedBy")
+  goodsReceipts          GoodsReceipt[]              @relation("ReiCreatedBy")
+  goodsReceiptsAssigned  GoodsReceipt[]              @relation("ReiAssignedTo")
+  stockTransfersCreated  StockTransfer[]             @relation("StnCreatedBy")
+  stockTransfersReceived StockTransfer[]             @relation("StnReceivedBy")
+  purchaseReturns        PurchaseReturn[]            @relation("PvnCreatedBy")
+  ordersCreated          Order[]                     @relation("OrderCreatedBy")
+  ordersAssigned         Order[]                     @relation("OrderAssignedTo")
+  orderReturns           OrderReturn[]               @relation("OrderReturnCreatedBy")
+  draftOrders            DraftOrder[]                @relation("DraftOrderCreatedBy")
+  vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
+  supplierLedgerEntries  SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
+  customerLedgerEntries  CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
+  conversationsAssigned  Conversation[]              @relation("ConversationAssignedTo")
+  conversationMessages   ConversationMessage[]       @relation("ConversationMessageAuthor")
+  chatAudits             ChatAudit[]
+  inboxLabels            CskhInboxLabel[]
+  inboxConvViews         CskhInboxConversationView[]
 
   @@map("users")
 }
@@ -331,35 +356,26 @@ model CustomerGroup {
 }
 
 model Product {
-  id               BigInt    @id @default(autoincrement())
-  slug             String    @unique
+  id               BigInt   @id @default(autoincrement())
+  slug             String   @unique
   name             String
   brand            String?
-  productType      String?   @map("product_type")
+  productType      String?  @map("product_type")
   unit             String?
-  tags             String[]  @default([])
-  requiresShipping Boolean   @default(true) @map("requires_shipping")
-  isPublished      Boolean   @default(false) @map("is_published")
-  taxable          Boolean   @default(true)
-  imageUrl         String?   @map("image_url")
-  seoTitle         String?   @map("seo_title")
-  seoDescription   String?   @map("seo_description")
-  description      String?   @db.Text
-  shortDescription String?   @map("short_description") @db.Text
-  trackInventory   Boolean   @default(true) @map("track_inventory")
-  allowBackorder   Boolean   @default(false) @map("allow_backorder")
-  taxIndustryGroup String?   @map("tax_industry_group")
-  category         String?
-  material         String?
-  craftType        String?   @map("craft_type")
-  isDiscontinued   Boolean   @default(false) @map("is_discontinued")
-  publishedAt      DateTime? @map("published_at")
-  /// Đồng bộ từ hệ thống Sapo gốc — id/thời gian bên đó, chỉ để đối chiếu.
-  sapoId           BigInt?   @unique @map("sapo_id")
-  sapoCreatedAt    DateTime? @map("sapo_created_at")
-  sapoUpdatedAt    DateTime? @map("sapo_updated_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  tags             String[] @default([])
+  requiresShipping Boolean  @default(true) @map("requires_shipping")
+  isPublished      Boolean  @default(false) @map("is_published")
+  taxable          Boolean  @default(true)
+  imageUrl         String?  @map("image_url")
+  seoTitle         String?  @map("seo_title")
+  seoDescription   String?  @map("seo_description")
+  description      String?  @db.Text
+  shortDescription String?  @map("short_description") @db.Text
+  trackInventory   Boolean  @default(true) @map("track_inventory")
+  allowBackorder   Boolean  @default(false) @map("allow_backorder")
+  taxIndustryGroup String?  @map("tax_industry_group")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   variants      ProductVariant[]
   images        ProductImage[]
@@ -368,7 +384,6 @@ model Product {
   categories    ProductCategory[]
 
   @@index([brand, productType])
-  @@index([category, material])
   @@map("products")
 }
 
@@ -410,23 +425,19 @@ model ProductVariant {
   weightUnit     String?  @map("weight_unit")
   imageUrl       String?  @map("image_url")
   enabled        Boolean  @default(true)
-  title          String?
-  unit           String?
 
-  product             Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
-  optionValues        VariantOptionValue[]
-  inventoryLevels     InventoryLevel[]
-  movements           InventoryMovement[]
-  poItems             PurchaseOrderItem[]
-  reiItems            GoodsReceiptItem[]
-  stnItems            StockTransferItem[]
-  pvnItems            PurchaseReturnItem[]
-  priceListItems      PriceListItem[]
-  orderItems          OrderItem[]
-  draftOrderItems     DraftOrderItem[]
-  orderReturnItems    OrderReturnItem[]
-  lots                Lot[]
-  sapoInboxOrderItems SapoInboxOrderItem[]
+  product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues     VariantOptionValue[]
+  inventoryLevels  InventoryLevel[]
+  movements        InventoryMovement[]
+  poItems          PurchaseOrderItem[]
+  reiItems         GoodsReceiptItem[]
+  stnItems         StockTransferItem[]
+  pvnItems         PurchaseReturnItem[]
+  priceListItems   PriceListItem[]
+  orderItems       OrderItem[]
+  draftOrderItems  DraftOrderItem[]
+  orderReturnItems OrderReturnItem[]
 
   @@index([productId])
   @@map("product_variants")
@@ -553,13 +564,11 @@ model InventoryMovement {
   referenceType String?         @map("reference_type")
   referenceId   BigInt?         @map("reference_id")
   createdById   BigInt?         @map("created_by")
-  lotId         BigInt?         @map("lot_id")
   createdAt     DateTime        @default(now()) @map("created_at")
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
   createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
-  lot       Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([variantId, warehouseId, bucket, createdAt]) // T046
   @@map("inventory_movements")
@@ -728,14 +737,12 @@ model GoodsReceiptItem {
   goodsReceiptId  BigInt  @map("goods_receipt_id")
   variantId       BigInt  @map("variant_id")
   purchaseOrderId BigInt? @map("purchase_order_id")
-  lotId           BigInt? @map("lot_id")
   quantity        Int
   unitPrice       Decimal @map("unit_price") @db.Decimal(18, 2)
 
   goodsReceipt  GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
-  lot           Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([goodsReceiptId])
   @@index([variantId])
@@ -771,15 +778,13 @@ model StockTransfer {
 }
 
 model StockTransferItem {
-  id              BigInt  @id @default(autoincrement())
-  stockTransferId BigInt  @map("stock_transfer_id")
-  variantId       BigInt  @map("variant_id")
-  lotId           BigInt? @map("lot_id")
+  id              BigInt @id @default(autoincrement())
+  stockTransferId BigInt @map("stock_transfer_id")
+  variantId       BigInt @map("variant_id")
   quantity        Int
 
   stockTransfer StockTransfer  @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
-  lot           Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([stockTransferId])
   @@index([variantId])
@@ -818,13 +823,11 @@ model PurchaseReturnItem {
   id               BigInt  @id @default(autoincrement())
   purchaseReturnId BigInt  @map("purchase_return_id")
   variantId        BigInt  @map("variant_id")
-  lotId            BigInt? @map("lot_id")
   quantity         Int
   unitPrice        Decimal @map("unit_price") @db.Decimal(18, 2)
 
   purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
   variant        ProductVariant @relation(fields: [variantId], references: [id])
-  lot            Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([purchaseReturnId])
   @@index([variantId])
@@ -1095,116 +1098,174 @@ model ConversationMessage {
   @@map("conversation_messages")
 }
 
-// --- Đa thuê bao, CSKH Inbox (Facebook), đồng bộ Sapo gốc ---
-// Các bảng dưới đây tồn tại thật trên server (đội CSKH/marketing dùng riêng),
-// được model lại cho khớp DB nhưng ứng dụng quản lý kho/đơn hàng hiện chưa
-// có nghiệp vụ nào đọc/ghi vào chúng.
-
-model Tenant {
-  id           String   @id @db.Uuid
-  name         String   @db.VarChar(100)
-  domain       String?  @db.VarChar
-  logoUrl      String?  @map("logo_url") @db.VarChar
-  primaryColor String?  @map("primary_color") @db.VarChar
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @map("updated_at") @db.Timestamptz(6)
-
-  users                  User[]
-  chatAudits             ChatAudit[]
-  cskhInboxConversations CskhInboxConversation[]
-  cskhInboxLabels        CskhInboxLabel[]
-  cskhInboxMessages      CskhInboxMessage[]
-  cskhJobRuns            CskhJobRun[]
-  cskhMonitorItems       CskhMonitorItem[]
-  facebookCskhConfigs    FacebookCskhConfig[]
-  facebookOauthSessions  FacebookOauthSession[]
-
-  @@map("tenants")
-}
-
-model Lot {
-  id             BigInt    @id @default(autoincrement())
-  code           String
-  variantId      BigInt    @map("variant_id")
-  manufacturedAt DateTime? @map("manufactured_at") @db.Date
-  expiredAt      DateTime? @map("expired_at") @db.Date
-
-  variant             ProductVariant       @relation(fields: [variantId], references: [id])
-  goodsReceiptItems   GoodsReceiptItem[]
-  inventoryMovements  InventoryMovement[]
-  purchaseReturnItems PurchaseReturnItem[]
-  stockTransferItems  StockTransferItem[]
-
-  @@unique([variantId, code])
-  @@map("lots")
-}
+// --- CQA CSKH / Facebook inbox ---
 
 model ChatAudit {
-  id           String   @id @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
   userId       BigInt?  @map("user_id")
   agentName    String?  @map("agent_name") @db.VarChar
   customerName String?  @map("customer_name") @db.VarChar
   channel      String?  @db.VarChar
   score        Int      @default(0)
-  feedback     String?
+  feedback     String?  @db.Text
   transcript   Json?
   metadata     Json?
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @map("updated_at") @db.Timestamptz(6)
   tenantId     String?  @map("tenant_id") @db.Uuid
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User?   @relation(fields: [userId], references: [id])
-
-  @@index([tenantId, createdAt(sort: Desc)])
   @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
   @@map("chat_audits")
 }
 
-model CskhInboxConversation {
-  id                 String    @id @db.Uuid
-  pageName           String?   @map("page_name") @db.VarChar
-  fbConversationId   String?   @map("fb_conversation_id") @db.VarChar
-  customerName       String?   @map("customer_name") @db.VarChar
-  customerPictureUrl String?   @map("customer_picture_url") @db.VarChar
-  lastMessage        String?   @map("last_message")
-  lastMessageAt      DateTime? @map("last_message_at") @db.Timestamptz(6)
-  unreadCount        Int       @default(0) @map("unread_count")
-  fromAd             Boolean   @default(false) @map("from_ad")
-  adId               String?   @map("ad_id") @db.VarChar
-  adTitle            String?   @map("ad_title") @db.VarChar
-  referralSource     String?   @map("referral_source") @db.VarChar
-  referralAt         DateTime? @map("referral_at") @db.Timestamptz(6)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime  @map("updated_at") @db.Timestamptz(6)
-  pageId             String    @map("page_id")
-  participantPsid    String    @map("participant_psid")
-  tenantId           String?   @map("tenant_id") @db.Uuid
-  awaitingLabel      Boolean   @default(false) @map("awaiting_label")
-  customerLang       String?   @map("customer_lang") @db.VarChar(16)
-  customerLangLabel  String?   @map("customer_lang_label") @db.VarChar(64)
+model FacebookCskhConfig {
+  id              String   @id @default(uuid()) @db.Uuid
+  pageId          String   @unique @map("page_id")
+  pageName        String?  @map("page_name") @db.VarChar
+  pageAccessToken String   @map("page_access_token") @db.Text
+  enabled         Boolean  @default(true)
+  metadata        Json?
+  tenantId        String?  @map("tenant_id") @db.Uuid
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  tenant   Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  labels   CskhInboxConversationLabel[]
-  views    CskhInboxConversationView[]
-  messages CskhInboxMessage[]
+  @@map("facebook_cskh_configs")
+}
+
+model FacebookOAuthSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  fbUserId        String    @unique @map("fb_user_id")
+  fbUserName      String?   @map("fb_user_name") @db.VarChar
+  userAccessToken String    @map("user_access_token") @db.Text
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  metadata        Json?
+  tenantId        String?   @map("tenant_id") @db.Uuid
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("facebook_oauth_sessions")
+}
+
+model CskhJobRun {
+  id           String            @id @default(uuid()) @db.Uuid
+  type         String
+  status       String            @default("running")
+  summary      Json?
+  error        String?           @db.Text
+  tenantId     String?           @map("tenant_id") @db.Uuid
+  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startedAt    DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt   DateTime?         @map("finished_at") @db.Timestamptz(6)
+  monitorItems CskhMonitorItem[]
+
+  @@map("cskh_job_runs")
+}
+
+model CskhMonitorItem {
+  id             String     @id @default(uuid()) @db.Uuid
+  jobRunId       String     @map("job_run_id") @db.Uuid
+  pageId         String     @map("page_id")
+  pageName       String?    @map("page_name") @db.VarChar
+  conversationId String     @map("conversation_id")
+  customerName   String?    @map("customer_name") @db.VarChar
+  lastMessage    String?    @map("last_message") @db.Text
+  needsReply     Boolean    @default(true) @map("needs_reply")
+  tenantId       String?    @map("tenant_id") @db.Uuid
+  tenant         Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedAt      DateTime?  @map("updated_at") @db.Timestamptz(6)
+  jobRun         CskhJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
+
+  @@map("cskh_monitor_items")
+}
+
+model CskhInboxConversation {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  pageId             String                       @map("page_id")
+  pageName           String?                      @map("page_name") @db.VarChar
+  fbConversationId   String?                      @map("fb_conversation_id") @db.VarChar
+  participantPsid    String                       @map("participant_psid")
+  customerName       String?                      @map("customer_name") @db.VarChar
+  customerPictureUrl String?                      @map("customer_picture_url") @db.VarChar
+  lastMessage        String?                      @map("last_message") @db.Text
+  lastMessageAt      DateTime?                    @map("last_message_at") @db.Timestamptz(6)
+  unreadCount        Int                          @default(0) @map("unread_count")
+  awaitingLabel      Boolean                      @default(false) @map("awaiting_label")
+  fromAd             Boolean                      @default(false) @map("from_ad")
+  adId               String?                      @map("ad_id") @db.VarChar
+  adTitle            String?                      @map("ad_title") @db.VarChar
+  referralSource     String?                      @map("referral_source") @db.VarChar
+  referralAt         DateTime?                    @map("referral_at") @db.Timestamptz(6)
+  tenantId           String?                      @map("tenant_id") @db.Uuid
+  tenant             Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages           CskhInboxMessage[]
+  labelAssignments   CskhInboxConversationLabel[]
+  views              CskhInboxConversationView[]
 
   @@unique([pageId, participantPsid])
+  @@index([tenantId, lastMessageAt(sort: Desc), id(sort: Desc)])
   @@index([pageId, lastMessageAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, fromAd, lastMessageAt(sort: Desc), id(sort: Desc)])
-  @@index([tenantId, lastMessageAt(sort: Desc), id(sort: Desc)])
   @@map("cskh_inbox_conversations")
 }
 
-model CskhInboxConversationLabel {
-  id               String   @id @db.Uuid
-  conversationId   String   @map("conversation_id") @db.Uuid
-  labelId          String   @map("label_id") @db.Uuid
-  assignedByUserId BigInt?  @map("assigned_by_user_id")
-  assignedAt       DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+model CskhInboxMessage {
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  fbMessageId    String?               @unique @map("fb_message_id") @db.VarChar
+  direction      String
+  senderType     String                @map("sender_type")
+  text           String                @db.Text
+  messageType    String                @default("text") @map("message_type")
+  attachmentUrl  String?               @map("attachment_url") @db.Text
+  tenantId       String?               @map("tenant_id") @db.Uuid
+  tenant         Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sentAt         DateTime              @default(now()) @map("sent_at") @db.Timestamptz(6)
+  status         String                @default("sent")
+  conversation   CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  conversation CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  label        CskhInboxLabel        @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  @@index([tenantId])
+  @@index([conversationId, sentAt(sort: Desc)])
+  @@index([sentAt(sort: Desc)])
+  @@index([direction, sentAt(sort: Desc)])
+  @@map("cskh_inbox_messages")
+}
+
+model CskhInboxLabel {
+  id          String                       @id @default(uuid()) @db.Uuid
+  tenantId    String?                      @map("tenant_id") @db.Uuid
+  tenant      Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String                       @db.VarChar(80)
+  color       String                       @default("#6366f1") @db.VarChar(20)
+  type        String                       @db.VarChar(20)
+  userId      BigInt?                      @map("user_id")
+  user        User?                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sortOrder   Int                          @default(0) @map("sort_order")
+  isActive    Boolean                      @default(true) @map("is_active")
+  createdAt   DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  assignments CskhInboxConversationLabel[]
+
+  @@unique([tenantId, type, userId])
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type, sortOrder])
+  @@map("cskh_inbox_labels")
+}
+
+model CskhInboxConversationLabel {
+  id               String                @id @default(uuid()) @db.Uuid
+  conversationId   String                @map("conversation_id") @db.Uuid
+  labelId          String                @map("label_id") @db.Uuid
+  assignedByUserId BigInt?               @map("assigned_by_user_id")
+  assignedAt       DateTime              @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  conversation     CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  label            CskhInboxLabel        @relation(fields: [labelId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, labelId])
   @@index([conversationId])
@@ -1213,103 +1274,20 @@ model CskhInboxConversationLabel {
 }
 
 model CskhInboxConversationView {
-  id             String   @id @db.Uuid
-  conversationId String   @map("conversation_id") @db.Uuid
-  userId         BigInt   @map("user_id")
-  viewedAt       DateTime @default(now()) @map("viewed_at") @db.Timestamptz(6)
-
-  conversation CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String                @id @default(uuid()) @db.Uuid
+  conversationId String                @map("conversation_id") @db.Uuid
+  userId         BigInt                @map("user_id")
+  viewedAt       DateTime              @default(now()) @map("viewed_at") @db.Timestamptz(6)
+  conversation   CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
   @@index([conversationId, viewedAt(sort: Desc)])
   @@map("cskh_inbox_conversation_views")
 }
 
-model CskhInboxLabel {
-  id        String   @id @db.Uuid
-  tenantId  String?  @map("tenant_id") @db.Uuid
-  name      String   @db.VarChar(80)
-  color     String   @default("#6366f1") @db.VarChar(20)
-  type      String   @db.VarChar(20)
-  userId    BigInt?  @map("user_id")
-  sortOrder Int      @default(0) @map("sort_order")
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
-
-  tenant             Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user               User?                        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversationLabels CskhInboxConversationLabel[]
-
-  @@unique([tenantId, type, name])
-  @@unique([tenantId, type, userId])
-  @@index([tenantId, type, sortOrder])
-  @@map("cskh_inbox_labels")
-}
-
-model CskhInboxMessage {
-  id             String   @id @db.Uuid
-  conversationId String   @map("conversation_id") @db.Uuid
-  fbMessageId    String?  @unique @map("fb_message_id") @db.VarChar
-  text           String
-  attachmentUrl  String?  @map("attachment_url")
-  sentAt         DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
-  direction      String
-  senderType     String   @map("sender_type")
-  messageType    String   @default("text") @map("message_type")
-  status         String   @default("sent")
-  tenantId       String?  @map("tenant_id") @db.Uuid
-  originalText   String?  @map("original_text")
-  translatedText String?  @map("translated_text")
-  sourceLang     String?  @map("source_lang") @db.VarChar(16)
-
-  conversation CskhInboxConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  tenant       Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, sentAt(sort: Desc)])
-  @@index([direction, sentAt(sort: Desc)])
-  @@index([sentAt(sort: Desc)])
-  @@index([tenantId])
-  @@map("cskh_inbox_messages")
-}
-
-model CskhJobRun {
-  id         String    @id @db.Uuid
-  summary    Json?
-  error      String?
-  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
-  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
-  type       String
-  status     String    @default("running")
-  tenantId   String?   @map("tenant_id") @db.Uuid
-
-  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  monitorItems CskhMonitorItem[]
-
-  @@map("cskh_job_runs")
-}
-
-model CskhMonitorItem {
-  id             String    @id @db.Uuid
-  jobRunId       String    @map("job_run_id") @db.Uuid
-  pageName       String?   @map("page_name") @db.VarChar
-  customerName   String?   @map("customer_name") @db.VarChar
-  lastMessage    String?   @map("last_message")
-  needsReply     Boolean   @default(true) @map("needs_reply")
-  updatedAt      DateTime? @map("updated_at") @db.Timestamptz(6)
-  pageId         String    @map("page_id")
-  conversationId String    @map("conversation_id")
-  tenantId       String?   @map("tenant_id") @db.Uuid
-
-  jobRun CskhJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)
-  tenant Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@map("cskh_monitor_items")
-}
-
 model CskhPageAdSpendDaily {
-  id                     String   @id @db.Uuid
+  id                     String   @id @default(uuid()) @db.Uuid
   pageId                 String   @map("page_id")
   statDate               String   @map("stat_date") @db.VarChar(10)
   spend                  Float?
@@ -1321,111 +1299,10 @@ model CskhPageAdSpendDaily {
   unavailableReason      String?  @map("unavailable_reason") @db.VarChar(64)
   tenantId               String?  @map("tenant_id") @db.Uuid
   syncedAt               DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
-  updatedAt              DateTime @map("updated_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([pageId, statDate])
   @@index([statDate])
   @@index([tenantId, statDate])
   @@map("cskh_page_ad_spend_daily")
-}
-
-model CskhPageMessageTotal {
-  pageId                  String   @id @map("page_id")
-  messageCount            BigInt   @default(0) @map("message_count")
-  conversationCount       BigInt   @default(0) @map("conversation_count")
-  unreadConversationCount BigInt   @default(0) @map("unread_conversation_count")
-  refreshedAt             DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(6)
-
-  @@index([refreshedAt])
-  @@map("cskh_page_message_totals")
-}
-
-model FacebookCskhConfig {
-  id              String   @id @db.Uuid
-  pageName        String?  @map("page_name") @db.VarChar
-  pageAccessToken String   @map("page_access_token")
-  enabled         Boolean  @default(true)
-  metadata        Json?
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @map("updated_at") @db.Timestamptz(6)
-  pageId          String   @unique @map("page_id")
-  tenantId        String?  @map("tenant_id") @db.Uuid
-
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@map("facebook_cskh_configs")
-}
-
-model FacebookOauthSession {
-  id              String    @id @db.Uuid
-  fbUserName      String?   @map("fb_user_name") @db.VarChar
-  userAccessToken String    @map("user_access_token")
-  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz(6)
-  metadata        Json?
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @map("updated_at") @db.Timestamptz(6)
-  fbUserId        String    @unique @map("fb_user_id")
-  tenantId        String?   @map("tenant_id") @db.Uuid
-
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@map("facebook_oauth_sessions")
-}
-
-model SapoCatalogVariant {
-  id             Int      @id @default(autoincrement())
-  sapoProductId  Int      @map("sapo_product_id")
-  sapoVariantId  Int      @unique @map("sapo_variant_id")
-  productTitle   String   @map("product_title")
-  variantTitle   String   @default("Default") @map("variant_title")
-  price          Decimal  @db.Decimal(18, 2)
-  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
-  sku            String?
-  tags           String   @default("")
-  imageUrl       String?  @map("image_url")
-  inventoryQty   Int      @default(0) @map("inventory_qty")
-  isActive       Boolean  @default(true) @map("is_active")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @map("updated_at") @db.Timestamptz(6)
-
-  @@index([isActive])
-  @@map("sapo_catalog_variants")
-}
-
-model SapoInboxOrder {
-  id              String   @id @db.Uuid
-  orderNumber     Int      @unique @default(autoincrement()) @map("order_number")
-  conversationId  String?  @map("conversation_id") @db.Uuid
-  participantPsid String?  @map("participant_psid") @db.VarChar(64)
-  customerName    String   @map("customer_name")
-  phone           String?  @db.VarChar(32)
-  address         String?
-  note            String?
-  status          String   @default("pending") @db.VarChar(32)
-  totalPrice      Decimal  @default(0) @map("total_price") @db.Decimal(18, 2)
-  source          String   @default("db") @db.VarChar(16)
-  externalOrderId Int?     @map("external_order_id")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  items SapoInboxOrderItem[]
-
-  @@index([conversationId])
-  @@index([createdAt(sort: Desc)])
-  @@map("sapo_inbox_orders")
-}
-
-model SapoInboxOrderItem {
-  id          String  @id @db.Uuid
-  orderId     String  @map("order_id") @db.Uuid
-  variantId   BigInt  @map("variant_id")
-  productName String  @map("product_name")
-  unitPrice   Decimal @map("unit_price") @db.Decimal(18, 2)
-  quantity    Int
-  lineTotal   Decimal @map("line_total") @db.Decimal(18, 2)
-
-  order   SapoInboxOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant ProductVariant @relation(fields: [variantId], references: [id])
-
-  @@index([orderId])
-  @@map("sapo_inbox_order_items")
 }
