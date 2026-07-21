@@ -19,13 +19,57 @@ env:
   IMAGE: viejhaf/warehouse-be:latest
 
 jobs:
+  migrate:
+    name: Prisma migrate deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate DB secrets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Thiếu GitHub secret DATABASE_URL (cần để migrate trước deploy)"
+            exit 1
+          fi
+          echo "DB secrets OK"
+
+      # Schema vẫn khai báo directUrl — map cùng DATABASE_URL (không cần secret DIRECT_URL riêng)
+      - name: Migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm exec prisma migrate deploy
+
   build-and-push:
     name: Build & Push Docker Hub
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    needs: [migrate]
     if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_docker_push != 'true')
+      always() &&
+      needs.migrate.result == 'success' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_docker_push != 'true'))
 
     steps:
       - name: Checkout
@@ -55,9 +99,10 @@ jobs:
     name: Redeploy Railway
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [build-and-push]
+    needs: [migrate, build-and-push]
     if: |
       always() &&
+      needs.migrate.result == 'success' &&
       (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') &&
       (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
 
