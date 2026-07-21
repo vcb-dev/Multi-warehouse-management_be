@@ -231,6 +231,9 @@ export class OrderService {
         ? new Date(dto.expected_delivery_at)
         : null;
     }
+    if (dto.shipping_method !== undefined) {
+      data.shippingMethod = dto.shipping_method.trim() || null;
+    }
 
     const totalDelta = totals.totalAmount - Number(order.totalAmount);
 
@@ -434,6 +437,7 @@ export class OrderService {
             discountTotal: dto.discount_total ?? 0,
             taxTotal: totals.taxTotal,
             shippingFee: dto.shipping_fee ?? 0,
+            shippingMethod: dto.shipping_method?.trim() || null,
             totalAmount: totals.totalAmount,
             totalQuantity: totals.totalQuantity,
             paidAmount: initialPaid,

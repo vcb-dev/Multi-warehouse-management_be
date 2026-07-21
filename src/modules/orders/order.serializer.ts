@@ -10,6 +10,8 @@ export function serializeOrderListItem(o: {
   code: string;
   status: string;
   source: string;
+  paymentStatus: string;
+  shippingMethod: string | null;
   totalAmount: Prisma.Decimal;
   totalQuantity: number;
   orderedAt: Date;
@@ -28,6 +30,8 @@ export function serializeOrderListItem(o: {
     code: o.code,
     status: o.status,
     source: o.source,
+    payment_status: o.paymentStatus,
+    shipping_method: o.shippingMethod,
     branch_name: o.branch.name,
     created_by_name: o.createdBy.name ?? o.createdBy.email,
     total_amount: dec(o.totalAmount),
@@ -60,7 +64,13 @@ export function serializeOrderDetail(o: OrderWithRelations) {
         }
       : null,
     assigned_to: o.assignedToId?.toString() ?? null,
-    assigned_user: o.assignedTo,
+    assigned_user: o.assignedTo
+      ? {
+          id: o.assignedTo.id.toString(),
+          name: o.assignedTo.name,
+          email: o.assignedTo.email,
+        }
+      : null,
     created_by: o.createdById.toString(),
     created_by_name: o.createdBy.name ?? o.createdBy.email,
     email: o.email,
@@ -69,6 +79,7 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     discount_total: dec(o.discountTotal),
     tax_total: dec(o.taxTotal),
     shipping_fee: dec(o.shippingFee),
+    shipping_method: o.shippingMethod,
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
     payment_status: o.paymentStatus,

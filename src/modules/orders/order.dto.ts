@@ -96,6 +96,10 @@ export class CreateOrderDto {
   shipping_fee?: number;
 
   @IsOptional()
+  @IsString()
+  shipping_method?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   tax_rate?: number;
@@ -185,6 +189,10 @@ export class UpdateOrderDto {
   @IsNumber()
   @Min(0)
   shipping_fee?: number;
+
+  @IsOptional()
+  @IsString()
+  shipping_method?: string;
 
   @IsOptional()
   @IsNumber()
