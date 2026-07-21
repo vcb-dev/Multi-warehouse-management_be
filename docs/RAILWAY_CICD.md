@@ -4,8 +4,10 @@ Railway chạy image **`viejhaf/warehouse-be:latest`** (không build từ GitHub
 
 ```text
 push main
-  → GitHub Actions: docker build (linux/amd64) → push Docker Hub
+  → GitHub Actions: prisma migrate deploy  (áp dụng migration mới)
+  → docker build (linux/amd64) → push Docker Hub
   → railway redeploy API  (kéo lại :latest)
+  → container start: prisma migrate deploy lần nữa (idempotent) rồi start API
 ```
 
 ## GitHub Secrets (bắt buộc)
@@ -14,6 +16,8 @@ Repo → **Settings → Secrets and variables → Actions**
 
 | Secret | Giá trị |
 |--------|---------|
+| `DATABASE_URL` | Postgres URL (pooler / runtime) — giống Railway |
+| `DIRECT_URL` | Postgres URL session mode — dùng cho migrate |
 | `RAILWAY_TOKEN` | Project Token (Railway → Project → Settings → Tokens) |
 | `RAILWAY_SERVICE_API` | Service ID của warehouse-be trên Railway |
 | `DOCKERHUB_USERNAME` | Username Docker Hub (vd `viejhaf`) |
@@ -28,7 +32,7 @@ Repo → **Settings → Secrets and variables → Actions**
 
 ### Test thủ công
 1. Actions → **Deploy Railway** → **Run workflow**
-2. `skip_docker_push` = `false` (full) hoặc `true` (chỉ redeploy Railway)
+2. `skip_docker_push` = `false` (full) hoặc `true` (chỉ redeploy Railway; vẫn chạy migrate)
 
 ## Railway (không cần connect nhánh GitHub)
 
@@ -39,12 +43,15 @@ Repo → **Settings → Secrets and variables → Actions**
    - `DATABASE_URL`, `DIRECT_URL`
    - `JWT_SECRET`, `JWT_EXPIRES_IN`
    - `CORS_ORIGIN`, `APP_PUBLIC_URL`, `PUBLIC_UPLOAD_URL`
-5. Container start đã chạy `prisma migrate deploy` rồi `node dist/src/main`
+5. Container start: `prisma migrate deploy && node dist/src/main`
 
-## Local Docker (tuỳ chọn)
+## Khi thêm bảng / đổi schema
 
 ```bash
-# Tag local trùng tên production
-docker build -t viejhaf/warehouse-be:latest .
-docker push viejhaf/warehouse-be:latest
+pnpm exec prisma migrate dev --name ten_migration
+git add prisma/migrations prisma/schema.prisma
+git commit -m "Add migration ..."
+git push origin main
 ```
+
+CI/CD sẽ tự `migrate deploy` — không cần chạy tay trên production.
