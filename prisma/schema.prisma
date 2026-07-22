@@ -140,15 +140,15 @@ model Tenant {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  users        User[]
-  chatAudits   ChatAudit[]
-  configs      FacebookCskhConfig[]
-  sessions     FacebookOAuthSession[]
-  jobs         CskhJobRun[]
-  monitors     CskhMonitorItem[]
-  convs        CskhInboxConversation[]
-  messages     CskhInboxMessage[]
-  inboxLabels  CskhInboxLabel[]
+  users       User[]
+  chatAudits  ChatAudit[]
+  configs     FacebookCskhConfig[]
+  sessions    FacebookOAuthSession[]
+  jobs        CskhJobRun[]
+  monitors    CskhMonitorItem[]
+  convs       CskhInboxConversation[]
+  messages    CskhInboxMessage[]
+  inboxLabels CskhInboxLabel[]
 
   @@map("tenants")
 }
@@ -173,24 +173,24 @@ model User {
   warehouseRoles         UserWarehouseRole[]
   permissionOverrides    UserPermissionOverride[]
   invitations            UserInvitation[]
-  inventoryMoves         InventoryMovement[]      @relation("MovementCreatedBy")
+  inventoryMoves         InventoryMovement[]         @relation("MovementCreatedBy")
   activityLogs           ActivityLog[]
-  assignedSuppliers      Supplier[]               @relation("SupplierAssignedTo")
-  purchaseOrders         PurchaseOrder[]          @relation("PoCreatedBy")
-  goodsReceipts          GoodsReceipt[]           @relation("ReiCreatedBy")
-  goodsReceiptsAssigned  GoodsReceipt[]           @relation("ReiAssignedTo")
-  stockTransfersCreated  StockTransfer[]          @relation("StnCreatedBy")
-  stockTransfersReceived StockTransfer[]          @relation("StnReceivedBy")
-  purchaseReturns        PurchaseReturn[]         @relation("PvnCreatedBy")
-  ordersCreated          Order[]                  @relation("OrderCreatedBy")
-  ordersAssigned         Order[]                  @relation("OrderAssignedTo")
-  orderReturns           OrderReturn[]            @relation("OrderReturnCreatedBy")
-  draftOrders            DraftOrder[]             @relation("DraftOrderCreatedBy")
-  vouchersCreated        Voucher[]                @relation("VoucherCreatedBy")
-  supplierLedgerEntries  SupplierLedgerEntry[]    @relation("SupplierLedgerCreatedBy")
-  customerLedgerEntries  CustomerLedgerEntry[]    @relation("CustomerLedgerCreatedBy")
-  conversationsAssigned  Conversation[]           @relation("ConversationAssignedTo")
-  conversationMessages   ConversationMessage[]    @relation("ConversationMessageAuthor")
+  assignedSuppliers      Supplier[]                  @relation("SupplierAssignedTo")
+  purchaseOrders         PurchaseOrder[]             @relation("PoCreatedBy")
+  goodsReceipts          GoodsReceipt[]              @relation("ReiCreatedBy")
+  goodsReceiptsAssigned  GoodsReceipt[]              @relation("ReiAssignedTo")
+  stockTransfersCreated  StockTransfer[]             @relation("StnCreatedBy")
+  stockTransfersReceived StockTransfer[]             @relation("StnReceivedBy")
+  purchaseReturns        PurchaseReturn[]            @relation("PvnCreatedBy")
+  ordersCreated          Order[]                     @relation("OrderCreatedBy")
+  ordersAssigned         Order[]                     @relation("OrderAssignedTo")
+  orderReturns           OrderReturn[]               @relation("OrderReturnCreatedBy")
+  draftOrders            DraftOrder[]                @relation("DraftOrderCreatedBy")
+  vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
+  supplierLedgerEntries  SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
+  customerLedgerEntries  CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
+  conversationsAssigned  Conversation[]              @relation("ConversationAssignedTo")
+  conversationMessages   ConversationMessage[]       @relation("ConversationMessageAuthor")
   chatAudits             ChatAudit[]
   inboxLabels            CskhInboxLabel[]
   inboxConvViews         CskhInboxConversationView[]
@@ -425,6 +425,7 @@ model ProductVariant {
   weightUnit     String?  @map("weight_unit")
   imageUrl       String?  @map("image_url")
   enabled        Boolean  @default(true)
+  unit           String?
 
   product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues     VariantOptionValue[]
@@ -664,9 +665,9 @@ model PurchaseOrder {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  supplier      Supplier            @relation(fields: [supplierId], references: [id])
-  branch        Branch              @relation(fields: [branchId], references: [id])
-  warehouse     Warehouse           @relation(fields: [warehouseId], references: [id])
+  supplier          Supplier            @relation(fields: [supplierId], references: [id])
+  branch            Branch              @relation(fields: [branchId], references: [id])
+  warehouse         Warehouse           @relation(fields: [warehouseId], references: [id])
   createdBy         User                @relation("PoCreatedBy", fields: [createdById], references: [id])
   items             PurchaseOrderItem[]
   goodsReceipts     GoodsReceipt[]
@@ -884,30 +885,32 @@ model CustomerLedgerEntry {
 }
 
 model Order {
-  id                 BigInt      @id @default(autoincrement())
-  code               String      @unique
-  customerId         BigInt?     @map("customer_id")
-  branchId           BigInt      @map("branch_id")
-  source             OrderSource @default(other)
-  status             OrderStatus @default(ordered)
-  assignedToId       BigInt?     @map("assigned_to")
-  createdById        BigInt      @map("created_by")
+  id                 BigInt        @id @default(autoincrement())
+  code               String        @unique
+  customerId         BigInt?       @map("customer_id")
+  branchId           BigInt        @map("branch_id")
+  source             OrderSource   @default(other)
+  status             OrderStatus   @default(ordered)
+  assignedToId       BigInt?       @map("assigned_to")
+  createdById        BigInt        @map("created_by")
   email              String?
   phone              String?
-  subtotal           Decimal     @default(0) @db.Decimal(18, 2)
-  discountTotal      Decimal     @default(0) @map("discount_total") @db.Decimal(18, 2)
-  taxTotal           Decimal     @default(0) @map("tax_total") @db.Decimal(18, 2)
-  shippingFee        Decimal     @default(0) @map("shipping_fee") @db.Decimal(18, 2)
-  totalAmount        Decimal     @default(0) @map("total_amount") @db.Decimal(18, 2)
-  totalQuantity      Int         @default(0) @map("total_quantity")
+  subtotal           Decimal       @default(0) @db.Decimal(18, 2)
+  discountTotal      Decimal       @default(0) @map("discount_total") @db.Decimal(18, 2)
+  taxTotal           Decimal       @default(0) @map("tax_total") @db.Decimal(18, 2)
+  shippingFee        Decimal       @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  shippingMethod     String?       @map("shipping_method")
+  totalAmount        Decimal       @default(0) @map("total_amount") @db.Decimal(18, 2)
+  totalQuantity      Int           @default(0) @map("total_quantity")
   paymentStatus      PaymentStatus @default(chua_thanh_toan) @map("payment_status")
-  paidAmount         Decimal     @default(0) @map("paid_amount") @db.Decimal(18, 2)
-  note               String?     @db.Text
-  tags               String[]    @default([])
-  orderedAt          DateTime    @default(now()) @map("ordered_at")
-  expectedDeliveryAt DateTime?   @map("expected_delivery_at")
-  createdAt          DateTime    @default(now()) @map("created_at")
-  updatedAt          DateTime    @updatedAt @map("updated_at")
+  paidAmount         Decimal       @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  note               String?       @db.Text
+  tags               String[]      @default([])
+  orderedAt          DateTime      @default(now()) @map("ordered_at")
+  expectedDeliveryAt DateTime?     @map("expected_delivery_at")
+  shippedAt          DateTime?     @map("shipped_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
 
   customer   Customer?     @relation(fields: [customerId], references: [id])
   branch     Branch        @relation(fields: [branchId], references: [id])
@@ -1237,18 +1240,18 @@ model CskhInboxMessage {
 }
 
 model CskhInboxLabel {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String?  @map("tenant_id") @db.Uuid
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String   @db.VarChar(80)
-  color       String   @default("#6366f1") @db.VarChar(20)
-  type        String   @db.VarChar(20)
-  userId      BigInt?  @map("user_id")
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sortOrder   Int      @default(0) @map("sort_order")
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String                       @id @default(uuid()) @db.Uuid
+  tenantId    String?                      @map("tenant_id") @db.Uuid
+  tenant      Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String                       @db.VarChar(80)
+  color       String                       @default("#6366f1") @db.VarChar(20)
+  type        String                       @db.VarChar(20)
+  userId      BigInt?                      @map("user_id")
+  user        User?                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sortOrder   Int                          @default(0) @map("sort_order")
+  isActive    Boolean                      @default(true) @map("is_active")
+  createdAt   DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
   assignments CskhInboxConversationLabel[]
 
   @@unique([tenantId, type, userId])

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import {
   CreateOrderDto,
   ListOrdersQueryDto,
@@ -15,7 +16,10 @@ import { OrderService } from './order.service';
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private orders: OrderService) {}
+  constructor(
+    private orders: OrderService,
+    private activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   @RequirePermission('order:view')
@@ -33,6 +37,12 @@ export class OrdersController {
   @RequirePermission('order:view')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.findOne(BigInt(id), user);
+  }
+
+  @Get(':id/history')
+  @RequirePermission('order:view')
+  history(@Param('id') id: string) {
+    return this.activityLog.getHistory('order', BigInt(id));
   }
 
   @Put(':id')

@@ -21,6 +21,12 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   'stock_transfer.cancel': 'Hủy phiếu chuyển kho',
   'purchase_return.create': 'Thêm mới đơn trả hàng nhập',
   'purchase_return.confirm_refund': 'Xác nhận đã nhận hoàn tiền',
+  'order.create': 'Tạo đơn hàng',
+  'order.update': 'Cập nhật đơn hàng',
+  'order.transition_processing': 'Chuyển đơn sang xử lý',
+  'order.complete': 'Hoàn thành đơn hàng',
+  'order.cancel': 'Hủy đơn hàng',
+  'order.pay': 'Thanh toán đơn hàng',
 };
 
 type LogWithUser = ActivityLog & {
@@ -35,6 +41,7 @@ export function serializeActivityLog(entry: LogWithUser) {
     action_label: ACTIVITY_ACTION_LABELS[entry.action] ?? entry.action,
     actor_name: entry.user?.name ?? entry.user?.email ?? 'Hệ thống',
     reference_code: typeof metadata.code === 'string' ? metadata.code : null,
+    amount: typeof metadata.amount === 'number' ? metadata.amount : null,
     created_at: entry.createdAt.toISOString(),
   };
 }

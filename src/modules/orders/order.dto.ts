@@ -96,6 +96,10 @@ export class CreateOrderDto {
   shipping_fee?: number;
 
   @IsOptional()
+  @IsString()
+  shipping_method?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   tax_rate?: number;
@@ -187,6 +191,10 @@ export class UpdateOrderDto {
   shipping_fee?: number;
 
   @IsOptional()
+  @IsString()
+  shipping_method?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   tax_rate?: number;
@@ -195,7 +203,7 @@ export class UpdateOrderDto {
 export class OrderTransitionDto {
   @IsString()
   @MinLength(1)
-  action!: 'cancel' | 'complete' | 'processing';
+  action!: 'cancel' | 'complete' | 'processing' | 'ship';
 }
 
 export class ListOrderReturnsQueryDto {

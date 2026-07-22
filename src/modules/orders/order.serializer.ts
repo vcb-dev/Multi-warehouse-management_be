@@ -10,9 +10,12 @@ export function serializeOrderListItem(o: {
   code: string;
   status: string;
   source: string;
+  paymentStatus: string;
+  shippingMethod: string | null;
   totalAmount: Prisma.Decimal;
   totalQuantity: number;
   orderedAt: Date;
+  shippedAt: Date | null;
   phone: string | null;
   tags: string[];
   customer: { firstName: string | null; lastName: string | null } | null;
@@ -28,11 +31,14 @@ export function serializeOrderListItem(o: {
     code: o.code,
     status: o.status,
     source: o.source,
+    payment_status: o.paymentStatus,
+    shipping_method: o.shippingMethod,
     branch_name: o.branch.name,
     created_by_name: o.createdBy.name ?? o.createdBy.email,
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
     ordered_at: o.orderedAt.toISOString(),
+    shipped_at: o.shippedAt?.toISOString() ?? null,
     phone: o.phone,
     customer_name: customerName,
     tags: o.tags,
@@ -60,7 +66,13 @@ export function serializeOrderDetail(o: OrderWithRelations) {
         }
       : null,
     assigned_to: o.assignedToId?.toString() ?? null,
-    assigned_user: o.assignedTo,
+    assigned_user: o.assignedTo
+      ? {
+          id: o.assignedTo.id.toString(),
+          name: o.assignedTo.name,
+          email: o.assignedTo.email,
+        }
+      : null,
     created_by: o.createdById.toString(),
     created_by_name: o.createdBy.name ?? o.createdBy.email,
     email: o.email,
@@ -69,6 +81,7 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     discount_total: dec(o.discountTotal),
     tax_total: dec(o.taxTotal),
     shipping_fee: dec(o.shippingFee),
+    shipping_method: o.shippingMethod,
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
     payment_status: o.paymentStatus,
@@ -77,12 +90,16 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     tags: o.tags,
     ordered_at: o.orderedAt.toISOString(),
     expected_delivery_at: o.expectedDeliveryAt?.toISOString() ?? null,
+    shipped_at: o.shippedAt?.toISOString() ?? null,
     items: o.items.map((i) => ({
       id: i.id.toString(),
       variant_id: i.variantId.toString(),
       warehouse_id: i.warehouseId.toString(),
+      product_id: i.variant?.productId.toString() ?? null,
       product_name: i.productName,
       sku: i.sku,
+      image_url: i.variant?.imageUrl ?? null,
+      unit: i.variant?.unit ?? null,
       quantity: i.quantity,
       price: dec(i.price),
       discount: dec(i.discount),

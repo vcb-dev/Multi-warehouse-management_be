@@ -34,7 +34,7 @@ import {
   PayOrderDto,
   UpdateOrderDto,
 } from './order.dto';
-import { OrderRepository, orderInclude } from './order.repository';
+import { OrderRepository, orderInclude, OrderWithRelations } from './order.repository';
 import { serializeOrderDetail, serializeOrderListItem } from './order.serializer';
 
 type ResolvedItem = {
@@ -131,14 +131,35 @@ export class OrderService {
     }
 
     const detail = serializeOrderDetail(order);
-    const levels = await this.repo.client.inventoryLevel.findMany({
-      where: {
-        OR: order.items.map((i) => ({
-          variantId: i.variantId,
-          warehouseId: i.warehouseId,
-        })),
-      },
-    });
+    const [levels, customerStats] = await Promise.all([
+      this.repo.client.inventoryLevel.findMany({
+        where: {
+          OR: order.items.map((i) => ({
+            variantId: i.variantId,
+            warehouseId: i.warehouseId,
+          })),
+        },
+      }),
+      order.customerId
+        ? Promise.all([
+            this.repo.client.order.aggregate({
+              where: { customerId: order.customerId },
+              _count: { _all: true },
+              _sum: { totalAmount: true },
+            }),
+            this.repo.client.order.findFirst({
+              where: { customerId: order.customerId },
+              orderBy: { orderedAt: 'desc' },
+              select: { id: true, code: true },
+            }),
+          ]).then(([agg, last]) => ({
+            total_orders: agg._count._all,
+            total_spent: Number(agg._sum.totalAmount ?? 0),
+            last_order_id: last?.id.toString() ?? null,
+            last_order_code: last?.code ?? null,
+          }))
+        : Promise.resolve(null),
+    ]);
     const availMap = new Map(
       levels.map((l) => [
         `${l.variantId}:${l.warehouseId}`,
@@ -153,6 +174,9 @@ export class OrderService {
           ...i,
           available: availMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
         })),
+        customer: detail.customer && customerStats
+          ? { ...detail.customer, ...customerStats }
+          : detail.customer,
       },
     };
   }
@@ -231,6 +255,9 @@ export class OrderService {
         ? new Date(dto.expected_delivery_at)
         : null;
     }
+    if (dto.shipping_method !== undefined) {
+      data.shippingMethod = dto.shipping_method.trim() || null;
+    }
 
     const totalDelta = totals.totalAmount - Number(order.totalAmount);
 
@@ -251,11 +278,23 @@ export class OrderService {
         );
       }
 
-      return tx.order.update({
+      const record = await tx.order.update({
         where: { id },
         data,
         include: orderInclude,
       });
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'order.update',
+          entityType: 'order',
+          entityId: id,
+          metadata: { code: order.code },
+        },
+      });
+
+      return record;
     });
 
     return { data: serializeOrderDetail(updated) };
@@ -342,6 +381,16 @@ export class OrderService {
           tx,
         );
       }
+
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'order.pay',
+          entityType: 'order',
+          entityId: id,
+          metadata: { code: order.code, amount: payAmount },
+        },
+      });
 
       return result;
     });
@@ -434,6 +483,7 @@ export class OrderService {
             discountTotal: dto.discount_total ?? 0,
             taxTotal: totals.taxTotal,
             shippingFee: dto.shipping_fee ?? 0,
+            shippingMethod: dto.shipping_method?.trim() || null,
             totalAmount: totals.totalAmount,
             totalQuantity: totals.totalQuantity,
             paidAmount: initialPaid,
@@ -546,6 +596,42 @@ export class OrderService {
     }
   }
 
+  /** Trừ on_hand + committed cho toàn bộ dòng hàng — dùng ở cả action 'ship'
+   * và action 'complete' (khi đơn hoàn thành thẳng mà chưa qua bước xuất hàng). */
+  private async shipOrderItems(
+    order: OrderWithRelations,
+    user: AuthUser,
+    tx: Prisma.TransactionClient,
+  ) {
+    for (const item of sortForLocking(order.items)) {
+      await this.inventory.applyMovements(
+        [
+          {
+            variantId: item.variantId,
+            warehouseId: item.warehouseId,
+            bucket: InventoryBucket.on_hand,
+            change: -item.quantity,
+            type: MovementType.order_ship,
+            referenceType: 'order',
+            referenceId: order.id,
+            createdById: user.userId,
+          },
+          {
+            variantId: item.variantId,
+            warehouseId: item.warehouseId,
+            bucket: InventoryBucket.committed,
+            change: -item.quantity,
+            type: MovementType.order_ship,
+            referenceType: 'order',
+            referenceId: order.id,
+            createdById: user.userId,
+          },
+        ],
+        tx,
+      );
+    }
+  }
+
   async transition(id: bigint, dto: OrderTransitionDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
@@ -564,9 +650,20 @@ export class OrderService {
           409,
         );
       }
-      await this.repo.client.order.update({
-        where: { id },
-        data: { status: OrderStatus.processing },
+      await this.repo.client.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id },
+          data: { status: OrderStatus.processing },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.transition_processing',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.code },
+          },
+        });
       });
       return { id: id.toString(), status: OrderStatus.processing };
     }
@@ -579,6 +676,13 @@ export class OrderService {
         throw new BusinessException(
           'INVALID_TRANSITION',
           'Không thể hủy đơn ở trạng thái này',
+          409,
+        );
+      }
+      if (order.shippedAt) {
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Đơn đã xuất hàng, không thể hủy — dùng đổi trả hàng',
           409,
         );
       }
@@ -618,8 +722,50 @@ export class OrderService {
           where: { id },
           data: { status: OrderStatus.cancelled },
         });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.cancel',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.code },
+          },
+        });
       });
       return { id: id.toString(), status: OrderStatus.cancelled };
+    }
+
+    if (action === 'ship') {
+      if (order.status !== OrderStatus.processing) {
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Chỉ xuất hàng từ processing',
+          409,
+        );
+      }
+      if (order.shippedAt) {
+        throw new BusinessException('INVALID_TRANSITION', 'Đơn đã xuất hàng', 409);
+      }
+      const shippedAt = await this.repo.client.$transaction(async (tx) => {
+        await this.shipOrderItems(order, user, tx);
+        const now = new Date();
+        await tx.order.update({ where: { id }, data: { shippedAt: now } });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.ship',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.code },
+          },
+        });
+        return now;
+      });
+      return {
+        id: id.toString(),
+        status: order.status,
+        shipped_at: shippedAt.toISOString(),
+      };
     }
 
     if (action === 'complete') {
@@ -631,36 +777,23 @@ export class OrderService {
         );
       }
       await this.repo.client.$transaction(async (tx) => {
-        for (const item of sortForLocking(order.items)) {
-          await this.inventory.applyMovements(
-            [
-              {
-                variantId: item.variantId,
-                warehouseId: item.warehouseId,
-                bucket: InventoryBucket.on_hand,
-                change: -item.quantity,
-                type: MovementType.order_ship,
-                referenceType: 'order',
-                referenceId: order.id,
-                createdById: user.userId,
-              },
-              {
-                variantId: item.variantId,
-                warehouseId: item.warehouseId,
-                bucket: InventoryBucket.committed,
-                change: -item.quantity,
-                type: MovementType.order_ship,
-                referenceType: 'order',
-                referenceId: order.id,
-                createdById: user.userId,
-              },
-            ],
-            tx,
-          );
+        // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
+        // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
+        if (!order.shippedAt) {
+          await this.shipOrderItems(order, user, tx);
         }
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.completed },
+          data: { status: OrderStatus.completed, shippedAt: order.shippedAt ?? new Date() },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.complete',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.code },
+          },
         });
       });
       return { id: id.toString(), status: OrderStatus.completed };
