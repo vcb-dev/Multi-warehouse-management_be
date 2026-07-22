@@ -25,10 +25,11 @@ COPY package.json pnpm-lock.yaml ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts/migrate-deploy.cjs ./scripts/migrate-deploy.cjs
 
 RUN mkdir -p uploads
 
 EXPOSE 3001
 
-# Prefer migrate ở CI (DIRECT_URL = db.*.supabase.co). Nếu Railway có DIRECT_URL hợp lệ thì migrate lại khi start (idempotent).
-CMD ["sh", "-c", "if [ -n \"$DIRECT_URL\" ] && echo \"$DIRECT_URL\" | grep -vq pooler.supabase.com; then ./node_modules/.bin/prisma migrate deploy; else echo 'Skip start migrate: set DIRECT_URL to Supabase Direct (db.*.supabase.co) or rely on CI migrate'; fi; exec node dist/src/main"]
+# Prefer migrate ở CI. Script ép default_transaction_read_only=off (Supabase đôi khi bật read-only).
+CMD ["sh", "-c", "node scripts/migrate-deploy.cjs; exec node dist/src/main"]

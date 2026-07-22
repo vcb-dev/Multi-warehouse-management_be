@@ -71,7 +71,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: pnpm exec prisma migrate deploy
+        run: node scripts/migrate-deploy.cjs
 
   build-and-push:
     name: Build & Push Docker Hub
