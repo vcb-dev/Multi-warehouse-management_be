@@ -119,6 +119,7 @@ enum OrderSource {
   zalo
   live_fb
   warranty
+  sapo
   other
 }
 
@@ -356,26 +357,34 @@ model CustomerGroup {
 }
 
 model Product {
-  id               BigInt   @id @default(autoincrement())
-  slug             String   @unique
+  id               BigInt    @id @default(autoincrement())
+  sapoId           BigInt?   @unique @map("sapo_id")
+  slug             String    @unique
   name             String
   brand            String?
-  productType      String?  @map("product_type")
+  category         String?
+  material         String?
+  craftType        String?   @map("craft_type")
+  isDiscontinued   Boolean   @default(false) @map("is_discontinued")
+  productType      String?   @map("product_type")
   unit             String?
-  tags             String[] @default([])
-  requiresShipping Boolean  @default(true) @map("requires_shipping")
-  isPublished      Boolean  @default(false) @map("is_published")
-  taxable          Boolean  @default(true)
-  imageUrl         String?  @map("image_url")
-  seoTitle         String?  @map("seo_title")
-  seoDescription   String?  @map("seo_description")
-  description      String?  @db.Text
-  shortDescription String?  @map("short_description") @db.Text
-  trackInventory   Boolean  @default(true) @map("track_inventory")
-  allowBackorder   Boolean  @default(false) @map("allow_backorder")
-  taxIndustryGroup String?  @map("tax_industry_group")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  tags             String[]  @default([])
+  requiresShipping Boolean   @default(true) @map("requires_shipping")
+  isPublished      Boolean   @default(false) @map("is_published")
+  taxable          Boolean   @default(true)
+  imageUrl         String?   @map("image_url")
+  seoTitle         String?   @map("seo_title")
+  seoDescription   String?   @map("seo_description")
+  description      String?   @db.Text
+  shortDescription String?   @map("short_description") @db.Text
+  trackInventory   Boolean   @default(true) @map("track_inventory")
+  allowBackorder   Boolean   @default(false) @map("allow_backorder")
+  taxIndustryGroup String?   @map("tax_industry_group")
+  publishedAt      DateTime? @map("published_at")
+  sapoCreatedAt    DateTime? @map("sapo_created_at")
+  sapoUpdatedAt    DateTime? @map("sapo_updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   variants      ProductVariant[]
   images        ProductImage[]
@@ -416,7 +425,9 @@ model ProductOption {
 model ProductVariant {
   id             BigInt   @id @default(autoincrement())
   productId      BigInt   @map("product_id")
+  sapoId         BigInt?  @unique @map("sapo_id")
   sku            String   @unique
+  title          String?
   barcode        String?
   price          Decimal  @default(0) @db.Decimal(18, 2)
   compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
@@ -459,6 +470,7 @@ model VariantOptionValue {
 
 model Category {
   id             BigInt                @id @default(autoincrement())
+  sapoId         BigInt?               @unique @map("sapo_id")
   name           String
   description    String?               @db.Text
   parentId       BigInt?               @map("parent_id")
@@ -839,6 +851,7 @@ model PurchaseReturnItem {
 
 model Customer {
   id        BigInt   @id @default(autoincrement())
+  sapoId    BigInt?  @unique @map("sapo_id")
   firstName String?  @map("first_name")
   lastName  String?  @map("last_name")
   email     String?
@@ -854,6 +867,7 @@ model Customer {
   ledgerEntries CustomerLedgerEntry[]
 
   @@index([phone])
+  @@index([email])
   @@map("customers")
 }
 
@@ -886,6 +900,7 @@ model CustomerLedgerEntry {
 
 model Order {
   id                 BigInt        @id @default(autoincrement())
+  sapoId             BigInt?       @unique @map("sapo_id")
   code               String        @unique
   customerId         BigInt?       @map("customer_id")
   branchId           BigInt        @map("branch_id")
