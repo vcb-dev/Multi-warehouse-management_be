@@ -356,26 +356,34 @@ model CustomerGroup {
 }
 
 model Product {
-  id               BigInt   @id @default(autoincrement())
-  slug             String   @unique
+  id               BigInt    @id @default(autoincrement())
+  sapoId           BigInt?   @unique @map("sapo_id")
+  slug             String    @unique
   name             String
   brand            String?
-  productType      String?  @map("product_type")
+  category         String?
+  material         String?
+  craftType        String?   @map("craft_type")
+  isDiscontinued   Boolean   @default(false) @map("is_discontinued")
+  productType      String?   @map("product_type")
   unit             String?
-  tags             String[] @default([])
-  requiresShipping Boolean  @default(true) @map("requires_shipping")
-  isPublished      Boolean  @default(false) @map("is_published")
-  taxable          Boolean  @default(true)
-  imageUrl         String?  @map("image_url")
-  seoTitle         String?  @map("seo_title")
-  seoDescription   String?  @map("seo_description")
-  description      String?  @db.Text
-  shortDescription String?  @map("short_description") @db.Text
-  trackInventory   Boolean  @default(true) @map("track_inventory")
-  allowBackorder   Boolean  @default(false) @map("allow_backorder")
-  taxIndustryGroup String?  @map("tax_industry_group")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  tags             String[]  @default([])
+  requiresShipping Boolean   @default(true) @map("requires_shipping")
+  isPublished      Boolean   @default(false) @map("is_published")
+  taxable          Boolean   @default(true)
+  imageUrl         String?   @map("image_url")
+  seoTitle         String?   @map("seo_title")
+  seoDescription   String?   @map("seo_description")
+  description      String?   @db.Text
+  shortDescription String?   @map("short_description") @db.Text
+  trackInventory   Boolean   @default(true) @map("track_inventory")
+  allowBackorder   Boolean   @default(false) @map("allow_backorder")
+  taxIndustryGroup String?   @map("tax_industry_group")
+  publishedAt      DateTime? @map("published_at")
+  sapoCreatedAt    DateTime? @map("sapo_created_at")
+  sapoUpdatedAt    DateTime? @map("sapo_updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   variants      ProductVariant[]
   images        ProductImage[]
@@ -384,6 +392,7 @@ model Product {
   categories    ProductCategory[]
 
   @@index([brand, productType])
+  @@index([category, material])
   @@map("products")
 }
 
@@ -417,12 +426,14 @@ model ProductVariant {
   id             BigInt   @id @default(autoincrement())
   productId      BigInt   @map("product_id")
   sku            String   @unique
+  title          String?
   barcode        String?
   price          Decimal  @default(0) @db.Decimal(18, 2)
   compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
   cost           Decimal  @default(0) @db.Decimal(18, 2)
   weight         Decimal? @db.Decimal(18, 4)
   weightUnit     String?  @map("weight_unit")
+  unit           String?
   imageUrl       String?  @map("image_url")
   enabled        Boolean  @default(true)
   unit           String?
@@ -431,6 +442,7 @@ model ProductVariant {
   optionValues     VariantOptionValue[]
   inventoryLevels  InventoryLevel[]
   movements        InventoryMovement[]
+  lots             Lot[]
   poItems          PurchaseOrderItem[]
   reiItems         GoodsReceiptItem[]
   stnItems         StockTransferItem[]
@@ -439,6 +451,7 @@ model ProductVariant {
   orderItems       OrderItem[]
   draftOrderItems  DraftOrderItem[]
   orderReturnItems OrderReturnItem[]
+  sapoInboxItems   SapoInboxOrderItem[]
 
   @@index([productId])
   @@map("product_variants")
@@ -559,6 +572,7 @@ model InventoryMovement {
   id            BigInt          @id @default(autoincrement())
   variantId     BigInt          @map("variant_id")
   warehouseId   BigInt          @map("warehouse_id")
+  lotId         BigInt?         @map("lot_id")
   bucket        InventoryBucket
   change        Int
   type          MovementType
@@ -569,10 +583,28 @@ model InventoryMovement {
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  lot       Lot?           @relation(fields: [lotId], references: [id])
   createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
 
   @@index([variantId, warehouseId, bucket, createdAt]) // T046
   @@map("inventory_movements")
+}
+
+model Lot {
+  id             BigInt    @id @default(autoincrement())
+  code           String
+  variantId      BigInt    @map("variant_id")
+  manufacturedAt DateTime? @map("manufactured_at") @db.Date
+  expiredAt      DateTime? @map("expired_at") @db.Date
+
+  variant   ProductVariant       @relation(fields: [variantId], references: [id])
+  movements InventoryMovement[]
+  reiItems  GoodsReceiptItem[]
+  stnItems  StockTransferItem[]
+  pvnItems  PurchaseReturnItem[]
+
+  @@unique([variantId, code])
+  @@map("lots")
 }
 
 model ActivityLog {
@@ -738,12 +770,14 @@ model GoodsReceiptItem {
   goodsReceiptId  BigInt  @map("goods_receipt_id")
   variantId       BigInt  @map("variant_id")
   purchaseOrderId BigInt? @map("purchase_order_id")
+  lotId           BigInt? @map("lot_id")
   quantity        Int
   unitPrice       Decimal @map("unit_price") @db.Decimal(18, 2)
 
   goodsReceipt  GoodsReceipt   @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  lot           Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([goodsReceiptId])
   @@index([variantId])
@@ -779,13 +813,15 @@ model StockTransfer {
 }
 
 model StockTransferItem {
-  id              BigInt @id @default(autoincrement())
-  stockTransferId BigInt @map("stock_transfer_id")
-  variantId       BigInt @map("variant_id")
+  id              BigInt  @id @default(autoincrement())
+  stockTransferId BigInt  @map("stock_transfer_id")
+  variantId       BigInt  @map("variant_id")
+  lotId           BigInt? @map("lot_id")
   quantity        Int
 
   stockTransfer StockTransfer  @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
   variant       ProductVariant @relation(fields: [variantId], references: [id])
+  lot           Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([stockTransferId])
   @@index([variantId])
@@ -824,11 +860,13 @@ model PurchaseReturnItem {
   id               BigInt  @id @default(autoincrement())
   purchaseReturnId BigInt  @map("purchase_return_id")
   variantId        BigInt  @map("variant_id")
+  lotId            BigInt? @map("lot_id")
   quantity         Int
   unitPrice        Decimal @map("unit_price") @db.Decimal(18, 2)
 
   purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
   variant        ProductVariant @relation(fields: [variantId], references: [id])
+  lot            Lot?           @relation(fields: [lotId], references: [id])
 
   @@index([purchaseReturnId])
   @@index([variantId])
@@ -1202,6 +1240,9 @@ model CskhInboxConversation {
   adTitle            String?                      @map("ad_title") @db.VarChar
   referralSource     String?                      @map("referral_source") @db.VarChar
   referralAt         DateTime?                    @map("referral_at") @db.Timestamptz(6)
+  // Ngôn ngữ khách (ISO 639-1) — dùng khi NV bật tự dịch khi gửi. Persist ở BE.
+  customerLang       String?                      @map("customer_lang") @db.VarChar(16)
+  customerLangLabel  String?                      @map("customer_lang_label") @db.VarChar(64)
   tenantId           String?                      @map("tenant_id") @db.Uuid
   tenant             Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -1223,7 +1264,14 @@ model CskhInboxMessage {
   fbMessageId    String?               @unique @map("fb_message_id") @db.VarChar
   direction      String
   senderType     String                @map("sender_type")
+  // Nội dung gửi/nhận trên Facebook (ngôn ngữ khách nếu đã dịch outbound).
   text           String                @db.Text
+  // Bản gốc NV gõ (thường VI) khi auto-translate outbound.
+  originalText   String?               @map("original_text") @db.Text
+  // Bản dịch tiếng Việt để NV đọc (inbound), hoặc mirror originalText (outbound).
+  translatedText String?               @map("translated_text") @db.Text
+  // Ngôn ngữ của `text` (ISO 639-1).
+  sourceLang     String?               @map("source_lang") @db.VarChar(16)
   messageType    String                @default("text") @map("message_type")
   attachmentUrl  String?               @map("attachment_url") @db.Text
   tenantId       String?               @map("tenant_id") @db.Uuid
@@ -1307,4 +1355,76 @@ model CskhPageAdSpendDaily {
   @@index([statDate])
   @@index([tenantId, statDate])
   @@map("cskh_page_ad_spend_daily")
+}
+
+/// Cache tổng tin nhắn theo Page (manual SQL / Page-Kênh) — giữ trong schema để db push không drop.
+model CskhPageMessageTotals {
+  pageId                   String   @id @map("page_id")
+  messageCount             BigInt   @default(0) @map("message_count")
+  conversationCount        BigInt   @default(0) @map("conversation_count")
+  unreadConversationCount  BigInt   @default(0) @map("unread_conversation_count")
+  refreshedAt              DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(6)
+
+  @@index([refreshedAt])
+  @@map("cskh_page_message_totals")
+}
+
+// --- Sapo catalog mirror (test / offline) + inbox orders ---
+
+model SapoCatalogVariant {
+  id             Int      @id @default(autoincrement())
+  sapoProductId  Int      @map("sapo_product_id")
+  sapoVariantId  Int      @unique @map("sapo_variant_id")
+  productTitle   String   @map("product_title")
+  variantTitle   String   @default("Default") @map("variant_title")
+  price          Decimal  @db.Decimal(18, 2)
+  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
+  sku            String?
+  tags           String   @default("")
+  imageUrl       String?  @map("image_url")
+  inventoryQty   Int      @default(0) @map("inventory_qty")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isActive])
+  @@map("sapo_catalog_variants")
+}
+
+model SapoInboxOrder {
+  id              String   @id @default(uuid()) @db.Uuid
+  orderNumber     Int      @unique @default(autoincrement()) @map("order_number")
+  conversationId  String?  @map("conversation_id") @db.Uuid
+  participantPsid String?  @map("participant_psid") @db.VarChar(64)
+  customerName    String   @map("customer_name")
+  phone           String?  @db.VarChar(32)
+  address         String?  @db.Text
+  note            String?  @db.Text
+  status          String   @default("pending") @db.VarChar(32)
+  totalPrice      Decimal  @default(0) @map("total_price") @db.Decimal(18, 2)
+  source          String   @default("db") @db.VarChar(16)
+  externalOrderId Int?     @map("external_order_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  items SapoInboxOrderItem[]
+
+  @@index([conversationId])
+  @@index([createdAt(sort: Desc)])
+  @@map("sapo_inbox_orders")
+}
+
+model SapoInboxOrderItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  variantId   BigInt  @map("variant_id")
+  productName String  @map("product_name")
+  unitPrice   Decimal @map("unit_price") @db.Decimal(18, 2)
+  quantity    Int
+  lineTotal   Decimal @map("line_total") @db.Decimal(18, 2)
+
+  order   SapoInboxOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@map("sapo_inbox_order_items")
 }

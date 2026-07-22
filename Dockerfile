@@ -30,7 +30,5 @@ RUN mkdir -p uploads
 
 EXPOSE 3001
 
-# Auto-migrate khi start (idempotent; Prisma advisory lock nếu nhiều replica).
-# CI/CD cũng chạy migrate deploy trước khi redeploy — xem docs/RAILWAY_CICD.md
-# DIRECT_URL fallback = DATABASE_URL nếu Railway chỉ set 1 URL.
-CMD ["sh", "-c", "export DIRECT_URL=\"${DIRECT_URL:-$DATABASE_URL}\" && ./node_modules/.bin/prisma migrate deploy && node dist/src/main"]
+# Prefer migrate ở CI (DIRECT_URL = db.*.supabase.co). Nếu Railway có DIRECT_URL hợp lệ thì migrate lại khi start (idempotent).
+CMD ["sh", "-c", "if [ -n \"$DIRECT_URL\" ] && echo \"$DIRECT_URL\" | grep -vq pooler.supabase.com; then ./node_modules/.bin/prisma migrate deploy; else echo 'Skip start migrate: set DIRECT_URL to Supabase Direct (db.*.supabase.co) or rely on CI migrate'; fi; exec node dist/src/main"]
