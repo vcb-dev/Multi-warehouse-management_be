@@ -27,7 +27,7 @@
     "test:quickstart": "jest --testPathPattern=quickstart-kc",
     "reconcile": "ts-node --compiler-options {\"module\":\"CommonJS\"} scripts/reconcile-run.ts",
     "db:seed": "prisma db seed",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "node scripts/migrate-deploy.cjs",
     "db:deploy:supabase": "prisma migrate deploy && prisma db seed",
     "db:test-connection": "node scripts/test-db-connection.mjs",
     "docker:build": "bash scripts/docker-build.sh",

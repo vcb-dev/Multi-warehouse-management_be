@@ -43,22 +43,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # DATABASE_URL = transaction pooler :6543 (app).
+      # DIRECT_URL = Session mode :5432 (pooler) hoặc Direct db.*.supabase.co — dùng cho migrate.
+      # GitHub Actions thường không tới được db.*.supabase.co (IPv6) → ưu tiên Session pooler :5432.
       - name: Validate DB secrets
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::Thiếu GitHub secret DATABASE_URL (cần để migrate trước deploy)"
+            echo "::error::Thiếu GitHub secret DATABASE_URL"
             exit 1
           fi
-          echo "DB secrets OK"
+          if [ -z "$DIRECT_URL" ]; then
+            echo "::error::Thiếu GitHub secret DIRECT_URL — Supabase Connect → Session mode pooler (:5432) hoặc Direct"
+            exit 1
+          fi
+          case "$DIRECT_URL" in
+            *:6543*|*"pgbouncer=true"*)
+              echo "::error::DIRECT_URL đang Transaction pooler (:6543) — không dùng cho migrate. Đổi sang Session :5432"
+              exit 1
+              ;;
+          esac
+          echo "DB secrets OK (migrate dùng Session/Direct URL)"
 
-      # Schema vẫn khai báo directUrl — map cùng DATABASE_URL (không cần secret DIRECT_URL riêng)
       - name: Migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm exec prisma migrate deploy
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: node scripts/migrate-deploy.cjs
 
   build-and-push:
     name: Build & Push Docker Hub
