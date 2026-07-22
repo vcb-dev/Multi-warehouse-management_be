@@ -16,8 +16,8 @@ Repo → **Settings → Secrets and variables → Actions**
 
 | Secret | Giá trị |
 |--------|---------|
-| `DATABASE_URL` | Pooler (port **6543**, `?pgbouncer=true`) — cho app runtime |
-| `DIRECT_URL` | **Direct connection** Supabase (`db.<project-ref>.supabase.co:5432`) — **chỉ cho migrate** |
+| `DATABASE_URL` | Transaction pooler (port **6543**, `?pgbouncer=true`) — app runtime |
+| `DIRECT_URL` | **Session mode** pooler port **5432** (khuyến nghị cho GitHub Actions / IPv4) — migrate |
 | `RAILWAY_TOKEN` | Project Token (Railway → Project → Settings → Tokens) |
 | `RAILWAY_SERVICE_API` | Service ID của warehouse-be trên Railway |
 | `DOCKERHUB_USERNAME` | Username Docker Hub (vd `viejhaf`) |
@@ -25,20 +25,18 @@ Repo → **Settings → Secrets and variables → Actions**
 
 ### Lấy DIRECT_URL (quan trọng)
 
-Supabase Dashboard → **Project Settings → Database → Connect** → chọn **Direct connection** (không phải Pooler).
+Supabase Dashboard → **Connect**:
 
-Host phải là `db.xxxxx.supabase.co:5432` — **không** chứa `pooler.supabase.com`.
+| Dùng cho | Mode | Port |
+|----------|------|------|
+| App (`DATABASE_URL`) | Transaction pooler | **6543** |
+| Migrate CI (`DIRECT_URL`) | **Session mode** pooler | **5432** |
 
-Nếu migrate bằng pooler sẽ gặp:
+> `db.*.supabase.co` (Direct) thường IPv6 — GitHub Actions hay lỗi `Can't reach database server`. Dùng Session pooler `:5432` cho CI.
 
-```text
-ERROR: cannot execute INSERT in a read-only transaction
-```
+Nếu dùng Transaction `:6543` cho migrate sẽ gặp `read-only transaction` / prepared statement errors.
 
-App trên Railway vẫn chỉ cần `DATABASE_URL` (pooler). CI cần thêm `DIRECT_URL` để migrate ghi được.
-
-Trên Railway (container start migrate): set thêm biến `DIRECT_URL` = cùng Direct connection (hoặc bỏ migrate ở container nếu đã migrate ở CI).
-
+Trên Railway: set `DIRECT_URL` = Session `:5432` nếu muốn migrate lúc start container.
 ## Workflows
 
 | File | Khi chạy |
