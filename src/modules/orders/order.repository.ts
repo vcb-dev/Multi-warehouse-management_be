@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const orderInclude = {
-  items: true,
+  items: {
+    include: { variant: { select: { productId: true, imageUrl: true, unit: true } } },
+  },
   customer: true,
   branch: { select: { code: true, name: true } },
   assignedTo: { select: { id: true, name: true, email: true } },

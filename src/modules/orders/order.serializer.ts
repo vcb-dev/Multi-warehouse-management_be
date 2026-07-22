@@ -15,6 +15,7 @@ export function serializeOrderListItem(o: {
   totalAmount: Prisma.Decimal;
   totalQuantity: number;
   orderedAt: Date;
+  shippedAt: Date | null;
   phone: string | null;
   tags: string[];
   customer: { firstName: string | null; lastName: string | null } | null;
@@ -37,6 +38,7 @@ export function serializeOrderListItem(o: {
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
     ordered_at: o.orderedAt.toISOString(),
+    shipped_at: o.shippedAt?.toISOString() ?? null,
     phone: o.phone,
     customer_name: customerName,
     tags: o.tags,
@@ -88,12 +90,16 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     tags: o.tags,
     ordered_at: o.orderedAt.toISOString(),
     expected_delivery_at: o.expectedDeliveryAt?.toISOString() ?? null,
+    shipped_at: o.shippedAt?.toISOString() ?? null,
     items: o.items.map((i) => ({
       id: i.id.toString(),
       variant_id: i.variantId.toString(),
       warehouse_id: i.warehouseId.toString(),
+      product_id: i.variant?.productId.toString() ?? null,
       product_name: i.productName,
       sku: i.sku,
+      image_url: i.variant?.imageUrl ?? null,
+      unit: i.variant?.unit ?? null,
       quantity: i.quantity,
       price: dec(i.price),
       discount: dec(i.discount),

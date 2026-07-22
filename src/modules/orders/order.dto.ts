@@ -203,7 +203,7 @@ export class UpdateOrderDto {
 export class OrderTransitionDto {
   @IsString()
   @MinLength(1)
-  action!: 'cancel' | 'complete' | 'processing';
+  action!: 'cancel' | 'complete' | 'processing' | 'ship';
 }
 
 export class ListOrderReturnsQueryDto {
