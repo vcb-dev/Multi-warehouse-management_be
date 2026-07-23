@@ -107,6 +107,15 @@ export class OrderService {
           branch: true,
           createdBy: true,
           items: { select: { sku: true }, take: 8 },
+          fulfillments: {
+            where: { closedAt: null },
+            take: 1,
+            select: {
+              packingStatus: true,
+              shipmentStatus: true,
+              provider: { select: { name: true } },
+            },
+          },
         },
       }),
       this.repo.count(where),
@@ -596,6 +605,18 @@ export class OrderService {
     }
   }
 
+  /** Đơn có fulfillment đang mở thì trạng thái do vận đơn điều khiển —
+   * chặn các action thủ công ship/complete/cancel. */
+  private async assertNoOpenFulfillment(orderId: bigint, message: string) {
+    const open = await this.repo.client.fulfillment.findFirst({
+      where: { orderId, closedAt: null },
+      select: { id: true },
+    });
+    if (open) {
+      throw new BusinessException('INVALID_TRANSITION', message, 409);
+    }
+  }
+
   /** Trừ on_hand + committed cho toàn bộ dòng hàng — dùng ở cả action 'ship'
    * và action 'complete' (khi đơn hoàn thành thẳng mà chưa qua bước xuất hàng). */
   private async shipOrderItems(
@@ -679,6 +700,10 @@ export class OrderService {
           409,
         );
       }
+      await this.assertNoOpenFulfillment(
+        id,
+        'Hủy vận đơn trước khi hủy đơn hàng',
+      );
       if (order.shippedAt) {
         throw new BusinessException(
           'INVALID_TRANSITION',
@@ -743,6 +768,10 @@ export class OrderService {
           409,
         );
       }
+      await this.assertNoOpenFulfillment(
+        id,
+        'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
+      );
       if (order.shippedAt) {
         throw new BusinessException('INVALID_TRANSITION', 'Đơn đã xuất hàng', 409);
       }
@@ -776,6 +805,10 @@ export class OrderService {
           409,
         );
       }
+      await this.assertNoOpenFulfillment(
+        id,
+        'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
+      );
       await this.repo.client.$transaction(async (tx) => {
         // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
         // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.

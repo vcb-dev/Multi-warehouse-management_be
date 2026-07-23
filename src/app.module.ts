@@ -25,6 +25,7 @@ import { OrderReturnsModule } from './modules/order-returns/order-returns.module
 import { ChannelsModule } from './modules/channels/channels.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { FulfillmentsModule } from './modules/fulfillments/fulfillments.module';
 import { ConversationModule } from './modules/conversations/conversation.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -47,6 +48,7 @@ import { StorageModule } from './common/storage/storage.module';
     CategoriesModule,
     PricingModule,
     OrdersModule,
+    FulfillmentsModule,
     DraftOrdersModule,
     OrderReturnsModule,
     ChannelsModule,

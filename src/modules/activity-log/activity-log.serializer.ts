@@ -27,6 +27,17 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   'order.complete': 'Hoàn thành đơn hàng',
   'order.cancel': 'Hủy đơn hàng',
   'order.pay': 'Thanh toán đơn hàng',
+  'order.ship': 'Xuất hàng',
+  'fulfillment.packing_request': 'Tạo yêu cầu đóng gói',
+  'fulfillment.packing_status': 'Chuyển trạng thái đóng gói',
+  'fulfillment.print': 'In phiếu giao hàng',
+  'fulfillment.push': 'Đẩy vận chuyển',
+  'fulfillment.picked_up': 'Đơn vị vận chuyển lấy hàng',
+  'fulfillment.redeliver': 'Giao lại',
+  'fulfillment.delivered': 'Giao hàng thành công',
+  'fulfillment.delivery_failed': 'Giao hàng lỗi',
+  'fulfillment.returned': 'Chuyển hoàn về kho',
+  'fulfillment.cancel': 'Hủy vận đơn',
 };
 
 type LogWithUser = ActivityLog & {

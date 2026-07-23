@@ -128,6 +128,31 @@ enum VoucherType {
   payment
 }
 
+enum PackingStatus {
+  cho_dong_goi
+  cho_dan_phieu
+  da_dong_goi
+}
+
+enum ShipmentStatus {
+  cho_lay_hang
+  dang_giao
+  da_giao
+  giao_loi
+  da_hoan
+  huy
+}
+
+enum ShippingProviderType {
+  tich_hop
+  tu_lien_he
+}
+
+enum ShippingFeePayer {
+  shop_tra
+  khach_tra
+}
+
 // --- Auth & config ---
 
 // --- CQA multi-tenant ---
@@ -195,6 +220,8 @@ model User {
   chatAudits             ChatAudit[]
   inboxLabels            CskhInboxLabel[]
   inboxConvViews         CskhInboxConversationView[]
+  packedFulfillments     Fulfillment[]               @relation("FulfillmentPacker")
+  createdFulfillments    Fulfillment[]               @relation("FulfillmentCreatedBy")
 
   @@map("users")
 }
@@ -306,6 +333,11 @@ model Branch {
   code     String  @unique
   name     String
   isActive Boolean @default(true) @map("is_active")
+  phone    String?
+  province String?
+  district String?
+  ward     String?
+  address  String?
 
   warehouses Warehouse[]
 
@@ -314,6 +346,7 @@ model Branch {
   orders         Order[]
   draftOrders    DraftOrder[]
   vouchers       Voucher[]
+  fulfillments   Fulfillment[]
 
   @@map("branches")
 }
@@ -931,9 +964,10 @@ model Order {
   branch     Branch        @relation(fields: [branchId], references: [id])
   assignedTo User?         @relation("OrderAssignedTo", fields: [assignedToId], references: [id])
   createdBy  User          @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  items      OrderItem[]
-  returns    OrderReturn[]
-  fromDraft  DraftOrder?   @relation("DraftConverted")
+  items        OrderItem[]
+  returns      OrderReturn[]
+  fromDraft    DraftOrder?   @relation("DraftConverted")
+  fulfillments Fulfillment[]
 
   @@index([branchId, status, orderedAt])
   @@index([orderedAt])
@@ -964,6 +998,86 @@ model OrderItem {
   @@map("order_items")
 }
 
+model ShippingProvider {
+  id               BigInt               @id @default(autoincrement())
+  code             String               @unique
+  name             String
+  type             ShippingProviderType
+  isConnected      Boolean              @default(false) @map("is_connected")
+  connectionConfig Json?                @map("connection_config")
+  servicesConfig   Json?                @map("services_config")
+  phone            String?
+  email            String?
+  note             String?              @db.Text
+  isActive         Boolean              @default(true) @map("is_active")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  fulfillments Fulfillment[]
+
+  @@map("shipping_providers")
+}
+
+model Fulfillment {
+  id                    BigInt                @id @default(autoincrement())
+  code                  String                @unique
+  orderId               BigInt                @map("order_id")
+  // Đóng gói
+  packingStatus         PackingStatus?        @map("packing_status")
+  packerId              BigInt?               @map("packer_id")
+  packedAt              DateTime?             @map("packed_at")
+  deliveryNotePrintedAt DateTime?             @map("delivery_note_printed_at")
+  // Vận đơn
+  shipmentStatus        ShipmentStatus?       @map("shipment_status")
+  shippingType          ShippingProviderType? @map("shipping_type")
+  providerId            BigInt?               @map("provider_id")
+  serviceCode           String?               @map("service_code")
+  serviceName           String?               @map("service_name")
+  trackingCode          String?               @map("tracking_code")
+  shippingFee           Decimal               @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  feePayer              ShippingFeePayer      @default(shop_tra) @map("fee_payer")
+  codAmount             Decimal               @default(0) @map("cod_amount") @db.Decimal(18, 2)
+  weightGrams           Int?                  @map("weight_grams")
+  lengthCm              Int?                  @map("length_cm")
+  widthCm               Int?                  @map("width_cm")
+  heightCm              Int?                  @map("height_cm")
+  deliveryRequirement   String?               @map("delivery_requirement")
+  note                  String?               @db.Text
+  // Địa chỉ nhận (snapshot)
+  toName                String?               @map("to_name")
+  toPhone               String?               @map("to_phone")
+  toAddress             String?               @map("to_address")
+  toWard                String?               @map("to_ward")
+  toDistrict            String?               @map("to_district")
+  toProvince            String?               @map("to_province")
+  // Địa chỉ lấy hàng (snapshot)
+  fromBranchId          BigInt?               @map("from_branch_id")
+  fromName              String?               @map("from_name")
+  fromPhone             String?               @map("from_phone")
+  fromAddress           String?               @map("from_address")
+  // Vòng đời
+  pushedAt              DateTime?             @map("pushed_at")
+  pickedUpAt            DateTime?             @map("picked_up_at")
+  deliveredAt           DateTime?             @map("delivered_at")
+  returnedAt            DateTime?             @map("returned_at")
+  cancelledAt           DateTime?             @map("cancelled_at")
+  closedAt              DateTime?             @map("closed_at")
+  cancelReason          String?               @map("cancel_reason")
+  createdById           BigInt                @map("created_by")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  packer     User?             @relation("FulfillmentPacker", fields: [packerId], references: [id])
+  provider   ShippingProvider? @relation(fields: [providerId], references: [id])
+  fromBranch Branch?           @relation(fields: [fromBranchId], references: [id])
+  createdBy  User              @relation("FulfillmentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([orderId])
+  @@index([shipmentStatus])
+  @@map("fulfillments")
+}
+
 model DraftOrder {
   id               BigInt           @id @default(autoincrement())
   code             String           @unique
@@ -981,6 +1095,7 @@ model DraftOrder {
   shippingMethod   String?          @map("shipping_method")
   note             String?          @db.Text
   tags             String[]         @default([])
+  expectedDeliveryAt DateTime?      @map("expected_delivery_at")
   convertedOrderId BigInt?          @unique @map("converted_order_id")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")

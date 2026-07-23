@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { serializeFulfillment } from '../fulfillments/fulfillment.serializer';
 import { OrderWithRelations } from './order.repository';
 
 function dec(v: Prisma.Decimal): number {
@@ -22,10 +23,16 @@ export function serializeOrderListItem(o: {
   branch: { name: string };
   createdBy: { name: string | null; email: string };
   items: { sku: string }[];
+  fulfillments?: {
+    packingStatus: string | null;
+    shipmentStatus: string | null;
+    provider: { name: string } | null;
+  }[];
 }) {
   const customerName = o.customer
     ? [o.customer.firstName, o.customer.lastName].filter(Boolean).join(' ')
     : null;
+  const openFulfillment = o.fulfillments?.[0] ?? null;
   return {
     id: o.id.toString(),
     code: o.code,
@@ -33,6 +40,9 @@ export function serializeOrderListItem(o: {
     source: o.source,
     payment_status: o.paymentStatus,
     shipping_method: o.shippingMethod,
+    packing_status: openFulfillment?.packingStatus ?? null,
+    shipment_status: openFulfillment?.shipmentStatus ?? null,
+    provider_name: openFulfillment?.provider?.name ?? null,
     branch_name: o.branch.name,
     created_by_name: o.createdBy.name ?? o.createdBy.email,
     total_amount: dec(o.totalAmount),
@@ -105,6 +115,7 @@ export function serializeOrderDetail(o: OrderWithRelations) {
       discount: dec(i.discount),
       total: dec(i.total),
     })),
+    fulfillments: o.fulfillments.map(serializeFulfillment),
     created_at: o.createdAt.toISOString(),
     updated_at: o.updatedAt.toISOString(),
   };

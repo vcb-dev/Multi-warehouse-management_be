@@ -46,6 +46,7 @@ export class DraftOrderService {
           item_count: d.items.length,
           note: d.note,
           created_at: d.createdAt.toISOString(),
+          updated_at: d.updatedAt.toISOString(),
         };
       }),
     };
@@ -86,6 +87,9 @@ export class DraftOrderService {
         totalAmount: totals.totalAmount,
         note: dto.note?.trim() || null,
         tags: dto.tags ?? [],
+        expectedDeliveryAt: dto.expected_delivery_at
+          ? new Date(dto.expected_delivery_at)
+          : null,
         items: {
           create: lines.map((l) => ({
             variantId: l.variantId,
@@ -132,6 +136,7 @@ export class DraftOrderService {
         shipping_fee: Number(draft.shippingFee),
         shipping_method: draft.shippingMethod,
         total_amount: Number(draft.totalAmount),
+        expected_delivery_at: draft.expectedDeliveryAt?.toISOString() ?? null,
         items: draft.items.map((i) => ({
           variant_id: i.variantId.toString(),
           warehouse_id: i.warehouseId.toString(),
@@ -198,6 +203,9 @@ export class DraftOrderService {
           totalAmount: totals.totalAmount,
           note: dto.note?.trim() || null,
           tags: dto.tags ?? [],
+          expectedDeliveryAt: dto.expected_delivery_at
+            ? new Date(dto.expected_delivery_at)
+            : null,
           items: {
             create: lines.map((l) => ({
               variantId: l.variantId,
@@ -261,6 +269,8 @@ export class DraftOrderService {
         shipping_fee: Number(draft.shippingFee),
         shipping_method: draft.shippingMethod ?? undefined,
         note: draft.note ?? undefined,
+        tags: draft.tags,
+        expected_delivery_at: draft.expectedDeliveryAt?.toISOString(),
       },
       user,
     );

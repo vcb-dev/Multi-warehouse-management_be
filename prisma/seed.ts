@@ -9,6 +9,89 @@ import {
 
 const prisma = new PrismaClient();
 
+async function seedShippingProviders() {
+  const carriers: {
+    code: string;
+    name: string;
+    isConnected: boolean;
+    servicesConfig: {
+      code: string;
+      name: string;
+      eta: string;
+      base_fee: number;
+      extra_fee_per_500g: number;
+    }[];
+  }[] = [
+    {
+      code: 'ghn',
+      name: 'GHN Express',
+      isConnected: true,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 44080, extra_fee_per_500g: 5500 },
+        { code: 'fast', name: 'Nhanh', eta: '1-2 ngày', base_fee: 60500, extra_fee_per_500g: 7000 },
+      ],
+    },
+    {
+      code: 'spx',
+      name: 'SPX Express',
+      isConnected: true,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 39000, extra_fee_per_500g: 5000 },
+      ],
+    },
+    {
+      code: 'ghtk',
+      name: 'GHTK',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 38000, extra_fee_per_500g: 4500 },
+      ],
+    },
+    {
+      code: 'viettel_post',
+      name: 'Viettel Post',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 42000, extra_fee_per_500g: 5000 },
+        { code: 'express_48h', name: 'Chuyển phát hỏa tốc (48 giờ)', eta: '48 giờ', base_fee: 180925, extra_fee_per_500g: 12000 },
+      ],
+    },
+    {
+      code: 'jt',
+      name: 'J&T Express',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 58432, extra_fee_per_500g: 6000 },
+      ],
+    },
+  ];
+
+  for (const c of carriers) {
+    await prisma.shippingProvider.upsert({
+      where: { code: c.code },
+      update: { name: c.name, servicesConfig: c.servicesConfig },
+      create: {
+        code: c.code,
+        name: c.name,
+        type: 'tich_hop',
+        isConnected: c.isConnected,
+        servicesConfig: c.servicesConfig,
+      },
+    });
+  }
+
+  await prisma.shippingProvider.upsert({
+    where: { code: 'PARTNER0001' },
+    update: {},
+    create: {
+      code: 'PARTNER0001',
+      name: 'Đối tác giao hàng nội thành',
+      type: 'tu_lien_he',
+      phone: '0901234567',
+    },
+  });
+}
+
 async function seedRbac() {
   for (const p of PERMISSION_CATALOG) {
     await prisma.permission.upsert({
@@ -45,11 +128,20 @@ async function seedRbac() {
 async function main() {
   const passwordHash = await bcrypt.hash('password123', 10);
 
+  const branchAddress = {
+    phone: '0243 123 4567',
+    province: 'Hà Nội',
+    district: 'Quận Cầu Giấy',
+    ward: 'Phường Dịch Vọng',
+    address: 'Số 1 Trần Thái Tông',
+  };
   const branch = await prisma.branch.upsert({
     where: { code: 'CN-HN' },
-    update: {},
-    create: { code: 'CN-HN', name: 'Chi nhánh Hà Nội' },
+    update: branchAddress,
+    create: { code: 'CN-HN', name: 'Chi nhánh Hà Nội', ...branchAddress },
   });
+
+  await seedShippingProviders();
 
   const warehouses = [];
   for (let i = 1; i <= 16; i++) {

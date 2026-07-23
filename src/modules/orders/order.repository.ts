@@ -10,6 +10,14 @@ const orderInclude = {
   branch: { select: { code: true, name: true } },
   assignedTo: { select: { id: true, name: true, email: true } },
   createdBy: { select: { id: true, name: true, email: true } },
+  fulfillments: {
+    orderBy: { id: 'desc' },
+    include: {
+      packer: { select: { id: true, name: true, email: true } },
+      provider: { select: { id: true, code: true, name: true, type: true } },
+      fromBranch: { select: { id: true, code: true, name: true } },
+    },
+  },
 } satisfies Prisma.OrderInclude;
 
 export type OrderWithRelations = Prisma.OrderGetPayload<{

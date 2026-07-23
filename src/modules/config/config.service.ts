@@ -25,6 +25,11 @@ export class ConfigService {
         code: b.code,
         name: b.name,
         is_active: b.isActive,
+        phone: b.phone,
+        province: b.province,
+        district: b.district,
+        ward: b.ward,
+        address: b.address,
       })),
     };
   }

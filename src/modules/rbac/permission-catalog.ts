@@ -18,6 +18,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: 'staff:manage', group: 'Hệ thống', label: 'Quản lý nhân viên', scope: PermissionScope.system },
   { key: 'role:manage', group: 'Hệ thống', label: 'Quản lý vai trò & phân quyền', scope: PermissionScope.system },
   { key: 'report:view', group: 'Hệ thống', label: 'Xem báo cáo', scope: PermissionScope.system },
+  { key: 'shipping:manage', group: 'Hệ thống', label: 'Cấu hình vận chuyển', scope: PermissionScope.system },
 
   // Đơn hàng (theo kho)
   { key: 'order:view', group: 'Đơn hàng', label: 'Xem đơn hàng', scope: PermissionScope.warehouse },
@@ -63,7 +64,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
   store_manager: {
     name: 'Quản lý cửa hàng',
     permissions: [
-      'dashboard:view', 'report:view',
+      'dashboard:view', 'report:view', 'shipping:manage',
       'order:view', 'order:create', 'order:update', 'order:cancel', 'order:pack',
       'draft_order:view', 'draft_order:manage',
       'order_return:view', 'order_return:manage',
