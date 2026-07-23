@@ -1,0 +1,53 @@
+-- CreateEnum
+CREATE TYPE "OrderDeliveryMode" AS ENUM ('giao_hang_sau', 'cong_van_chuyen', 'tu_giao_hang', 'da_giao_hang');
+
+-- AlterTable
+ALTER TABLE "orders" ADD COLUMN     "delivery_cod_amount" DECIMAL(18,2),
+ADD COLUMN     "delivery_height_cm" INTEGER,
+ADD COLUMN     "delivery_length_cm" INTEGER,
+ADD COLUMN     "delivery_mode" "OrderDeliveryMode" NOT NULL DEFAULT 'giao_hang_sau',
+ADD COLUMN     "delivery_note" TEXT,
+ADD COLUMN     "delivery_requirement" TEXT,
+ADD COLUMN     "delivery_to_address" TEXT,
+ADD COLUMN     "delivery_to_district" TEXT,
+ADD COLUMN     "delivery_to_name" TEXT,
+ADD COLUMN     "delivery_to_phone" TEXT,
+ADD COLUMN     "delivery_to_province" TEXT,
+ADD COLUMN     "delivery_to_ward" TEXT,
+ADD COLUMN     "delivery_weight_grams" INTEGER,
+ADD COLUMN     "delivery_width_cm" INTEGER,
+ADD COLUMN     "invoice_address" TEXT,
+ADD COLUMN     "invoice_budget_code" TEXT,
+ADD COLUMN     "invoice_buyer_name" TEXT,
+ADD COLUMN     "invoice_company_name" TEXT,
+ADD COLUMN     "invoice_email" TEXT,
+ADD COLUMN     "invoice_id_card" TEXT,
+ADD COLUMN     "invoice_phone" TEXT,
+ADD COLUMN     "invoice_sell_to_consumer" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "invoice_tax_code" TEXT;
+
+-- AlterTable
+ALTER TABLE "draft_orders" ADD COLUMN     "delivery_cod_amount" DECIMAL(18,2),
+ADD COLUMN     "delivery_height_cm" INTEGER,
+ADD COLUMN     "delivery_length_cm" INTEGER,
+ADD COLUMN     "delivery_mode" "OrderDeliveryMode" NOT NULL DEFAULT 'giao_hang_sau',
+ADD COLUMN     "delivery_note" TEXT,
+ADD COLUMN     "delivery_requirement" TEXT,
+ADD COLUMN     "delivery_to_address" TEXT,
+ADD COLUMN     "delivery_to_district" TEXT,
+ADD COLUMN     "delivery_to_name" TEXT,
+ADD COLUMN     "delivery_to_phone" TEXT,
+ADD COLUMN     "delivery_to_province" TEXT,
+ADD COLUMN     "delivery_to_ward" TEXT,
+ADD COLUMN     "delivery_weight_grams" INTEGER,
+ADD COLUMN     "delivery_width_cm" INTEGER,
+ADD COLUMN     "invoice_address" TEXT,
+ADD COLUMN     "invoice_budget_code" TEXT,
+ADD COLUMN     "invoice_buyer_name" TEXT,
+ADD COLUMN     "invoice_company_name" TEXT,
+ADD COLUMN     "invoice_email" TEXT,
+ADD COLUMN     "invoice_id_card" TEXT,
+ADD COLUMN     "invoice_phone" TEXT,
+ADD COLUMN     "invoice_sell_to_consumer" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "invoice_tax_code" TEXT;
+

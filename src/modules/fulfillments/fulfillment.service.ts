@@ -74,6 +74,51 @@ export class FulfillmentService {
     return f;
   }
 
+  /**
+   * Đơn hàng được phép "bán âm" (giữ chỗ vượt tồn) khi tạo/đóng gói — điểm
+   * chặn thiếu hàng thật chuyển hẳn về đây: ngay khi bấm "Đẩy vận chuyển".
+   * Kiểm tra tồn vật lý (on_hand), không dùng available (available đã trừ
+   * phần giữ chỗ có thể âm nên không phản ánh đúng "còn bao nhiêu ngoài kho").
+   */
+  private async assertSufficientPhysicalStock(
+    items: { variantId: bigint; warehouseId: bigint; sku: string; quantity: number }[],
+  ) {
+    const required = new Map<string, { variantId: bigint; warehouseId: bigint; sku: string; quantity: number }>();
+    for (const item of items) {
+      const key = `${item.variantId}:${item.warehouseId}`;
+      const existing = required.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        required.set(key, { ...item });
+      }
+    }
+
+    const shortages: string[] = [];
+    for (const item of required.values()) {
+      const level = await this.prisma.inventoryLevel.findUnique({
+        where: {
+          variantId_warehouseId: {
+            variantId: item.variantId,
+            warehouseId: item.warehouseId,
+          },
+        },
+      });
+      const onHand = level?.onHand ?? 0;
+      if (onHand < item.quantity) {
+        shortages.push(`${item.sku} (cần ${item.quantity}, còn ${onHand})`);
+      }
+    }
+
+    if (shortages.length) {
+      throw new BusinessException(
+        'INSUFFICIENT_STOCK',
+        `Không đủ tồn kho thực tế để đẩy vận chuyển: ${shortages.join(', ')}`,
+        409,
+      );
+    }
+  }
+
   private async findOpen(orderId: bigint, tx?: Prisma.TransactionClient) {
     const client = tx ?? this.prisma;
     return client.fulfillment.findFirst({
@@ -103,6 +148,7 @@ export class FulfillmentService {
         409,
       );
     }
+    await this.assertSufficientPhysicalStock(order.items);
     const created = await this.prisma.$transaction(async (tx) => {
       const open = await this.findOpen(order.id, tx);
       if (open) {
@@ -254,6 +300,7 @@ export class FulfillmentService {
         409,
       );
     }
+    await this.assertSufficientPhysicalStock(order.items);
 
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { id: BigInt(dto.provider_id) },

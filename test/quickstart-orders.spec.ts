@@ -5,8 +5,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { InventoryBucket, OrderStatus } from '@prisma/client';
 import { BusinessException } from '../src/common/exceptions/business.exception';
-import { DraftOrdersModule } from '../src/modules/draft-orders/draft-orders.module';
-import { DraftOrderService } from '../src/modules/draft-orders/draft-order.service';
 import { OrderReturnsModule } from '../src/modules/order-returns/order-returns.module';
 import { OrderReturnService } from '../src/modules/order-returns/order-return.service';
 import { ChannelsModule } from '../src/modules/channels/channels.module';
@@ -24,7 +22,6 @@ const describeIfDb =
 
 describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   let orders: OrderService;
-  let drafts: DraftOrderService;
   let returns: OrderReturnService;
   let channels: ChannelSyncService;
   let prisma: PrismaService;
@@ -47,14 +44,12 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
         PrismaModule,
         VouchersModule,
         OrdersModule,
-        DraftOrdersModule,
         OrderReturnsModule,
         ChannelsModule,
       ],
     }).compile();
 
     orders = module.get(OrderService);
-    drafts = module.get(DraftOrderService);
     returns = module.get(OrderReturnService);
     channels = module.get(ChannelSyncService);
     prisma = module.get(PrismaService);
@@ -138,25 +133,6 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
         auth(),
       ),
     ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });
-  });
-
-  it('KC3 — nháp → convert giữ tồn', async () => {
-    const draft = await drafts.create(
-      {
-        branch_id: branchId.toString(),
-        items: [
-          {
-            variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
-            quantity: 1,
-            price: 50000,
-          },
-        ],
-      },
-      auth(),
-    );
-    const converted = await drafts.convert(BigInt(draft.id), auth());
-    expect(converted.status).toBe('ordered');
   });
 
   it('KC5 — webhook shopee', async () => {

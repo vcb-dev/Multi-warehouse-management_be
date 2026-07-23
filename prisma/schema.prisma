@@ -153,6 +153,13 @@ enum ShippingFeePayer {
   khach_tra
 }
 
+enum OrderDeliveryMode {
+  giao_hang_sau
+  cong_van_chuyen
+  tu_giao_hang
+  da_giao_hang
+}
+
 // --- Auth & config ---
 
 // --- CQA multi-tenant ---
@@ -957,6 +964,34 @@ model Order {
   orderedAt          DateTime      @default(now()) @map("ordered_at")
   expectedDeliveryAt DateTime?     @map("expected_delivery_at")
   shippedAt          DateTime?     @map("shipped_at")
+
+  // Giao hàng (nhập lúc tạo đơn — chỉ lưu thông tin, không tự tạo vận đơn)
+  deliveryMode        OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
+  deliveryToName       String?  @map("delivery_to_name")
+  deliveryToPhone      String?  @map("delivery_to_phone")
+  deliveryToAddress    String?  @map("delivery_to_address")
+  deliveryToWard       String?  @map("delivery_to_ward")
+  deliveryToDistrict   String?  @map("delivery_to_district")
+  deliveryToProvince   String?  @map("delivery_to_province")
+  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
+  deliveryLengthCm     Int?     @map("delivery_length_cm")
+  deliveryWidthCm      Int?     @map("delivery_width_cm")
+  deliveryHeightCm     Int?     @map("delivery_height_cm")
+  deliveryRequirement  String?  @map("delivery_requirement")
+  deliveryNote         String?  @map("delivery_note") @db.Text
+
+  // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
+  invoiceTaxCode         String?  @map("invoice_tax_code")
+  invoiceCompanyName     String?  @map("invoice_company_name")
+  invoiceAddress         String?  @map("invoice_address")
+  invoiceBuyerName       String?  @map("invoice_buyer_name")
+  invoiceIdCard          String?  @map("invoice_id_card")
+  invoiceBudgetCode      String?  @map("invoice_budget_code")
+  invoicePhone           String?  @map("invoice_phone")
+  invoiceEmail           String?  @map("invoice_email")
+  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
@@ -1097,6 +1132,34 @@ model DraftOrder {
   tags             String[]         @default([])
   expectedDeliveryAt DateTime?      @map("expected_delivery_at")
   convertedOrderId BigInt?          @unique @map("converted_order_id")
+
+  // Giao hàng (nhập lúc tạo đơn — chỉ lưu thông tin, không tự tạo vận đơn)
+  deliveryMode        OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
+  deliveryToName       String?  @map("delivery_to_name")
+  deliveryToPhone      String?  @map("delivery_to_phone")
+  deliveryToAddress    String?  @map("delivery_to_address")
+  deliveryToWard       String?  @map("delivery_to_ward")
+  deliveryToDistrict   String?  @map("delivery_to_district")
+  deliveryToProvince   String?  @map("delivery_to_province")
+  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
+  deliveryLengthCm     Int?     @map("delivery_length_cm")
+  deliveryWidthCm      Int?     @map("delivery_width_cm")
+  deliveryHeightCm     Int?     @map("delivery_height_cm")
+  deliveryRequirement  String?  @map("delivery_requirement")
+  deliveryNote         String?  @map("delivery_note") @db.Text
+
+  // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
+  invoiceTaxCode         String?  @map("invoice_tax_code")
+  invoiceCompanyName     String?  @map("invoice_company_name")
+  invoiceAddress         String?  @map("invoice_address")
+  invoiceBuyerName       String?  @map("invoice_buyer_name")
+  invoiceIdCard          String?  @map("invoice_id_card")
+  invoiceBudgetCode      String?  @map("invoice_budget_code")
+  invoicePhone           String?  @map("invoice_phone")
+  invoiceEmail           String?  @map("invoice_email")
+  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 

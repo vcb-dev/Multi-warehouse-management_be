@@ -27,10 +27,6 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: 'order:cancel', group: 'Đơn hàng', label: 'Hủy đơn hàng', scope: PermissionScope.warehouse },
   { key: 'order:pack', group: 'Đơn hàng', label: 'Đóng gói & giao hàng', scope: PermissionScope.warehouse },
 
-  // Đơn nháp (theo kho)
-  { key: 'draft_order:view', group: 'Đơn hàng nháp', label: 'Xem đơn nháp', scope: PermissionScope.warehouse },
-  { key: 'draft_order:manage', group: 'Đơn hàng nháp', label: 'Tạo & cập nhật đơn nháp', scope: PermissionScope.warehouse },
-
   // Trả hàng (theo kho)
   { key: 'order_return:view', group: 'Trả hàng', label: 'Xem trả hàng', scope: PermissionScope.warehouse },
   { key: 'order_return:manage', group: 'Trả hàng', label: 'Tạo & xử lý trả hàng', scope: PermissionScope.warehouse },
@@ -66,7 +62,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     permissions: [
       'dashboard:view', 'report:view', 'shipping:manage',
       'order:view', 'order:create', 'order:update', 'order:cancel', 'order:pack',
-      'draft_order:view', 'draft_order:manage',
       'order_return:view', 'order_return:manage',
       'product:view', 'product:manage',
       'inventory:view', 'inventory:transfer', 'inventory:receive',
@@ -78,7 +73,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     permissions: [
       'dashboard:view',
       'order:view', 'order:create', 'order:update',
-      'draft_order:view', 'draft_order:manage',
       'order_return:view',
       'product:view',
       'inventory:view',

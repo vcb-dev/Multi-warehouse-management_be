@@ -8,7 +8,7 @@ import {
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
-import { assertAnyWarehouseAccess } from '../../common/auth/access';
+import { assertAnyWarehouseAccess, assertWarehouseAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
 import {
@@ -63,9 +63,26 @@ export class OrderService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderWhereInput = {};
 
-    where.items = { some: { warehouseId: { in: user.warehouseIds } } };
+    if (query.warehouse_id) {
+      const warehouseId = BigInt(query.warehouse_id);
+      assertWarehouseAccess(user, warehouseId);
+      where.items = { some: { warehouseId } };
+    } else {
+      where.items = { some: { warehouseId: { in: user.warehouseIds } } };
+    }
 
-    if (query.status) where.status = query.status as OrderStatus;
+    const stockFilter =
+      query.stock_status === 'thieu_hang' || query.stock_status === 'du_hang'
+        ? query.stock_status
+        : undefined;
+
+    if (stockFilter) {
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn còn chờ xử lý — đơn đã giao/hủy
+      // thì tồn tại thời điểm đó không còn phản ánh gì cho hành động sắp tới.
+      where.status = { in: [OrderStatus.ordered, OrderStatus.processing] };
+    } else if (query.status) {
+      where.status = query.status as OrderStatus;
+    }
     if (query.branch_id) where.branchId = BigInt(query.branch_id);
     if (query.sources) {
       const list = query.sources
@@ -96,33 +113,98 @@ export class OrderService {
       where.id = { in: ids };
     }
 
+    const listInclude = {
+      customer: true,
+      branch: true,
+      createdBy: true,
+      items: {
+        select: { sku: true, variantId: true, warehouseId: true, quantity: true },
+      },
+      fulfillments: {
+        where: { closedAt: null },
+        take: 1,
+        select: {
+          packingStatus: true,
+          shipmentStatus: true,
+          provider: { select: { name: true } },
+        },
+      },
+    } as const;
+
+    async function computeStockReady(
+      repo: OrderRepository,
+      orders: { id: bigint; items: { variantId: bigint; warehouseId: bigint; quantity: number }[] }[],
+    ) {
+      const pairs = new Map<string, { variantId: bigint; warehouseId: bigint }>();
+      for (const row of orders) {
+        for (const item of row.items) {
+          pairs.set(`${item.variantId}:${item.warehouseId}`, {
+            variantId: item.variantId,
+            warehouseId: item.warehouseId,
+          });
+        }
+      }
+      const levels = pairs.size
+        ? await repo.client.inventoryLevel.findMany({
+            where: { OR: Array.from(pairs.values()) },
+            select: { variantId: true, warehouseId: true, onHand: true },
+          })
+        : [];
+      const onHandMap = new Map(
+        levels.map((l) => [`${l.variantId}:${l.warehouseId}`, l.onHand]),
+      );
+      return new Map<bigint, boolean>(
+        orders.map((row) => [
+          row.id,
+          row.items.every(
+            (i) => (onHandMap.get(`${i.variantId}:${i.warehouseId}`) ?? 0) >= i.quantity,
+          ),
+        ]),
+      );
+    }
+
+    if (stockFilter) {
+      // Không có cột lưu sẵn "đủ/thiếu hàng" nên phải lấy hết đơn đang chờ
+      // xử lý khớp các bộ lọc khác, tính stock_ready từng đơn rồi mới lọc +
+      // phân trang bằng JS — chấp nhận được vì tập đơn ordered/processing
+      // luôn nhỏ (đơn đã giao/hủy không nằm trong tập này).
+      const all = await this.repo.client.order.findMany({
+        where,
+        orderBy: { orderedAt: 'desc' },
+        include: listInclude,
+      });
+      const stockReadyMap = await computeStockReady(this.repo, all);
+      const wantReady = stockFilter === 'du_hang';
+      const filtered = all.filter((row) => (stockReadyMap.get(row.id) ?? true) === wantReady);
+      const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+      return {
+        data: pageRows.map((row) =>
+          serializeOrderListItem(row, stockReadyMap.get(row.id) ?? true),
+        ),
+        total: filtered.length,
+        page,
+        page_size: pageSize,
+      };
+    }
+
     const [rows, total] = await Promise.all([
       this.repo.client.order.findMany({
         where,
         orderBy: { orderedAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          customer: true,
-          branch: true,
-          createdBy: true,
-          items: { select: { sku: true }, take: 8 },
-          fulfillments: {
-            where: { closedAt: null },
-            take: 1,
-            select: {
-              packingStatus: true,
-              shipmentStatus: true,
-              provider: { select: { name: true } },
-            },
-          },
-        },
+        include: listInclude,
       }),
       this.repo.count(where),
     ]);
 
+    const stockReadyMap = await computeStockReady(this.repo, rows);
+
     return {
-      data: rows.map(serializeOrderListItem),
+      data: rows.map((row) =>
+        serializeOrderListItem(row, stockReadyMap.get(row.id) ?? true),
+      ),
       total,
       page,
       page_size: pageSize,
@@ -175,10 +257,22 @@ export class OrderService {
         l.available,
       ]),
     );
+    const onHandMap = new Map(
+      levels.map((l) => [`${l.variantId}:${l.warehouseId}`, l.onHand]),
+    );
+    const stockShortageItems = detail.items
+      .map((i) => ({
+        sku: i.sku,
+        required: i.quantity,
+        on_hand: onHandMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
+      }))
+      .filter((i) => i.on_hand < i.required);
 
     return {
       data: {
         ...detail,
+        stock_ready: stockShortageItems.length === 0,
+        stock_shortage_items: stockShortageItems,
         items: detail.items.map((i) => ({
           ...i,
           available: availMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
@@ -508,6 +602,29 @@ export class OrderService {
             expectedDeliveryAt: dto.expected_delivery_at
               ? new Date(dto.expected_delivery_at)
               : null,
+            deliveryMode: dto.delivery_mode ?? undefined,
+            deliveryToName: dto.delivery_to_name?.trim() || null,
+            deliveryToPhone: dto.delivery_to_phone?.trim() || null,
+            deliveryToAddress: dto.delivery_to_address?.trim() || null,
+            deliveryToWard: dto.delivery_to_ward?.trim() || null,
+            deliveryToDistrict: dto.delivery_to_district?.trim() || null,
+            deliveryToProvince: dto.delivery_to_province?.trim() || null,
+            deliveryCodAmount: dto.delivery_cod_amount ?? null,
+            deliveryWeightGrams: dto.delivery_weight_grams ?? null,
+            deliveryLengthCm: dto.delivery_length_cm ?? null,
+            deliveryWidthCm: dto.delivery_width_cm ?? null,
+            deliveryHeightCm: dto.delivery_height_cm ?? null,
+            deliveryRequirement: dto.delivery_requirement?.trim() || null,
+            deliveryNote: dto.delivery_note?.trim() || null,
+            invoiceTaxCode: dto.invoice_tax_code?.trim() || null,
+            invoiceCompanyName: dto.invoice_company_name?.trim() || null,
+            invoiceAddress: dto.invoice_address?.trim() || null,
+            invoiceBuyerName: dto.invoice_buyer_name?.trim() || null,
+            invoiceIdCard: dto.invoice_id_card?.trim() || null,
+            invoiceBudgetCode: dto.invoice_budget_code?.trim() || null,
+            invoicePhone: dto.invoice_phone?.trim() || null,
+            invoiceEmail: dto.invoice_email?.trim() || null,
+            invoiceSellToConsumer: dto.invoice_sell_to_consumer ?? false,
             items: {
               create: resolvedItems.map((i) => ({
                 variantId: i.variantId,

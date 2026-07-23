@@ -20,6 +20,23 @@ import {
  */
 const MOVEMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
+/**
+ * Các bước trong vòng đời đơn hàng được phép giữ chỗ/di chuyển vượt tồn thực
+ * tế (bán âm/backorder giống Sapo) — cảnh báo "Hết hàng" ở giao diện thay vì
+ * chặn cứng lúc đặt/đóng gói/xuất đơn. Tồn vật lý (on_hand) tự nó không bao
+ * giờ được âm (vẫn chặn ở nhánh riêng bên dưới); việc kiểm tra đủ hàng thật
+ * trước khi bàn giao cho ĐTVC chuyển sang FulfillmentService.pushShipment().
+ * Các module khác (nhập/chuyển/trả hàng...) không nằm trong danh sách này
+ * nên vẫn bị chặn âm tồn như cũ.
+ */
+const ORDER_LIFECYCLE_TYPES: ReadonlySet<MovementType> = new Set([
+  MovementType.order_reserve,
+  MovementType.order_release,
+  MovementType.packing_start,
+  MovementType.packing_cancel,
+  MovementType.order_ship,
+]);
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -141,7 +158,17 @@ export class InventoryService {
 
       const available = computeAvailable(level);
 
-      if (available < 0 && input.bucket !== InventoryBucket.unavailable) {
+      // Bucket on_hand kéo available lên khi tăng; các bucket còn lại (giữ
+      // chỗ) kéo available xuống khi tăng — dùng để biết đúng chiều tác động.
+      const worsensAvailable =
+        input.bucket === InventoryBucket.on_hand ? input.change < 0 : input.change > 0;
+
+      if (
+        available < 0 &&
+        worsensAvailable &&
+        input.bucket !== InventoryBucket.unavailable &&
+        !ORDER_LIFECYCLE_TYPES.has(input.type)
+      ) {
         throw new InsufficientStockException();
       }
 

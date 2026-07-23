@@ -20,7 +20,6 @@ import { TransfersModule } from './modules/transfers/transfers.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { PricingModule } from './modules/pricing/pricing.module';
-import { DraftOrdersModule } from './modules/draft-orders/draft-orders.module';
 import { OrderReturnsModule } from './modules/order-returns/order-returns.module';
 import { ChannelsModule } from './modules/channels/channels.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
@@ -49,7 +48,6 @@ import { StorageModule } from './common/storage/storage.module';
     PricingModule,
     OrdersModule,
     FulfillmentsModule,
-    DraftOrdersModule,
     OrderReturnsModule,
     ChannelsModule,
     ConversationModule,

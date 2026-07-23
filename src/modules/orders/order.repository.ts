@@ -7,7 +7,17 @@ const orderInclude = {
     include: { variant: { select: { productId: true, imageUrl: true, unit: true } } },
   },
   customer: true,
-  branch: { select: { code: true, name: true } },
+  branch: {
+    select: {
+      code: true,
+      name: true,
+      phone: true,
+      address: true,
+      ward: true,
+      district: true,
+      province: true,
+    },
+  },
   assignedTo: { select: { id: true, name: true, email: true } },
   createdBy: { select: { id: true, name: true, email: true } },
   fulfillments: {
