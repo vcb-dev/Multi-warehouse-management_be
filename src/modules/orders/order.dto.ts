@@ -18,7 +18,7 @@ export class OrderItemDto {
   variant_id!: string;
 
   @IsString()
-  warehouse_id!: string;
+  location_id!: string;
 
   @IsInt()
   @Min(1)
@@ -37,11 +37,12 @@ export class OrderItemDto {
 
 export class CreateOrderDto {
   @IsString()
-  branch_id!: string;
+  location_id!: string;
 
+  /** Kênh bán (facebook/tiktokshop/shopee/web/pos/zalo/...) — chuỗi tự do theo Sapo */
   @IsOptional()
-  @IsEnum(OrderSource)
-  source?: OrderSource;
+  @IsString()
+  source_name?: string;
 
   @IsOptional()
   @IsString()
@@ -223,11 +224,7 @@ export class ListOrdersQueryDto {
 
   @IsOptional()
   @IsString()
-  branch_id?: string;
-
-  @IsOptional()
-  @IsString()
-  warehouse_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsString()
@@ -313,6 +310,11 @@ export class OrderTransitionDto {
   @IsString()
   @MinLength(1)
   action!: 'cancel' | 'complete' | 'processing' | 'ship';
+
+  /** Lý do hủy — chỉ dùng khi action = 'cancel' */
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
 
 export class ListOrderReturnsQueryDto {
@@ -395,7 +397,7 @@ export class OrderReturnItemDto {
   variant_id!: string;
 
   @IsString()
-  warehouse_id!: string;
+  location_id!: string;
 
   @IsInt()
   @Min(1)
@@ -423,7 +425,7 @@ export class ChannelWebhookDto {
   customer_name?: string;
 
   @IsString()
-  branch_id!: string;
+  location_id!: string;
 
   @IsArray()
   @ValidateNested({ each: true })

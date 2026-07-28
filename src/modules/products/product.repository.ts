@@ -38,8 +38,8 @@ export class ProductRepository {
     });
   }
 
-  findBySlug(slug: string) {
-    return this.prisma.product.findUnique({ where: { slug } });
+  findByAlias(alias: string) {
+    return this.prisma.product.findUnique({ where: { alias } });
   }
 
   findVariantBySku(sku: string) {

@@ -7,14 +7,14 @@ import {
   PurchaseReturn,
   PurchaseReturnItem,
 } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 type PoWithItems = PurchaseOrder & {
   items: (PurchaseOrderItem & {
     variant?: { sku: string; product?: { name: string } };
   })[];
   supplier?: { code: string; name: string };
-  warehouse?: { code: string; name: string };
-  branch?: { code: string; name: string };
+  location?: { code: string | null; name: string };
 };
 
 type ReiWithItems = GoodsReceipt & {
@@ -23,9 +23,9 @@ type ReiWithItems = GoodsReceipt & {
     purchaseOrder?: { code: string } | null;
   })[];
   supplier?: { code: string; name: string };
-  warehouse?: { code: string; name: string };
+  location?: { code: string | null; name: string };
   purchaseOrder?: { code: string } | null;
-  assignedTo?: { name: string | null; email: string } | null;
+  assignedTo?: { firstName: string | null; lastName: string | null; email: string } | null;
 };
 
 export function serializePurchaseOrder(po: PoWithItems) {
@@ -35,11 +35,9 @@ export function serializePurchaseOrder(po: PoWithItems) {
     supplier_id: po.supplierId.toString(),
     supplier_code: po.supplier?.code,
     supplier_name: po.supplier?.name,
-    branch_id: po.branchId.toString(),
-    branch_code: po.branch?.code,
-    warehouse_id: po.warehouseId.toString(),
-    warehouse_code: po.warehouse?.code,
-    warehouse_name: po.warehouse?.name,
+    location_id: po.locationId.toString(),
+    location_code: po.location?.code,
+    location_name: po.location?.name,
     status: po.status,
     total_quantity: po.totalQuantity,
     total_amount: po.totalAmount.toString(),
@@ -67,8 +65,8 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     supplier_id: rei.supplierId.toString(),
     supplier_code: rei.supplier?.code,
     supplier_name: rei.supplier?.name,
-    warehouse_id: rei.warehouseId.toString(),
-    warehouse_code: rei.warehouse?.code,
+    location_id: rei.locationId.toString(),
+    location_code: rei.location?.code,
     purchase_order_id: rei.purchaseOrderId?.toString() ?? null,
     purchase_order_code: rei.purchaseOrder?.code ?? null,
     status: rei.status,
@@ -82,7 +80,7 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     extra_cost: rei.extraCost.toString(),
     deposit_applied: rei.depositApplied.toString(),
     assigned_to_id: rei.assignedToId?.toString() ?? null,
-    assigned_to_name: rei.assignedTo?.name ?? rei.assignedTo?.email ?? null,
+    assigned_to_name: userDisplayName(rei.assignedTo) ?? rei.assignedTo?.email ?? null,
     expected_receipt_at: rei.expectedReceiptAt?.toISOString() ?? null,
     invoice_at: rei.invoiceAt?.toISOString() ?? null,
     invoice_symbol: rei.invoiceSymbol ?? null,
@@ -126,9 +124,9 @@ type PvnWithRelations = PurchaseReturn & {
     variant?: { sku: string };
   })[];
   supplier?: { code: string; name: string };
-  warehouse?: { code: string; name: string };
+  location?: { code: string | null; name: string };
   goodsReceipt?: { code: string } | null;
-  createdBy?: { name: string | null; email: string } | null;
+  createdBy?: { firstName: string | null; lastName: string | null; email: string } | null;
 };
 
 export function serializePurchaseReturn(pvn: PvnWithRelations) {
@@ -138,11 +136,11 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
     supplier_id: pvn.supplierId.toString(),
     supplier_code: pvn.supplier?.code,
     supplier_name: pvn.supplier?.name,
-    warehouse_id: pvn.warehouseId.toString(),
-    warehouse_code: pvn.warehouse?.code,
+    location_id: pvn.locationId.toString(),
+    location_code: pvn.location?.code,
     goods_receipt_id: pvn.goodsReceiptId?.toString() ?? null,
     goods_receipt_code: pvn.goodsReceipt?.code ?? null,
-    created_by_name: pvn.createdBy?.name ?? pvn.createdBy?.email ?? null,
+    created_by_name: userDisplayName(pvn.createdBy) ?? pvn.createdBy?.email ?? null,
     total_quantity: pvn.totalQuantity,
     total_amount: pvn.totalAmount.toString(),
     refund_status: pvn.refundStatus,
@@ -172,7 +170,7 @@ type LedgerEntryWithRelations = {
   reason: string | null;
   amount: Prisma.Decimal;
   createdAt: Date;
-  createdBy?: { name: string | null; email: string } | null;
+  createdBy?: { firstName: string | null; lastName: string | null; email: string } | null;
 };
 
 export function serializeLedgerEntry(entry: LedgerEntryWithRelations) {
@@ -184,7 +182,7 @@ export function serializeLedgerEntry(entry: LedgerEntryWithRelations) {
     transaction_label: entry.transactionLabel,
     reason: entry.reason,
     amount: entry.amount.toString(),
-    created_by_name: entry.createdBy?.name ?? entry.createdBy?.email ?? null,
+    created_by_name: userDisplayName(entry.createdBy) ?? entry.createdBy?.email ?? null,
     created_at: entry.createdAt.toISOString(),
   };
 }

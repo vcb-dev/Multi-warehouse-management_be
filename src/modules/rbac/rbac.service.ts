@@ -5,7 +5,7 @@ export type ResolvedPermissions = {
   /** Kho mà user được gán role admin — quyền admin chỉ hiệu lực tại từng kho này. */
   adminWarehouseIds: bigint[];
   warehousePermissions: Record<string, string[]>;
-  warehouseIds: bigint[];
+  locationIds: bigint[];
   /** @deprecated Quyền gom theo kho; field giữ cho tương thích login cũ. */
   systemPermissions: string[];
   /** @deprecated Dùng adminWarehouseIds + warehousePermissions. */
@@ -23,7 +23,7 @@ export class RbacService {
    */
   async resolvePermissions(userId: bigint): Promise<ResolvedPermissions> {
     const [assignments, overrides] = await Promise.all([
-      this.prisma.userWarehouseRole.findMany({
+      this.prisma.userLocationRole.findMany({
         where: { userId, role: { isActive: true } },
         include: {
           role: {
@@ -40,16 +40,16 @@ export class RbacService {
     ]);
 
     const byWarehouse: Record<string, Set<string>> = {};
-    const warehouseIds: bigint[] = [];
+    const locationIds: bigint[] = [];
     const adminWarehouseIds: bigint[] = [];
 
     for (const a of assignments) {
-      warehouseIds.push(a.warehouseId);
-      const whKey = a.warehouseId.toString();
+      locationIds.push(a.locationId);
+      const whKey = a.locationId.toString();
       byWarehouse[whKey] ??= new Set<string>();
 
       if (a.role.isSystem && a.role.code === 'admin') {
-        adminWarehouseIds.push(a.warehouseId);
+        adminWarehouseIds.push(a.locationId);
       }
 
       for (const rp of a.role.permissions) {
@@ -60,8 +60,8 @@ export class RbacService {
     // Lệch quyền riêng (nhân viên) chồng lên quyền mặc định của role tại kho —
     // bỏ qua với kho user đang là admin (admin luôn full quyền, không override).
     for (const o of overrides) {
-      const whKey = o.warehouseId.toString();
-      if (adminWarehouseIds.some((id) => id === o.warehouseId)) continue;
+      const whKey = o.locationId.toString();
+      if (adminWarehouseIds.some((id) => id === o.locationId)) continue;
       const set = (byWarehouse[whKey] ??= new Set<string>());
       if (o.granted) set.add(o.permission.key);
       else set.delete(o.permission.key);
@@ -74,7 +74,7 @@ export class RbacService {
     return {
       adminWarehouseIds,
       warehousePermissions,
-      warehouseIds,
+      locationIds,
       systemPermissions: [],
       permissions: [],
       isAdmin: adminWarehouseIds.length > 0,

@@ -3,13 +3,16 @@ import {
   CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
+  OrderFulfillmentStatus,
+  OrderRefundStatus,
+  OrderReturnStatus,
   OrderStatus,
   Prisma,
 } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
-  assertAnyWarehouseAccess,
-  assertWarehouseAccess,
+  assertAnyLocationAccess,
+  assertLocationAccess,
 } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
@@ -35,7 +38,7 @@ export class OrderReturnService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderReturnItemWhereInput = {};
 
-    where.warehouseId = { in: user.warehouseIds };
+    where.locationId = { in: user.locationIds };
 
     if (query.q?.trim()) {
       const q = query.q.trim();
@@ -60,7 +63,7 @@ export class OrderReturnService {
         include: {
           orderReturn: {
             include: {
-              order: { include: { branch: true } },
+              order: { include: { location: true } },
               createdBy: true,
             },
           },
@@ -84,11 +87,14 @@ export class OrderReturnService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
-    if (order.status !== OrderStatus.completed) {
+    assertAnyLocationAccess(user, [order.locationId]);
+    // "Đã hoàn thành" thực tế = đã giao hàng (fulfillment_status='fulfilled'),
+    // KHÔNG phải status='closed' — dữ liệu Sapo thật cho thấy phần lớn đơn đã
+    // giao vẫn ở status='open' (Sapo hiếm khi đóng đơn về mặt hành chính).
+    const isFulfilled =
+      order.fulfillmentStatus === OrderFulfillmentStatus.fulfilled ||
+      order.status === OrderStatus.closed;
+    if (!isFulfilled) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ trả hàng trên đơn đã hoàn thành',
@@ -99,11 +105,11 @@ export class OrderReturnService {
     await this.validateReturnQty(orderId, dto);
 
     for (const item of dto.items) {
-      assertWarehouseAccess(user, BigInt(item.warehouse_id));
+      assertLocationAccess(user, BigInt(item.location_id));
     }
 
     const orderItemMap = new Map(
-      order.items.map((i) => [`${i.variantId}:${i.warehouseId}`, i]),
+      order.items.map((i) => [`${i.variantId}:${order.locationId}`, i]),
     );
 
     const variantIds = [...new Set(dto.items.map((i) => BigInt(i.variant_id)))];
@@ -139,7 +145,7 @@ export class OrderReturnService {
           createdById: user.userId,
           items: {
             create: dto.items.map((i) => {
-              const key = `${i.variant_id}:${i.warehouse_id}`;
+              const key = `${i.variant_id}:${i.location_id}`;
               const oi = orderItemMap.get(key);
               const variant = variantMap.get(i.variant_id);
               const variantTitle = variant
@@ -150,7 +156,7 @@ export class OrderReturnService {
                 : null;
               return {
                 variantId: BigInt(i.variant_id),
-                warehouseId: BigInt(i.warehouse_id),
+                locationId: BigInt(i.location_id),
                 productName: oi?.productName ?? variant?.product.name ?? '',
                 sku: oi?.sku ?? variant?.sku ?? '',
                 variantTitle,
@@ -168,7 +174,7 @@ export class OrderReturnService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: item.locationId,
               bucket: InventoryBucket.on_hand,
               change: item.quantity,
               type: MovementType.return_in,
@@ -203,7 +209,7 @@ export class OrderReturnService {
       } else {
         voucher = await this.vouchers.createPayment(
           {
-            branchId: order.branchId,
+            locationId: order.locationId,
             amount: dto.refund_amount,
             createdById: user.userId,
             sourceDocument: order.code,
@@ -232,9 +238,34 @@ export class OrderReturnService {
         },
       });
 
+      // return_status/refund_status độc lập với status (theo Sapo) — không còn
+      // ghi đè status='returned' như trước (điều đó xóa mất việc đơn đã 'closed').
+      const totalOrderedQty = order.items.reduce((s, i) => s + i.quantity, 0);
+      const returnedAgg = await tx.orderReturnItem.aggregate({
+        where: { orderReturn: { orderId } },
+        _sum: { quantity: true },
+      });
+      const totalReturnedQty = returnedAgg._sum.quantity ?? 0;
+      const returnStatus =
+        totalReturnedQty >= totalOrderedQty
+          ? OrderReturnStatus.returned
+          : OrderReturnStatus.in_progress;
+
+      const refundAgg = await tx.orderReturn.aggregate({
+        where: { orderId },
+        _sum: { refundAmount: true },
+      });
+      const totalRefunded = Number(refundAgg._sum.refundAmount ?? 0);
+      const refundStatus =
+        totalRefunded >= Number(order.totalAmount)
+          ? OrderRefundStatus.refunded
+          : totalRefunded > 0
+            ? OrderRefundStatus.partial
+            : OrderRefundStatus.no_refund;
+
       await tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.returned },
+        data: { returnStatus, refundStatus },
       });
 
       return { ret, voucher };
@@ -249,31 +280,36 @@ export class OrderReturnService {
   }
 
   private async validateReturnQty(orderId: bigint, dto: CreateOrderReturnDto) {
+    // Location ở cấp đơn (theo Sapo) nên mọi dòng hàng đều thuộc cùng một kho.
+    const { locationId } = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { locationId: true },
+    });
     const orderItems = await this.prisma.orderItem.findMany({
       where: { orderId },
     });
     const purchased = new Map<string, number>();
     for (const i of orderItems) {
-      const key = `${i.variantId}:${i.warehouseId}`;
+      const key = `${i.variantId}:${locationId}`;
       purchased.set(key, (purchased.get(key) ?? 0) + i.quantity);
     }
 
     const returned = await this.prisma.orderReturnItem.groupBy({
-      by: ['variantId', 'warehouseId'],
+      by: ['variantId', 'locationId'],
       where: { orderReturn: { orderId } },
       _sum: { quantity: true },
     });
     const already = new Map<string, number>();
     for (const r of returned) {
       already.set(
-        `${r.variantId}:${r.warehouseId}`,
+        `${r.variantId}:${r.locationId}`,
         r._sum.quantity ?? 0,
       );
     }
 
     const req = new Map<string, number>();
     for (const item of dto.items) {
-      const key = `${item.variant_id}:${item.warehouse_id}`;
+      const key = `${item.variant_id}:${item.location_id}`;
       req.set(key, (req.get(key) ?? 0) + item.quantity);
     }
 

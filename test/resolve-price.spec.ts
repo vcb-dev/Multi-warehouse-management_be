@@ -12,7 +12,7 @@ describeIfDb('resolvePrice priority (integration)', () => {
   let pricing: PriceListService;
   let prisma: PrismaService;
   let variantId: bigint;
-  let branchId: bigint;
+  let locationId: bigint;
   let customerGroupId: bigint;
 
   beforeAll(async () => {
@@ -24,18 +24,18 @@ describeIfDb('resolvePrice priority (integration)', () => {
     prisma = module.get(PrismaService);
 
     const variant = await prisma.productVariant.findFirst();
-    const branch = await prisma.branch.findFirst();
+    const branch = await prisma.location.findFirst();
     const cg = await prisma.customerGroup.findFirst();
     if (!variant || !branch || !cg) throw new Error('Run seed first');
     variantId = variant.id;
-    branchId = branch.id;
+    locationId = branch.id;
     customerGroupId = cg.id;
 
     const plBranch = await prisma.priceList.create({
       data: {
         code: `CTL-TEST-${Date.now()}`,
         name: 'Test branch',
-        branchId,
+        locationId,
         items: {
           create: {
             variantId,
@@ -56,7 +56,7 @@ describeIfDb('resolvePrice priority (integration)', () => {
     const variant = await prisma.productVariant.findUniqueOrThrow({
       where: { id: variantId },
     });
-    const result = await pricing.resolvePrice(variantId, { branch_id: branchId });
+    const result = await pricing.resolvePrice(variantId, { location_id: locationId });
     expect(result.source).toBe('branch');
     expect(result.price).toBe(150_000);
     expect(result.price).not.toBe(Number(variant.price));

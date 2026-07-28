@@ -21,7 +21,7 @@ describeIfDb('roles RBAC (integration)', () => {
   let prisma: PrismaService;
 
   let targetUserId: string;
-  let warehouseId: string;
+  let locationId: string;
   let salesRoleId: string;
   let customRoleId: string;
 
@@ -34,19 +34,19 @@ describeIfDb('roles RBAC (integration)', () => {
     prisma = module.get(PrismaService);
 
     const user = await prisma.user.findFirst({ where: { email: 'sales@local.dev' } });
-    const warehouse = await prisma.warehouse.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const salesRole = await prisma.role.findUnique({ where: { code: 'sales' } });
     if (!user || !warehouse || !salesRole) {
       throw new Error('Run prisma db seed before integration tests');
     }
     targetUserId = user.id.toString();
-    warehouseId = warehouse.id.toString();
+    locationId = warehouse.id.toString();
     salesRoleId = salesRole.id.toString();
   });
 
   afterAll(async () => {
     if (customRoleId) {
-      await prisma.userWarehouseRole.deleteMany({ where: { roleId: BigInt(customRoleId) } });
+      await prisma.userLocationRole.deleteMany({ where: { roleId: BigInt(customRoleId) } });
       await prisma.rolePermission.deleteMany({ where: { roleId: BigInt(customRoleId) } });
       await prisma.role.deleteMany({ where: { id: BigInt(customRoleId) } });
     }
@@ -83,12 +83,12 @@ describeIfDb('roles RBAC (integration)', () => {
 
   it('PUT warehouse-roles: gán 1 role/kho và chặn trùng warehouse', async () => {
     const result = await users.putWarehouseRoles(targetUserId, {
-      assignments: [{ warehouse_id: warehouseId, role_id: salesRoleId }],
+      assignments: [{ location_id: locationId, role_id: salesRoleId }],
     });
     expect(result.data.warehouse_roles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          warehouse_id: warehouseId,
+          location_id: locationId,
           role_id: salesRoleId,
         }),
       ]),
@@ -97,8 +97,8 @@ describeIfDb('roles RBAC (integration)', () => {
     await expect(
       users.putWarehouseRoles(targetUserId, {
         assignments: [
-          { warehouse_id: warehouseId, role_id: salesRoleId },
-          { warehouse_id: warehouseId, role_id: customRoleId },
+          { location_id: locationId, role_id: salesRoleId },
+          { location_id: locationId, role_id: customRoleId },
         ],
       }),
     ).rejects.toMatchObject({ message: expect.stringContaining('DUPLICATE_WAREHOUSE') });

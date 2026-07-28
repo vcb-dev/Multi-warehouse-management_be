@@ -3,12 +3,12 @@ import {
   CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
-  OrderSource,
+  OrderFinancialStatus,
+  OrderFulfillmentStatus,
   OrderStatus,
-  PaymentStatus,
   Prisma,
 } from '@prisma/client';
-import { assertAnyWarehouseAccess, assertWarehouseAccess } from '../../common/auth/access';
+import { assertAnyLocationAccess, assertLocationAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
 import {
@@ -39,7 +39,7 @@ import { serializeOrderDetail, serializeOrderListItem } from './order.serializer
 
 type ResolvedItem = {
   variantId: bigint;
-  warehouseId: bigint;
+  locationId: bigint;
   productName: string;
   sku: string;
   quantity: number;
@@ -63,12 +63,13 @@ export class OrderService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderWhereInput = {};
 
-    if (query.warehouse_id) {
-      const warehouseId = BigInt(query.warehouse_id);
-      assertWarehouseAccess(user, warehouseId);
-      where.items = { some: { warehouseId } };
+    // Location nằm ở cấp đơn (theo Sapo), không còn theo từng dòng hàng.
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationAccess(user, locationId);
+      where.locationId = locationId;
     } else {
-      where.items = { some: { warehouseId: { in: user.warehouseIds } } };
+      where.locationId = { in: user.locationIds };
     }
 
     const stockFilter =
@@ -77,21 +78,29 @@ export class OrderService {
         : undefined;
 
     if (stockFilter) {
-      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn còn chờ xử lý — đơn đã giao/hủy
-      // thì tồn tại thời điểm đó không còn phản ánh gì cho hành động sắp tới.
-      where.status = { in: [OrderStatus.ordered, OrderStatus.processing] };
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn còn chờ xử lý (chưa đóng/hủy) —
+      // đơn đã giao/hủy thì tồn tại thời điểm đó không còn phản ánh gì cho
+      // hành động sắp tới. "open" gộp cả ordered/processing cũ.
+      where.status = OrderStatus.open;
+    } else if (query.status === 'closed') {
+      // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
+      // status='closed' — khớp guard ở order-return.service.ts, vì đa số
+      // đơn đã giao thật (dữ liệu Sapo) vẫn ở status='open'.
+      where.OR = [
+        { status: OrderStatus.closed },
+        { fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+      ];
     } else if (query.status) {
       where.status = query.status as OrderStatus;
     }
-    if (query.branch_id) where.branchId = BigInt(query.branch_id);
     if (query.sources) {
       const list = query.sources
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      if (list.length) where.source = { in: list as OrderSource[] };
+      if (list.length) where.sourceName = { in: list };
     } else if (query.source) {
-      where.source = query.source as OrderSource;
+      where.sourceName = query.source;
     }
     if (query.assigned_to) {
       where.assignedToId = BigInt(query.assigned_to);
@@ -115,10 +124,10 @@ export class OrderService {
 
     const listInclude = {
       customer: true,
-      branch: true,
+      location: true,
       createdBy: true,
       items: {
-        select: { sku: true, variantId: true, warehouseId: true, quantity: true },
+        select: { sku: true, variantId: true, quantity: true },
       },
       fulfillments: {
         where: { closedAt: null },
@@ -133,31 +142,32 @@ export class OrderService {
 
     async function computeStockReady(
       repo: OrderRepository,
-      orders: { id: bigint; items: { variantId: bigint; warehouseId: bigint; quantity: number }[] }[],
+      // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
+      orders: { id: bigint; locationId: bigint; items: { variantId: bigint; quantity: number }[] }[],
     ) {
-      const pairs = new Map<string, { variantId: bigint; warehouseId: bigint }>();
+      const pairs = new Map<string, { variantId: bigint; locationId: bigint }>();
       for (const row of orders) {
         for (const item of row.items) {
-          pairs.set(`${item.variantId}:${item.warehouseId}`, {
+          pairs.set(`${item.variantId}:${row.locationId}`, {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: row.locationId,
           });
         }
       }
       const levels = pairs.size
         ? await repo.client.inventoryLevel.findMany({
             where: { OR: Array.from(pairs.values()) },
-            select: { variantId: true, warehouseId: true, onHand: true },
+            select: { variantId: true, locationId: true, onHand: true },
           })
         : [];
       const onHandMap = new Map(
-        levels.map((l) => [`${l.variantId}:${l.warehouseId}`, l.onHand]),
+        levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
       );
       return new Map<bigint, boolean>(
         orders.map((row) => [
           row.id,
           row.items.every(
-            (i) => (onHandMap.get(`${i.variantId}:${i.warehouseId}`) ?? 0) >= i.quantity,
+            (i) => (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >= i.quantity,
           ),
         ]),
       );
@@ -215,20 +225,15 @@ export class OrderService {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (user) {
-      assertAnyWarehouseAccess(
-        user,
-        order.items.map((i) => i.warehouseId),
-      );
+      assertAnyLocationAccess(user, [order.locationId]);
     }
 
     const detail = serializeOrderDetail(order);
     const [levels, customerStats] = await Promise.all([
       this.repo.client.inventoryLevel.findMany({
         where: {
-          OR: order.items.map((i) => ({
-            variantId: i.variantId,
-            warehouseId: i.warehouseId,
-          })),
+          locationId: order.locationId,
+          variantId: { in: order.items.map((i) => i.variantId) },
         },
       }),
       order.customerId
@@ -253,18 +258,18 @@ export class OrderService {
     ]);
     const availMap = new Map(
       levels.map((l) => [
-        `${l.variantId}:${l.warehouseId}`,
+        `${l.variantId}:${l.locationId}`,
         l.available,
       ]),
     );
     const onHandMap = new Map(
-      levels.map((l) => [`${l.variantId}:${l.warehouseId}`, l.onHand]),
+      levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
     );
     const stockShortageItems = detail.items
       .map((i) => ({
         sku: i.sku,
         required: i.quantity,
-        on_hand: onHandMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
+        on_hand: onHandMap.get(`${i.variant_id}:${order.locationId}`) ?? 0,
       }))
       .filter((i) => i.on_hand < i.required);
 
@@ -275,7 +280,7 @@ export class OrderService {
         stock_shortage_items: stockShortageItems,
         items: detail.items.map((i) => ({
           ...i,
-          available: availMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
+          available: availMap.get(`${i.variant_id}:${order.locationId}`) ?? 0,
         })),
         customer: detail.customer && customerStats
           ? { ...detail.customer, ...customerStats }
@@ -287,14 +292,11 @@ export class OrderService {
   async update(id: bigint, dto: UpdateOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
-    if (order.status !== OrderStatus.ordered) {
+    assertAnyLocationAccess(user, [order.locationId]);
+    if (order.status !== OrderStatus.open || order.confirmedOn !== null) {
       throw new BusinessException(
         'INVALID_TRANSITION',
-        'Chỉ sửa đơn ở trạng thái ordered',
+        'Chỉ sửa đơn khi chưa xác nhận',
         409,
       );
     }
@@ -341,12 +343,12 @@ export class OrderService {
       taxTotal: totals.taxTotal,
       totalAmount: totals.totalAmount,
       totalQuantity: totals.totalQuantity,
-      paymentStatus:
+      financialStatus:
         paidAmount >= totals.totalAmount
-          ? PaymentStatus.da_thanh_toan
+          ? OrderFinancialStatus.paid
           : paidAmount > 0
-            ? PaymentStatus.mot_phan
-            : PaymentStatus.chua_thanh_toan,
+            ? OrderFinancialStatus.partially_paid
+            : OrderFinancialStatus.pending,
     };
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.tags !== undefined) data.tags = dto.tags;
@@ -407,10 +409,7 @@ export class OrderService {
   async pay(id: bigint, dto: PayOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
+    assertAnyLocationAccess(user, [order.locationId]);
 
     if (order.status === OrderStatus.cancelled) {
       throw new BusinessException(
@@ -419,10 +418,10 @@ export class OrderService {
         409,
       );
     }
-    if (order.paymentStatus === PaymentStatus.da_thanh_toan) {
+    if (order.financialStatus === OrderFinancialStatus.paid) {
       return {
         id: order.id.toString(),
-        payment_status: PaymentStatus.da_thanh_toan,
+        payment_status: OrderFinancialStatus.paid,
         paid_amount: order.paidAmount.toString(),
       };
     }
@@ -446,20 +445,24 @@ export class OrderService {
     }
 
     const newPaidAmount = Number(order.paidAmount) + payAmount;
-    const newStatus =
-      newPaidAmount >= Number(order.totalAmount)
-        ? PaymentStatus.da_thanh_toan
-        : PaymentStatus.mot_phan;
+    const reachedPaid = newPaidAmount >= Number(order.totalAmount);
+    const newStatus = reachedPaid
+      ? OrderFinancialStatus.paid
+      : OrderFinancialStatus.partially_paid;
 
     const voucher = await this.repo.client.$transaction(async (tx) => {
       await tx.order.update({
         where: { id },
-        data: { paymentStatus: newStatus, paidAmount: newPaidAmount },
+        data: {
+          financialStatus: newStatus,
+          paidAmount: newPaidAmount,
+          ...(reachedPaid ? { paidOn: new Date() } : {}),
+        },
       });
 
       const result = await this.vouchers.createReceipt(
         {
-          branchId: order.branchId,
+          locationId: order.locationId,
           amount: payAmount,
           createdById: user.userId,
           sourceDocument: order.code,
@@ -516,7 +519,7 @@ export class OrderService {
     }
 
     for (const item of dto.items) {
-      if (!item.warehouse_id) {
+      if (!item.location_id) {
         throw new BusinessException(
           'MISSING_WAREHOUSE',
           'Mỗi dòng hàng phải có kho xuất',
@@ -525,8 +528,8 @@ export class OrderService {
       }
     }
 
-    const branchId = BigInt(dto.branch_id);
-    await this.repo.client.branch.findUniqueOrThrow({ where: { id: branchId } });
+    const locationId = BigInt(dto.location_id);
+    await this.repo.client.location.findUniqueOrThrow({ where: { id: locationId } });
 
     if (dto.code) {
       const dup = await this.repo.findByCode(dto.code.trim());
@@ -539,7 +542,7 @@ export class OrderService {
       }
     }
 
-    const resolvedItems = await this.resolveItems(dto, branchId);
+    const resolvedItems = await this.resolveItems(dto, locationId);
     const pricedLines: PricedLine[] = resolvedItems.map((i) => ({
       quantity: i.quantity,
       price: i.price,
@@ -569,15 +572,16 @@ export class OrderService {
     try {
       const order = await this.repo.client.$transaction(async (tx) => {
         const code =
-          dto.code?.trim() || (await generateOrderCode(tx, branchId));
+          dto.code?.trim() || (await generateOrderCode(tx, locationId));
 
+        const initialPaidReachesFull = initialPaid >= totals.totalAmount && totals.totalAmount > 0;
         const record = await tx.order.create({
           data: {
             code,
-            branchId,
+            locationId,
             customerId,
-            source: dto.source ?? OrderSource.other,
-            status: OrderStatus.ordered,
+            sourceName: dto.source_name?.trim() || null,
+            status: OrderStatus.open,
             assignedToId,
             createdById: user.userId,
             email: dto.email?.trim() || null,
@@ -590,12 +594,12 @@ export class OrderService {
             totalAmount: totals.totalAmount,
             totalQuantity: totals.totalQuantity,
             paidAmount: initialPaid,
-            paymentStatus:
-              initialPaid >= totals.totalAmount
-                ? PaymentStatus.da_thanh_toan
-                : initialPaid > 0
-                  ? PaymentStatus.mot_phan
-                  : PaymentStatus.chua_thanh_toan,
+            financialStatus: initialPaidReachesFull
+              ? OrderFinancialStatus.paid
+              : initialPaid > 0
+                ? OrderFinancialStatus.partially_paid
+                : OrderFinancialStatus.pending,
+            ...(initialPaidReachesFull ? { paidOn: new Date() } : {}),
             note: dto.note?.trim() || null,
             tags: dto.tags ?? [],
             orderedAt: dto.ordered_at ? new Date(dto.ordered_at) : new Date(),
@@ -625,10 +629,11 @@ export class OrderService {
             invoicePhone: dto.invoice_phone?.trim() || null,
             invoiceEmail: dto.invoice_email?.trim() || null,
             invoiceSellToConsumer: dto.invoice_sell_to_consumer ?? false,
+            // location không còn theo từng dòng hàng — order_items không có
+            // cột location_id (bỏ ở Phase 1, Sapo đặt location ở cấp đơn).
             items: {
               create: resolvedItems.map((i) => ({
                 variantId: i.variantId,
-                warehouseId: i.warehouseId,
                 productName: i.productName,
                 sku: i.sku,
                 quantity: i.quantity,
@@ -641,11 +646,11 @@ export class OrderService {
         });
 
         for (const item of sortForLocking(resolvedItems)) {
-          this.inventory.assertWarehouseAccess(user, item.warehouseId);
+          this.inventory.assertLocationAccess(user, item.locationId);
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId,
               bucket: InventoryBucket.committed,
               change: item.quantity,
               type: MovementType.order_reserve,
@@ -676,7 +681,7 @@ export class OrderService {
         if (initialPaid > 0) {
           await this.vouchers.createReceipt(
             {
-              branchId,
+              locationId,
               amount: initialPaid,
               createdById: user.userId,
               sourceDocument: record.code,
@@ -746,7 +751,7 @@ export class OrderService {
         [
           {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: order.locationId,
             bucket: InventoryBucket.on_hand,
             change: -item.quantity,
             type: MovementType.order_ship,
@@ -756,7 +761,7 @@ export class OrderService {
           },
           {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: order.locationId,
             bucket: InventoryBucket.committed,
             change: -item.quantity,
             type: MovementType.order_ship,
@@ -773,25 +778,28 @@ export class OrderService {
   async transition(id: bigint, dto: OrderTransitionDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
+    assertAnyLocationAccess(user, [order.locationId]);
 
     const action = dto.action;
 
+    // "ordered" cũ = status open & chưa xác nhận; "processing" cũ = status
+    // open & đã xác nhận (confirmedOn khác null). Theo Sapo, status tự nó chỉ
+    // có open/closed/cancelled — mức độ chi tiết hơn nằm ở các mốc thời gian.
+    const isOrderedEquivalent = order.status === OrderStatus.open && order.confirmedOn === null;
+    const isProcessingEquivalent = order.status === OrderStatus.open && order.confirmedOn !== null;
+
     if (action === 'processing') {
-      if (order.status !== OrderStatus.ordered) {
+      if (!isOrderedEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ chuyển processing từ ordered',
+          'Chỉ xác nhận đơn khi đang ở trạng thái chờ xác nhận',
           409,
         );
       }
       await this.repo.client.$transaction(async (tx) => {
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.processing },
+          data: { confirmedOn: new Date() },
         });
         await tx.activityLog.create({
           data: {
@@ -803,14 +811,11 @@ export class OrderService {
           },
         });
       });
-      return { id: id.toString(), status: OrderStatus.processing };
+      return { id: id.toString(), status: OrderStatus.open };
     }
 
     if (action === 'cancel') {
-      if (
-        order.status !== OrderStatus.ordered &&
-        order.status !== OrderStatus.processing
-      ) {
+      if (!isOrderedEquivalent && !isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
           'Không thể hủy đơn ở trạng thái này',
@@ -833,7 +838,7 @@ export class OrderService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: order.locationId,
               bucket: InventoryBucket.committed,
               change: -item.quantity,
               type: MovementType.order_release,
@@ -862,7 +867,11 @@ export class OrderService {
         }
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.cancelled },
+          data: {
+            status: OrderStatus.cancelled,
+            cancelledOn: new Date(),
+            cancelReason: dto.reason?.trim() || null,
+          },
         });
         await tx.activityLog.create({
           data: {
@@ -878,10 +887,10 @@ export class OrderService {
     }
 
     if (action === 'ship') {
-      if (order.status !== OrderStatus.processing) {
+      if (!isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ xuất hàng từ processing',
+          'Chỉ xuất hàng sau khi đã xác nhận đơn',
           409,
         );
       }
@@ -895,7 +904,10 @@ export class OrderService {
       const shippedAt = await this.repo.client.$transaction(async (tx) => {
         await this.shipOrderItems(order, user, tx);
         const now = new Date();
-        await tx.order.update({ where: { id }, data: { shippedAt: now } });
+        await tx.order.update({
+          where: { id },
+          data: { shippedAt: now, fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+        });
         await tx.activityLog.create({
           data: {
             userId: user.userId,
@@ -915,10 +927,10 @@ export class OrderService {
     }
 
     if (action === 'complete') {
-      if (order.status !== OrderStatus.processing) {
+      if (!isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ hoàn thành từ processing',
+          'Chỉ hoàn thành sau khi đã xác nhận đơn',
           409,
         );
       }
@@ -932,9 +944,16 @@ export class OrderService {
         if (!order.shippedAt) {
           await this.shipOrderItems(order, user, tx);
         }
+        const now = new Date();
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.completed, shippedAt: order.shippedAt ?? new Date() },
+          data: {
+            status: OrderStatus.closed,
+            closedOn: now,
+            completedOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            shippedAt: order.shippedAt ?? now,
+          },
         });
         await tx.activityLog.create({
           data: {
@@ -946,7 +965,7 @@ export class OrderService {
           },
         });
       });
-      return { id: id.toString(), status: OrderStatus.completed };
+      return { id: id.toString(), status: OrderStatus.closed };
     }
 
     throw new BusinessException('VALIDATION_ERROR', 'Action không hợp lệ', 422);
@@ -955,8 +974,8 @@ export class OrderService {
   /** Dùng chung cho draft convert & channel webhook */
   async createFromResolvedItems(
     params: {
-      branchId: bigint;
-      source: OrderSource;
+      locationId: bigint;
+      sourceName?: string;
       customerId?: bigint | null;
       items: ResolvedItem[];
       discountTotal?: number;
@@ -967,12 +986,12 @@ export class OrderService {
     user: AuthUser,
   ) {
     const dto: CreateOrderDto = {
-      branch_id: params.branchId.toString(),
-      source: params.source,
+      location_id: params.locationId.toString(),
+      source_name: params.sourceName,
       customer_id: params.customerId?.toString(),
       items: params.items.map((i) => ({
         variant_id: i.variantId.toString(),
-        warehouse_id: i.warehouseId.toString(),
+        location_id: i.locationId.toString(),
         quantity: i.quantity,
         price: i.price,
         discount: i.discount,
@@ -987,12 +1006,12 @@ export class OrderService {
 
   private async resolveItems(
     dto: CreateOrderDto,
-    branchId: bigint,
+    locationId: bigint,
   ): Promise<ResolvedItem[]> {
     const result: ResolvedItem[] = [];
     for (const item of dto.items) {
       const variantId = BigInt(item.variant_id);
-      const warehouseId = BigInt(item.warehouse_id);
+      const locationId = BigInt(item.location_id);
       const variant = await this.repo.client.productVariant.findUnique({
         where: { id: variantId },
         include: { product: true },
@@ -1008,7 +1027,7 @@ export class OrderService {
       let price = item.price;
       if (price === undefined) {
         const resolved = await this.pricing.resolvePrice(variantId, {
-          branch_id: branchId,
+          location_id: locationId,
         });
         price = resolved.price;
       }
@@ -1016,7 +1035,7 @@ export class OrderService {
       const discount = item.discount ?? 0;
       result.push({
         variantId,
-        warehouseId,
+        locationId,
         productName: variant.product.name,
         sku: variant.sku,
         quantity: item.quantity,

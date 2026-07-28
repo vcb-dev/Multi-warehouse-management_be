@@ -209,7 +209,7 @@ export class CreateSupplierPaymentDto {
 
   @IsString()
   @IsNotEmpty()
-  branch_id!: string;
+  location_id!: string;
 
   @IsOptional()
   @IsString()

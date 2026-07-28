@@ -27,15 +27,14 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   let prisma: PrismaService;
 
   let userId: bigint;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
 
   const auth = () => ({
     userId,
     email: 'admin@local.dev',
     roles: ['admin'],
-    warehouseIds: [] as bigint[],
+    locationIds: [] as bigint[],
   });
 
   beforeAll(async () => {
@@ -55,22 +54,21 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     prisma = module.get(PrismaService);
 
     const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
-    const branch = await prisma.branch.findFirst();
-    const warehouse = await prisma.warehouse.findFirst();
+    const branch = await prisma.location.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const variant = await prisma.productVariant.findFirst();
     if (!user || !branch || !warehouse || !variant) throw new Error('Run seed');
 
     userId = user.id;
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     variantId = variant.id;
 
     await prisma.inventoryLevel.upsert({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
       update: { onHand: 10, available: 10, committed: 0 },
       create: {
         variantId,
-        warehouseId,
+        locationId,
         onHand: 10,
         available: 10,
         price: 100000,
@@ -86,11 +84,11 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   it('KC1 — tạo đơn giữ committed', async () => {
     const res = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 2,
             price: 100000,
           },
@@ -98,10 +96,10 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
       },
       auth(),
     );
-    expect(res.status).toBe(OrderStatus.ordered);
+    expect(res.status).toBe(OrderStatus.open);
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     expect(level.committed).toBeGreaterThanOrEqual(2);
     expect(level.available).toBeLessThanOrEqual(8);
@@ -111,11 +109,11 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     await expect(
       orders.create(
         {
-          branch_id: branchId.toString(),
+          location_id: locationId.toString(),
           items: [
             {
               variant_id: variantId.toString(),
-              warehouse_id: warehouseId.toString(),
+              location_id: locationId.toString(),
               quantity: 999,
             },
           ],
@@ -127,8 +125,8 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     await expect(
       orders.create(
         {
-          branch_id: branchId.toString(),
-          items: [{ variant_id: variantId.toString(), warehouse_id: '', quantity: 1 }],
+          location_id: locationId.toString(),
+          items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }],
         },
         auth(),
       ),
@@ -140,12 +138,12 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     const res = await channels.handleWebhook(
       {
         source: 'shopee',
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         customer_phone: phone,
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 1,
           },
         ],
@@ -156,7 +154,7 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: BigInt(res.order_id) },
     });
-    expect(order.source).toBe('shopee');
+    expect(order.sourceName).toBe('shopee');
   });
 });
 

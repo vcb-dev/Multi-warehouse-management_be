@@ -44,15 +44,15 @@ export class InvitationService {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('EMAIL_EXISTS');
 
-    const name = [dto.first_name, dto.last_name].filter(Boolean).join(' ').trim();
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
-        name: name || dto.last_name,
-        phone: dto.phone,
+        firstName: dto.first_name,
+        lastName: dto.last_name,
+        phoneNumber: dto.phone,
         passwordHash: null,
         status: 'invited',
-        isActive: false,
+        active: false,
         roles: [],
       },
     });
@@ -106,7 +106,7 @@ export class InvitationService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: invitation.userId },
-        data: { passwordHash, status: 'active', isActive: true },
+        data: { passwordHash, status: 'active', active: true },
       }),
       this.prisma.userInvitation.update({
         where: { id: invitation.id },

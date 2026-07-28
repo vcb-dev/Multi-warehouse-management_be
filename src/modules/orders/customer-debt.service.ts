@@ -3,6 +3,7 @@ import { CustomerLedgerReferenceType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { userDisplayName } from '../../common/utils/user-display-name';
 import {
   CreateCustomerDebtAdjustmentDto,
   ListCustomerLedgerQueryDto,
@@ -19,7 +20,7 @@ export type CustomerLedgerInput = {
 };
 
 type LedgerEntryWithCreator = Prisma.CustomerLedgerEntryGetPayload<{
-  include: { createdBy: { select: { name: true; email: true } } };
+  include: { createdBy: { select: { firstName: true; lastName: true; email: true } } };
 }>;
 
 function serializeEntry(entry: LedgerEntryWithCreator) {
@@ -31,7 +32,7 @@ function serializeEntry(entry: LedgerEntryWithCreator) {
     transaction_label: entry.transactionLabel,
     reason: entry.reason,
     amount: entry.amount.toString(),
-    created_by_name: entry.createdBy?.name ?? entry.createdBy?.email ?? null,
+    created_by_name: userDisplayName(entry.createdBy) ?? entry.createdBy?.email ?? null,
     created_at: entry.createdAt.toISOString(),
   };
 }
@@ -65,7 +66,7 @@ export class CustomerDebtService {
     const [rows, total, balanceAgg] = await Promise.all([
       this.prisma.customerLedgerEntry.findMany({
         where: { customerId },
-        include: { createdBy: { select: { name: true, email: true } } },
+        include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -111,7 +112,7 @@ export class CustomerDebtService {
         amount: dto.amount,
         createdById: user.userId,
       },
-      include: { createdBy: { select: { name: true, email: true } } },
+      include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
     });
 
     return { data: serializeEntry(entry) };

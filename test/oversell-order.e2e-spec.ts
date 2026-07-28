@@ -33,18 +33,17 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
   let transfers: StockTransferService;
   let inventory: InventoryService;
   let prisma: PrismaService;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let otherWarehouseId: bigint;
   let variantId: bigint;
   let productId: bigint;
   let providerId: bigint;
   let userId: bigint;
-  let authUser: { userId: bigint; email: string; roles: string[]; warehouseIds: bigint[] };
+  let authUser: { userId: bigint; email: string; roles: string[]; locationIds: bigint[] };
 
   async function level() {
     return prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
   }
 
@@ -64,27 +63,23 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     inventory = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const branch = await prisma.branch.findFirstOrThrow();
-    const warehouses = await prisma.warehouse.findMany({
-      where: { branchId: branch.id },
-      take: 2,
-    });
+    const branch = await prisma.location.findFirstOrThrow();
+    const warehouses = await prisma.location.findMany({ take: 2 });
     const warehouse = warehouses[0];
     const otherWarehouse = warehouses[1] ?? warehouses[0];
     const user = await prisma.user.findFirstOrThrow();
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     otherWarehouseId = otherWarehouse.id;
     userId = user.id;
     authUser = {
       userId,
       email: 't',
       roles: ['admin'],
-      warehouseIds: [warehouseId, otherWarehouseId],
+      locationIds: [locationId, otherWarehouseId],
     };
 
     const product = await prisma.product.create({
-      data: { name: `Oversell E2E ${SKU}`, slug: SKU.toLowerCase() },
+      data: { name: `Oversell E2E ${SKU}`, alias: SKU.toLowerCase() },
     });
     productId = product.id;
     const variant = await prisma.productVariant.create({
@@ -93,15 +88,15 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     variantId = variant.id;
     // Tồn thực tế chỉ có 2, sẽ đặt 5 (vượt 3)
     await prisma.inventoryLevel.create({
-      data: { variantId, warehouseId, onHand: 2, available: 2, price: 1000, cost: 500 },
+      data: { variantId, locationId, onHand: 2, available: 2, price: 1000, cost: 500 },
     });
-    if (otherWarehouseId !== warehouseId) {
+    if (otherWarehouseId !== locationId) {
       await prisma.inventoryLevel.upsert({
-        where: { variantId_warehouseId: { variantId, warehouseId: otherWarehouseId } },
+        where: { variantId_locationId: { variantId, locationId: otherWarehouseId } },
         update: { onHand: 0, available: 0 },
         create: {
           variantId,
-          warehouseId: otherWarehouseId,
+          locationId: otherWarehouseId,
           onHand: 0,
           available: 0,
           price: 1000,
@@ -152,11 +147,11 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     // 1. Tạo đơn số lượng 5 dù chỉ còn 2 — phải thành công
     const created = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 5,
             price: 1000,
           },
@@ -203,7 +198,7 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     // 4. Nhập thêm hàng (receipt) dù available đang âm — KHÔNG được bị chặn
     await inventory.applyMovement({
       variantId,
-      warehouseId,
+      locationId,
       bucket: 'on_hand' as never,
       change: 3,
       type: 'receipt' as never,
@@ -242,7 +237,7 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     );
     lv = await level();
     expect(lv.committed).toBe(0);
-    expect(lv.packing).toBe(5);
+    expect(lv.packed).toBe(5);
     expect(lv.onHand).toBe(5);
 
     // 7. Đẩy vận chuyển — phải thành công
@@ -267,14 +262,14 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
   it('chuyển kho (stock transfer) KHÔNG được phép vượt tồn — vẫn chặn như cũ', async () => {
     // Đặt lại tồn sạch cho biến thể khác warehouse để tránh phụ thuộc test trước
     await prisma.inventoryLevel.update({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
-      data: { onHand: 1, available: 1, committed: 0, packing: 0 },
+      where: { variantId_locationId: { variantId, locationId } },
+      data: { onHand: 1, available: 1, committed: 0, packed: 0 },
     });
 
     const stn = await transfers.create(
       {
-        from_warehouse_id: warehouseId.toString(),
-        to_warehouse_id: otherWarehouseId.toString(),
+        from_location_id: locationId.toString(),
+        to_location_id: otherWarehouseId.toString(),
         items: [{ variant_id: variantId.toString(), quantity: 999 }],
       } as never,
       authUser as never,

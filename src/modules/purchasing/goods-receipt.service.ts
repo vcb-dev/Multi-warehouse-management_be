@@ -32,9 +32,9 @@ const reiInclude = {
     },
   },
   supplier: { select: { code: true, name: true } },
-  warehouse: { select: { code: true, name: true } },
+  location: { select: { code: true, name: true } },
   purchaseOrder: { select: { code: true } },
-  assignedTo: { select: { name: true, email: true } },
+  assignedTo: { select: { firstName: true, lastName: true, email: true } },
 } satisfies Prisma.GoodsReceiptInclude;
 
 @Injectable()
@@ -117,7 +117,7 @@ export class GoodsReceiptService {
     }
 
     const supplier = await this.getActiveSupplier(BigInt(dto.supplier_id));
-    this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
+    this.inventory.assertLocationAccess(user, BigInt(dto.location_id));
 
     // Gom PO tham chiếu: từng dòng có thể gắn PO riêng, dòng không gắn thì
     // dùng PO chung của phiếu (nếu có).
@@ -157,7 +157,7 @@ export class GoodsReceiptService {
           422,
         );
       }
-      if (po.warehouseId !== BigInt(dto.warehouse_id)) {
+      if (po.locationId !== BigInt(dto.location_id)) {
         throw new BusinessException(
           'VALIDATION_ERROR',
           `Kho không khớp với PO ${po.code}`,
@@ -200,7 +200,7 @@ export class GoodsReceiptService {
         data: {
           code,
           supplierId: BigInt(dto.supplier_id),
-          warehouseId: BigInt(dto.warehouse_id),
+          locationId: BigInt(dto.location_id),
           purchaseOrderId: headerPoId ? BigInt(headerPoId) : null,
           status: GoodsReceiptStatus.chua_nhap,
           paymentStatus: PaymentStatus.chua_thanh_toan,
@@ -271,7 +271,7 @@ export class GoodsReceiptService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, rei.warehouseId);
+    this.inventory.assertLocationAccess(user, rei.locationId);
 
     const movementIds: bigint[] = [];
     let amountDue = 0;
@@ -340,7 +340,7 @@ export class GoodsReceiptService {
         if (itemPoId) {
           movements.push({
             variantId: item.variantId,
-            warehouseId: rei.warehouseId,
+            locationId: rei.locationId,
             bucket: InventoryBucket.incoming,
             change: -item.quantity,
             type: MovementType.incoming_receipt,
@@ -352,7 +352,7 @@ export class GoodsReceiptService {
 
         movements.push({
           variantId: item.variantId,
-          warehouseId: rei.warehouseId,
+          locationId: rei.locationId,
           bucket: InventoryBucket.on_hand,
           change: item.quantity,
           type: MovementType.receipt,
@@ -477,7 +477,7 @@ export class GoodsReceiptService {
   async pay(id: bigint, user: AuthUser, amount?: number) {
     const rei = await this.prisma.goodsReceipt.findUnique({
       where: { id },
-      include: { supplier: true, warehouse: true },
+      include: { supplier: true, location: true },
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
     if (rei.status !== GoodsReceiptStatus.da_nhap) {
@@ -495,7 +495,7 @@ export class GoodsReceiptService {
       };
     }
 
-    this.inventory.assertWarehouseAccess(user, rei.warehouseId);
+    this.inventory.assertLocationAccess(user, rei.locationId);
 
     const remaining = Number(rei.amountDue) - Number(rei.paidAmount);
     const payAmount = amount ?? remaining;
@@ -529,7 +529,7 @@ export class GoodsReceiptService {
 
       const result = await this.vouchers.createPayment(
         {
-          branchId: rei.warehouse.branchId,
+          locationId: rei.locationId,
           amount: payAmount,
           createdById: user.userId,
           sourceDocument: rei.code,
@@ -584,7 +584,7 @@ export class GoodsReceiptService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, rei.warehouseId);
+    this.inventory.assertLocationAccess(user, rei.locationId);
 
     // Phiếu "chưa nhập" chưa từng đụng vào tồn kho/công nợ nên hủy = xóa hẳn,
     // không giữ lại bản ghi "đã hủy" (khớp Sapo: chỉ có 2 trạng thái Đã nhập/Chưa nhập).

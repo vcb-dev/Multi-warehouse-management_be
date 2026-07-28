@@ -116,7 +116,7 @@ export class PushShipmentDto {
 
   @IsOptional()
   @IsString()
-  from_branch_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsString()

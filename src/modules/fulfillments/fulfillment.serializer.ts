@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 const fulfillmentInclude = {
-  packer: { select: { id: true, name: true, email: true } },
+  packer: { select: { id: true, firstName: true, lastName: true, email: true } },
   provider: { select: { id: true, code: true, name: true, type: true } },
-  fromBranch: { select: { id: true, code: true, name: true } },
+  location: { select: { id: true, code: true, name: true } },
 } satisfies Prisma.FulfillmentInclude;
 
 export type FulfillmentWithRelations = Prisma.FulfillmentGetPayload<{
@@ -21,7 +22,7 @@ export function serializeFulfillment(f: FulfillmentWithRelations) {
     order_id: f.orderId.toString(),
     packing_status: f.packingStatus,
     packer_id: f.packerId?.toString() ?? null,
-    packer_name: f.packer ? (f.packer.name ?? f.packer.email) : null,
+    packer_name: f.packer ? (userDisplayName(f.packer) ?? f.packer.email) : null,
     packed_at: f.packedAt?.toISOString() ?? null,
     delivery_note_printed_at: f.deliveryNotePrintedAt?.toISOString() ?? null,
     shipment_status: f.shipmentStatus,
@@ -47,8 +48,8 @@ export function serializeFulfillment(f: FulfillmentWithRelations) {
     to_ward: f.toWard,
     to_district: f.toDistrict,
     to_province: f.toProvince,
-    from_branch_id: f.fromBranchId?.toString() ?? null,
-    from_branch_name: f.fromBranch?.name ?? null,
+    location_id: f.locationId?.toString() ?? null,
+    from_location_name: f.location?.name ?? null,
     from_name: f.fromName,
     from_phone: f.fromPhone,
     from_address: f.fromAddress,

@@ -25,9 +25,9 @@ const pvnInclude = {
     },
   },
   supplier: { select: { code: true, name: true } },
-  warehouse: { select: { code: true, name: true } },
+  location: { select: { code: true, name: true } },
   goodsReceipt: { select: { code: true } },
-  createdBy: { select: { name: true, email: true } },
+  createdBy: { select: { firstName: true, lastName: true, email: true } },
 } satisfies Prisma.PurchaseReturnInclude;
 
 @Injectable()
@@ -81,21 +81,21 @@ export class PurchaseReturnService {
       );
     }
 
-    const warehouseId = BigInt(dto.warehouse_id);
+    const locationId = BigInt(dto.location_id);
     const supplierId = BigInt(dto.supplier_id);
 
     await this.validateSupplier(supplierId);
-    this.inventory.assertWarehouseAccess(user, warehouseId);
+    this.inventory.assertLocationAccess(user, locationId);
 
     const goodsReceiptId = dto.goods_receipt_id
       ? await this.validateGoodsReceiptRef(
           BigInt(dto.goods_receipt_id),
           supplierId,
-          warehouseId,
+          locationId,
         )
       : null;
 
-    await this.validateReturnQuantities(dto.items, warehouseId);
+    await this.validateReturnQuantities(dto.items, locationId);
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
     const totalAmount = dto.items.reduce(
@@ -109,7 +109,7 @@ export class PurchaseReturnService {
         data: {
           code,
           supplierId,
-          warehouseId,
+          locationId,
           goodsReceiptId,
           totalQuantity,
           totalAmount,
@@ -129,7 +129,7 @@ export class PurchaseReturnService {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
-            warehouseId,
+            locationId,
             bucket: InventoryBucket.on_hand,
             change: -item.quantity,
             type: MovementType.return_out,
@@ -184,7 +184,7 @@ export class PurchaseReturnService {
   async confirmRefund(id: bigint, user: AuthUser) {
     const pvn = await this.prisma.purchaseReturn.findUnique({
       where: { id },
-      include: { supplier: true, warehouse: true },
+      include: { supplier: true, location: true },
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
     if (pvn.refundStatus === RefundStatus.da_hoan_tien) {
@@ -195,7 +195,7 @@ export class PurchaseReturnService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, pvn.warehouseId);
+    this.inventory.assertLocationAccess(user, pvn.locationId);
 
     const voucher = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseReturn.update({
@@ -228,7 +228,7 @@ export class PurchaseReturnService {
 
       return this.vouchers.createReceipt(
         {
-          branchId: pvn.warehouse.branchId,
+          locationId: pvn.locationId,
           amount: Number(pvn.totalAmount),
           createdById: user.userId,
           sourceDocument: pvn.code,
@@ -251,7 +251,7 @@ export class PurchaseReturnService {
   private async validateGoodsReceiptRef(
     goodsReceiptId: bigint,
     supplierId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
   ) {
     const rei = await this.prisma.goodsReceipt.findUnique({
       where: { id: goodsReceiptId },
@@ -277,7 +277,7 @@ export class PurchaseReturnService {
         422,
       );
     }
-    if (rei.warehouseId !== warehouseId) {
+    if (rei.locationId !== locationId) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Kho không khớp với đơn nhập hàng',
@@ -290,7 +290,7 @@ export class PurchaseReturnService {
   /** Không còn theo dõi theo lô — chỉ đảm bảo không trả vượt tồn hiện có tại kho */
   private async validateReturnQuantities(
     items: CreatePurchaseReturnDto['items'],
-    warehouseId: bigint,
+    locationId: bigint,
   ) {
     const qtyByVariant = new Map<string, number>();
     for (const item of items) {
@@ -301,9 +301,9 @@ export class PurchaseReturnService {
     for (const [variantId, qty] of qtyByVariant) {
       const level = await this.prisma.inventoryLevel.findUnique({
         where: {
-          variantId_warehouseId: {
+          variantId_locationId: {
             variantId: BigInt(variantId),
-            warehouseId,
+            locationId,
           },
         },
       });

@@ -22,7 +22,7 @@ export class RoleService {
     const roles = await this.prisma.role.findMany({
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
       include: {
-        _count: { select: { permissions: true, warehouseRoles: true } },
+        _count: { select: { permissions: true, locationRoles: true } },
       },
     });
     return {
@@ -34,7 +34,7 @@ export class RoleService {
         is_system: r.isSystem,
         is_active: r.isActive,
         permission_count: r._count.permissions,
-        assigned_count: r._count.warehouseRoles,
+        assigned_count: r._count.locationRoles,
       })),
     };
   }
@@ -151,11 +151,11 @@ export class RoleService {
   async remove(id: string) {
     const role = await this.prisma.role.findUnique({
       where: { id: BigInt(id) },
-      include: { _count: { select: { warehouseRoles: true } } },
+      include: { _count: { select: { locationRoles: true } } },
     });
     if (!role) throw new NotFoundException('ROLE_NOT_FOUND');
     if (role.isSystem) throw new ForbiddenException('ROLE_SYSTEM');
-    if (role._count.warehouseRoles > 0)
+    if (role._count.locationRoles > 0)
       throw new ConflictException('ROLE_IN_USE');
     await this.prisma.role.delete({ where: { id: role.id } });
   }

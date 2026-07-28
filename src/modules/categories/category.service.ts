@@ -130,7 +130,7 @@ export class CategoryService {
 
   matchesAuto(
     product: {
-      brand: string | null;
+      vendor: string | null;
       productType: string | null;
       tags: string[];
     },
@@ -138,13 +138,13 @@ export class CategoryService {
   ): boolean {
     if (!conditions || typeof conditions !== 'object') return false;
     const c = conditions as AutoConditions;
-    if (c.brand && product.brand !== c.brand) return false;
+    if (c.vendor && product.vendor !== c.vendor) return false;
     if (c.product_type && product.productType !== c.product_type) return false;
     if (c.tags?.length) {
       const hasAll = c.tags.every((t) => product.tags.includes(t));
       if (!hasAll) return false;
     }
-    return !!(c.brand || c.product_type || c.tags?.length);
+    return !!(c.vendor || c.product_type || c.tags?.length);
   }
 
   private buildTree(

@@ -2,15 +2,17 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   InventoryBucket,
   MovementType,
+  OrderFulfillmentStatus,
   OrderStatus,
   PackingStatus,
   Prisma,
   ShipmentStatus,
   ShippingProviderType,
 } from '@prisma/client';
-import { assertAnyWarehouseAccess } from '../../common/auth/access';
+import { assertAnyLocationAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
+import { userDisplayName } from '../../common/utils/user-display-name';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -51,10 +53,7 @@ export class FulfillmentService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
+    assertAnyLocationAccess(user, [order.locationId]);
     return order;
   }
 
@@ -67,10 +66,7 @@ export class FulfillmentService {
       include: { order: { include: { items: true } } },
     });
     if (!f) throw new NotFoundException('Không tìm thấy phiếu xử lý đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      f.order.items.map((i) => i.warehouseId),
-    );
+    assertAnyLocationAccess(user, [f.order.locationId]);
     return f;
   }
 
@@ -81,16 +77,17 @@ export class FulfillmentService {
    * phần giữ chỗ có thể âm nên không phản ánh đúng "còn bao nhiêu ngoài kho").
    */
   private async assertSufficientPhysicalStock(
-    items: { variantId: bigint; warehouseId: bigint; sku: string; quantity: number }[],
+    locationId: bigint,
+    items: { variantId: bigint; sku: string; quantity: number }[],
   ) {
-    const required = new Map<string, { variantId: bigint; warehouseId: bigint; sku: string; quantity: number }>();
+    const required = new Map<string, { variantId: bigint; locationId: bigint; sku: string; quantity: number }>();
     for (const item of items) {
-      const key = `${item.variantId}:${item.warehouseId}`;
+      const key = `${item.variantId}`;
       const existing = required.get(key);
       if (existing) {
         existing.quantity += item.quantity;
       } else {
-        required.set(key, { ...item });
+        required.set(key, { ...item, locationId });
       }
     }
 
@@ -98,9 +95,9 @@ export class FulfillmentService {
     for (const item of required.values()) {
       const level = await this.prisma.inventoryLevel.findUnique({
         where: {
-          variantId_warehouseId: {
+          variantId_locationId: {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: item.locationId,
           },
         },
       });
@@ -141,14 +138,14 @@ export class FulfillmentService {
 
   async createPackingRequest(dto: CreatePackingDto, user: AuthUser) {
     const order = await this.loadOrder(BigInt(dto.order_id), user);
-    if (order.status !== OrderStatus.processing) {
+    if (order.status !== OrderStatus.open || order.confirmedOn === null) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Xác nhận đơn hàng trước khi tạo yêu cầu đóng gói',
         409,
       );
     }
-    await this.assertSufficientPhysicalStock(order.items);
+    await this.assertSufficientPhysicalStock(order.locationId, order.items);
     const created = await this.prisma.$transaction(async (tx) => {
       const open = await this.findOpen(order.id, tx);
       if (open) {
@@ -166,7 +163,9 @@ export class FulfillmentService {
           packerId: dto.packer_id ? BigInt(dto.packer_id) : null,
           createdById: user.userId,
         },
-        include: { packer: { select: { name: true, email: true } } },
+        include: {
+          packer: { select: { firstName: true, lastName: true, email: true } },
+        },
       });
       await tx.activityLog.create({
         data: {
@@ -178,7 +177,7 @@ export class FulfillmentService {
             code: order.code,
             fulfillment_code: record.code,
             packer_name: record.packer
-              ? (record.packer.name ?? record.packer.email)
+              ? (userDisplayName(record.packer) ?? record.packer.email)
               : null,
           },
         },
@@ -214,13 +213,13 @@ export class FulfillmentService {
     }
     await this.prisma.$transaction(async (tx) => {
       if (dto.status === PackingStatus.da_dong_goi) {
-        // committed → packing: giữ nguyên available, hàng vào khu đóng gói
+        // committed → packed: giữ nguyên available, hàng vào khu đóng gói
         for (const item of sortForLocking(f.order.items)) {
           await this.inventory.applyMovements(
             [
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
+                locationId: f.order.locationId,
                 bucket: InventoryBucket.committed,
                 change: -item.quantity,
                 type: MovementType.packing_start,
@@ -230,8 +229,8 @@ export class FulfillmentService {
               },
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
-                bucket: InventoryBucket.packing,
+                locationId: f.order.locationId,
+                bucket: InventoryBucket.packed,
                 change: item.quantity,
                 type: MovementType.packing_start,
                 referenceType: 'order',
@@ -293,14 +292,14 @@ export class FulfillmentService {
 
   async pushShipment(dto: PushShipmentDto, user: AuthUser) {
     const order = await this.loadOrder(BigInt(dto.order_id), user);
-    if (order.status !== OrderStatus.processing) {
+    if (order.status !== OrderStatus.open || order.confirmedOn === null) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Xác nhận đơn hàng trước khi đẩy vận chuyển',
         409,
       );
     }
-    await this.assertSufficientPhysicalStock(order.items);
+    await this.assertSufficientPhysicalStock(order.locationId, order.items);
 
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { id: BigInt(dto.provider_id) },
@@ -348,28 +347,28 @@ export class FulfillmentService {
     const codAmount =
       dto.cod_amount ?? Number(order.totalAmount) - Number(order.paidAmount);
 
-    let fromBranch: { name: string; phone: string | null; address: string | null; ward: string | null; district: string | null; province: string | null } | null = null;
-    const fromBranchId = dto.from_branch_id
-      ? BigInt(dto.from_branch_id)
-      : order.branchId;
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: fromBranchId },
+    let location: { name: string; phone: string | null; address: string | null; ward: string | null; district: string | null; province: string | null } | null = null;
+    const locationId = dto.location_id
+      ? BigInt(dto.location_id)
+      : order.locationId;
+    const branch = await this.prisma.location.findUnique({
+      where: { id: locationId },
     });
     if (branch) {
-      fromBranch = {
+      location = {
         name: branch.name,
         phone: branch.phone,
-        address: branch.address,
+        address: branch.address1,
         ward: branch.ward,
         district: branch.district,
         province: branch.province,
       };
     }
     const fromAddressParts = [
-      fromBranch?.address,
-      fromBranch?.ward,
-      fromBranch?.district,
-      fromBranch?.province,
+      location?.address,
+      location?.ward,
+      location?.district,
+      location?.province,
     ].filter(Boolean);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -403,9 +402,9 @@ export class FulfillmentService {
         toWard: dto.to_ward,
         toDistrict: dto.to_district,
         toProvince: dto.to_province,
-        fromBranchId,
-        fromName: dto.from_name ?? fromBranch?.name ?? null,
-        fromPhone: dto.from_phone ?? fromBranch?.phone ?? null,
+        locationId,
+        fromName: dto.from_name ?? location?.name ?? null,
+        fromPhone: dto.from_phone ?? location?.phone ?? null,
         fromAddress:
           dto.from_address ??
           (fromAddressParts.length ? fromAddressParts.join(', ') : null),
@@ -494,14 +493,14 @@ export class FulfillmentService {
       if (status === ShipmentStatus.dang_giao && !f.pickedUpAt) {
         // ĐTVC lấy hàng: xuất kho — trừ on_hand và giải phóng packing/committed
         const reservedBucket = f.packedAt
-          ? InventoryBucket.packing
+          ? InventoryBucket.packed
           : InventoryBucket.committed;
         for (const item of sortForLocking(f.order.items)) {
           await this.inventory.applyMovements(
             [
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
+                locationId: f.order.locationId,
                 bucket: InventoryBucket.on_hand,
                 change: -item.quantity,
                 type: MovementType.order_ship,
@@ -511,7 +510,7 @@ export class FulfillmentService {
               },
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
+                locationId: f.order.locationId,
                 bucket: reservedBucket,
                 change: -item.quantity,
                 type: MovementType.order_ship,
@@ -552,7 +551,12 @@ export class FulfillmentService {
         });
         await tx.order.update({
           where: { id: f.orderId },
-          data: { status: OrderStatus.completed },
+          data: {
+            status: OrderStatus.closed,
+            closedOn: now,
+            completedOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+          },
         });
         await this.logShipment(tx, f, 'fulfillment.delivered', user);
         return;
@@ -573,7 +577,7 @@ export class FulfillmentService {
           [
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: f.order.locationId,
               bucket: InventoryBucket.on_hand,
               change: item.quantity,
               type: MovementType.return_in,
@@ -583,7 +587,7 @@ export class FulfillmentService {
             },
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: f.order.locationId,
               bucket: InventoryBucket.committed,
               change: item.quantity,
               type: MovementType.order_reserve,
@@ -649,8 +653,8 @@ export class FulfillmentService {
             [
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
-                bucket: InventoryBucket.packing,
+                locationId: f.order.locationId,
+                bucket: InventoryBucket.packed,
                 change: -item.quantity,
                 type: MovementType.packing_cancel,
                 referenceType: 'order',
@@ -659,7 +663,7 @@ export class FulfillmentService {
               },
               {
                 variantId: item.variantId,
-                warehouseId: item.warehouseId,
+                locationId: f.order.locationId,
                 bucket: InventoryBucket.committed,
                 change: item.quantity,
                 type: MovementType.packing_cancel,

@@ -105,7 +105,7 @@ export class InventoryExportService {
         nhom_hang_1: r.nhom_hang_1 ?? '',
         nhom_hang_2: r.nhom_hang_2 ?? '',
         nhom_hang_3: r.nhom_hang_3 ?? '',
-        packing: r.packing,
+        packed: r.packed,
         unavailable: r.unavailable,
       });
     }
@@ -122,8 +122,8 @@ export class InventoryImportService {
     private inventory: InventoryService,
   ) {}
 
-  async importExcel(buffer: Buffer, warehouseId: bigint, user: AuthUser) {
-    this.inventory.assertWarehouseAccess(user, warehouseId);
+  async importExcel(buffer: Buffer, locationId: bigint, user: AuthUser) {
+    this.inventory.assertLocationAccess(user, locationId);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
@@ -161,7 +161,7 @@ export class InventoryImportService {
 
         const result = await this.inventory.adjustOnHandTo({
           variantId: variant.id,
-          warehouseId,
+          locationId,
           targetOnHand,
           referenceType: 'import',
           createdById: user.userId,

@@ -23,7 +23,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
   let inventory: InventoryService;
   let prisma: PrismaService;
 
-  let warehouseId: bigint;
+  let locationId: bigint;
   let userId: bigint;
   let productId: bigint;
   // A: oversell; B, C: deadlock; D: race tạo dòng tồn lần đầu
@@ -40,18 +40,18 @@ describeIfDb('Inventory concurrency (integration)', () => {
     inventory = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const warehouse = await prisma.warehouse.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const user = await prisma.user.findFirst();
     if (!warehouse || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     userId = user.id;
 
     const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const product = await prisma.product.create({
       data: {
-        slug: `conc-test-${suffix}`,
+        alias: `conc-test-${suffix}`,
         name: `Concurrency test ${suffix}`,
         variants: {
           create: ['A', 'B', 'C', 'D'].map((v) => ({
@@ -88,7 +88,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
   const reserveOne = (variantId: bigint) =>
     inventory.applyMovement({
       variantId,
-      warehouseId,
+      locationId,
       bucket: InventoryBucket.committed,
       change: 1,
       type: MovementType.order_reserve,
@@ -99,7 +99,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
   it('10 request tranh 4 tồn: đúng 4 thắng, 6 bị INSUFFICIENT_STOCK, không oversell', async () => {
     await inventory.applyMovement({
       variantId: variantA,
-      warehouseId,
+      locationId,
       bucket: InventoryBucket.on_hand,
       change: 4,
       type: MovementType.receipt,
@@ -127,7 +127,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
       where: {
-        variantId_warehouseId: { variantId: variantA, warehouseId },
+        variantId_locationId: { variantId: variantA, locationId },
       },
     });
     expect(level.onHand).toBe(4);
@@ -135,7 +135,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
     expect(level.available).toBe(0);
 
     // Sổ cái khớp số dư sau bão request
-    const check = await inventory.reconcile(variantA, warehouseId);
+    const check = await inventory.reconcile(variantA, locationId);
     expect(check.ok).toBe(true);
   });
 
@@ -143,7 +143,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
     for (const variantId of [variantB, variantC]) {
       await inventory.applyMovement({
         variantId,
-        warehouseId,
+        locationId,
         bucket: InventoryBucket.on_hand,
         change: 100,
         type: MovementType.receipt,
@@ -161,7 +161,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
             await inventory.applyMovement(
               {
                 variantId: item.variantId,
-                warehouseId,
+                locationId,
                 bucket: InventoryBucket.committed,
                 change: 1,
                 type: MovementType.order_reserve,
@@ -188,7 +188,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
 
     for (const variantId of [variantB, variantC]) {
       const level = await prisma.inventoryLevel.findUniqueOrThrow({
-        where: { variantId_warehouseId: { variantId, warehouseId } },
+        where: { variantId_locationId: { variantId, locationId } },
       });
       expect(level.committed).toBe(rounds * 2);
     }
@@ -199,7 +199,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
       Array.from({ length: 8 }, () =>
         inventory.applyMovement({
           variantId: variantD,
-          warehouseId,
+          locationId,
           bucket: InventoryBucket.on_hand,
           change: 1,
           type: MovementType.receipt,
@@ -214,11 +214,11 @@ describeIfDb('Inventory concurrency (integration)', () => {
     }
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId: variantD, warehouseId } },
+      where: { variantId_locationId: { variantId: variantD, locationId } },
     });
     expect(level.onHand).toBe(8);
 
-    const check = await inventory.reconcile(variantD, warehouseId);
+    const check = await inventory.reconcile(variantD, locationId);
     expect(check.ok).toBe(true);
   });
 });

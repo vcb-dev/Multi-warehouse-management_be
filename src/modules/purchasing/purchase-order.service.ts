@@ -29,8 +29,7 @@ const poInclude = {
     },
   },
   supplier: { select: { code: true, name: true } },
-  warehouse: { select: { code: true, name: true } },
-  branch: { select: { code: true, name: true } },
+  location: { select: { code: true, name: true } },
 } satisfies Prisma.PurchaseOrderInclude;
 
 type PoForTransition = Prisma.PurchaseOrderGetPayload<{
@@ -92,8 +91,8 @@ export class PurchaseOrderService {
     }
 
     await this.validateSupplier(BigInt(dto.supplier_id));
-    await this.validateBranch(BigInt(dto.branch_id));
-    this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
+    await this.validateBranch(BigInt(dto.location_id));
+    this.inventory.assertLocationAccess(user, BigInt(dto.location_id));
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
     const totalAmount = dto.items.reduce(
@@ -117,8 +116,7 @@ export class PurchaseOrderService {
         data: {
           code,
           supplierId: BigInt(dto.supplier_id),
-          branchId: BigInt(dto.branch_id),
-          warehouseId: BigInt(dto.warehouse_id),
+          locationId: BigInt(dto.location_id),
           status: PoStatus.don_nhap,
           totalQuantity,
           totalAmount,
@@ -170,17 +168,16 @@ export class PurchaseOrderService {
     }
 
     if (dto.supplier_id) await this.validateSupplier(BigInt(dto.supplier_id));
-    if (dto.branch_id) await this.validateBranch(BigInt(dto.branch_id));
-    if (dto.warehouse_id) {
-      this.inventory.assertWarehouseAccess(user, BigInt(dto.warehouse_id));
+    if (dto.location_id) await this.validateBranch(BigInt(dto.location_id));
+    if (dto.location_id) {
+      this.inventory.assertLocationAccess(user, BigInt(dto.location_id));
     }
 
     const data: Prisma.PurchaseOrderUpdateInput = {};
     if (dto.supplier_id)
       data.supplier = { connect: { id: BigInt(dto.supplier_id) } };
-    if (dto.branch_id) data.branch = { connect: { id: BigInt(dto.branch_id) } };
-    if (dto.warehouse_id)
-      data.warehouse = { connect: { id: BigInt(dto.warehouse_id) } };
+    if (dto.location_id)
+      data.location = { connect: { id: BigInt(dto.location_id) } };
 
     if (dto.items) {
       data.totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
@@ -246,7 +243,7 @@ export class PurchaseOrderService {
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
 
-    this.inventory.assertWarehouseAccess(user, po.warehouseId);
+    this.inventory.assertLocationAccess(user, po.locationId);
 
     switch (action) {
       case 'submit':
@@ -311,7 +308,7 @@ export class PurchaseOrderService {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
-            warehouseId: po.warehouseId,
+            locationId: po.locationId,
             bucket: InventoryBucket.incoming,
             change: item.quantity,
             type: MovementType.incoming_po,
@@ -341,7 +338,7 @@ export class PurchaseOrderService {
       if (Number(po.depositAmount) > 0) {
         await this.vouchers.createPayment(
           {
-            branchId: po.branchId,
+            locationId: po.locationId,
             amount: Number(po.depositAmount),
             createdById: user.userId,
             sourceDocument: po.code,
@@ -434,7 +431,7 @@ export class PurchaseOrderService {
       await this.inventory.applyMovement(
         {
           variantId: item.variantId,
-          warehouseId: po.warehouseId,
+          locationId: po.locationId,
           bucket: InventoryBucket.incoming,
           change: -remaining,
           type: MovementType.incoming_cancel,
@@ -455,8 +452,8 @@ export class PurchaseOrderService {
   }
 
   private async validateBranch(id: bigint) {
-    const b = await this.prisma.branch.findUnique({ where: { id } });
-    if (!b || !b.isActive) {
+    const b = await this.prisma.location.findUnique({ where: { id } });
+    if (!b || b.status !== 'active') {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Chi nhánh không hợp lệ',

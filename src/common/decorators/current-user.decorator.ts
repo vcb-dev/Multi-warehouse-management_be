@@ -4,7 +4,7 @@ export type AuthUser = {
   userId: bigint;
   email: string;
   roles: string[];
-  warehouseIds: bigint[];
+  locationIds: bigint[];
   /** @deprecated Không dùng bypass toàn cục — dùng adminWarehouseIds. */
   isAdmin?: boolean;
   /** Kho mà user mang role admin. */

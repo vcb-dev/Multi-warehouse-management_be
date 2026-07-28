@@ -10,9 +10,9 @@ export function resolveWarehouseId(sources: {
   const header = sources.headers?.['x-warehouse-id'];
   const fromHeader = Array.isArray(header) ? header[0] : header;
   return (
-    sources.params?.warehouseId ??
-    (sources.query?.warehouse_id as string | undefined) ??
-    (sources.body?.warehouse_id as string | undefined) ??
+    sources.params?.locationId ??
+    (sources.query?.location_id as string | undefined) ??
+    (sources.body?.location_id as string | undefined) ??
     fromHeader
   );
 }
@@ -20,31 +20,31 @@ export function resolveWarehouseId(sources: {
 /** User có role admin tại kho cụ thể — không bypass toàn hệ thống. */
 export function isAdminAtWarehouse(
   user: AuthUser,
-  warehouseId?: string | bigint,
+  locationId?: string | bigint,
 ): boolean {
-  if (!warehouseId) return false;
-  const wid = warehouseId.toString();
+  if (!locationId) return false;
+  const wid = locationId.toString();
   return (user.adminWarehouseIds ?? []).some((id) => id.toString() === wid);
 }
 
-/** @deprecated Dùng isAdminAtWarehouse(user, warehouseId). Không còn bypass toàn cục. */
-export function isAdminUser(user: AuthUser, warehouseId?: string | bigint): boolean {
-  return isAdminAtWarehouse(user, warehouseId);
+/** @deprecated Dùng isAdminAtWarehouse(user, locationId). Không còn bypass toàn cục. */
+export function isAdminUser(user: AuthUser, locationId?: string | bigint): boolean {
+  return isAdminAtWarehouse(user, locationId);
 }
 
-function effectivePermissions(user: AuthUser, warehouseId?: string): string[] {
-  if (!warehouseId) return [];
-  return user.warehousePermissions?.[warehouseId] ?? [];
+function effectivePermissions(user: AuthUser, locationId?: string): string[] {
+  if (!locationId) return [];
+  return user.warehousePermissions?.[locationId] ?? [];
 }
 
 export function hasPermission(
   user: AuthUser,
   permission: string,
-  warehouseId?: string,
+  locationId?: string,
 ): boolean {
-  if (warehouseId && isAdminAtWarehouse(user, warehouseId)) return true;
-  if (warehouseId) {
-    return effectivePermissions(user, warehouseId).includes(permission);
+  if (locationId && isAdminAtWarehouse(user, locationId)) return true;
+  if (locationId) {
+    return effectivePermissions(user, locationId).includes(permission);
   }
   const byWh = user.warehousePermissions ?? {};
   return Object.entries(byWh).some(
@@ -56,28 +56,28 @@ export function hasPermission(
 export function hasSystemPermission(
   user: AuthUser,
   permission: string,
-  warehouseId?: string,
+  locationId?: string,
 ): boolean {
-  return hasPermission(user, permission, warehouseId);
+  return hasPermission(user, permission, locationId);
 }
 
 export function hasWarehousePermission(
   user: AuthUser,
   permission: string,
-  warehouseId?: string,
+  locationId?: string,
 ): boolean {
-  return hasPermission(user, permission, warehouseId);
+  return hasPermission(user, permission, locationId);
 }
 
-export function assertWarehouseAccess(user: AuthUser, warehouseId: bigint): void {
-  if (!user.warehouseIds.some((id) => id === warehouseId)) {
+export function assertLocationAccess(user: AuthUser, locationId: bigint): void {
+  if (!user.locationIds.some((id) => id === locationId)) {
     throw new ForbiddenException('FORBIDDEN_SCOPE');
   }
 }
 
-export function assertAnyWarehouseAccess(user: AuthUser, warehouseIds: bigint[]): void {
-  const allowed = new Set(user.warehouseIds.map((id) => id.toString()));
-  if (!warehouseIds.some((id) => allowed.has(id.toString()))) {
+export function assertAnyLocationAccess(user: AuthUser, locationIds: bigint[]): void {
+  const allowed = new Set(user.locationIds.map((id) => id.toString()));
+  if (!locationIds.some((id) => allowed.has(id.toString()))) {
     throw new ForbiddenException('FORBIDDEN_SCOPE');
   }
 }

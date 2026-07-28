@@ -20,7 +20,7 @@ function toBoolean(value: unknown): boolean | undefined {
 export class ListInventoryQueryDto {
   @IsOptional()
   @IsString()
-  warehouse_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsString()
@@ -65,7 +65,7 @@ export class ListInventoryQueryDto {
 export class ListMovementsQueryDto {
   @IsOptional()
   @IsString()
-  warehouse_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsEnum(InventoryBucket)

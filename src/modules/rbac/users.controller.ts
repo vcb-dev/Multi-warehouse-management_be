@@ -76,32 +76,32 @@ export class UsersController {
     return this.users.putWarehouseRoles(id, dto);
   }
 
-  @Delete(':id/warehouse-roles/:warehouseId')
+  @Delete(':id/warehouse-roles/:locationId')
   @RequirePermission('staff:manage')
   @HttpCode(204)
   removeWarehouseRole(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
   ) {
-    return this.users.removeWarehouseRole(id, warehouseId);
+    return this.users.removeWarehouseRole(id, locationId);
   }
 
-  @Get(':id/warehouses/:warehouseId/permissions')
+  @Get(':id/locations/:locationId/permissions')
   @RequirePermission('staff:manage')
   getWarehousePermissions(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
   ) {
-    return this.users.getWarehousePermissions(id, warehouseId);
+    return this.users.getWarehousePermissions(id, locationId);
   }
 
-  @Put(':id/warehouses/:warehouseId/permissions')
+  @Put(':id/locations/:locationId/permissions')
   @RequirePermission('staff:manage')
   updateWarehousePermissions(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
     @Body() dto: UpdateUserPermissionsDto,
   ) {
-    return this.users.updateWarehousePermissions(id, warehouseId, dto);
+    return this.users.updateWarehousePermissions(id, locationId, dto);
   }
 }

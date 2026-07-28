@@ -6,7 +6,7 @@ export type ReconcileReport = {
   checked: number;
   mismatches: Array<{
     variant_id: string;
-    warehouse_id: string;
+    location_id: string;
     ok: boolean;
     available_formula_ok?: boolean;
     buckets?: Record<string, { expected: number; ledger: number; ok: boolean }>;
@@ -27,7 +27,7 @@ export class ReconcileService {
   /** Đối soát toàn bộ dòng inventory_levels (KC4 / INV-2) */
   async runFullReconcile(): Promise<ReconcileReport> {
     const levels = await this.prisma.inventoryLevel.findMany({
-      select: { variantId: true, warehouseId: true },
+      select: { variantId: true, locationId: true },
     });
 
     const mismatches: ReconcileReport['mismatches'] = [];
@@ -35,12 +35,12 @@ export class ReconcileService {
     for (const level of levels) {
       const result = await this.inventory.reconcile(
         level.variantId,
-        level.warehouseId,
+        level.locationId,
       );
       if (!result.ok) {
         mismatches.push({
           variant_id: level.variantId.toString(),
-          warehouse_id: level.warehouseId.toString(),
+          location_id: level.locationId.toString(),
           ok: result.ok,
           available_formula_ok: result.available_formula_ok,
           buckets: result.buckets,

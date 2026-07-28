@@ -3,7 +3,7 @@
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- --config ./test/jest-e2e.json customer-debt
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { InventoryBucket, MovementType, PaymentStatus } from '@prisma/client';
+import { InventoryBucket, MovementType, OrderFinancialStatus } from '@prisma/client';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { OrdersModule } from '../src/modules/orders/orders.module';
@@ -11,6 +11,8 @@ import { OrderService } from '../src/modules/orders/order.service';
 import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+
+jest.setTimeout(120000);
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -22,8 +24,7 @@ describeIfDb('Customer debt (integration)', () => {
   let inventoryService: InventoryService;
   let prisma: PrismaService;
 
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
   let customerId: bigint;
   let userId: bigint;
@@ -31,7 +32,7 @@ describeIfDb('Customer debt (integration)', () => {
     userId: bigint;
     email: string;
     roles: string[];
-    warehouseIds: bigint[];
+    locationIds: bigint[];
   };
 
   async function debtBalance() {
@@ -51,7 +52,7 @@ describeIfDb('Customer debt (integration)', () => {
     inventoryService = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const warehouse = await prisma.warehouse.findFirst({
+    const warehouse = await prisma.location.findFirst({
       orderBy: { id: 'asc' },
     });
     const variant = await prisma.productVariant.findFirst();
@@ -60,8 +61,7 @@ describeIfDb('Customer debt (integration)', () => {
     if (!warehouse || !variant || !user || !customer) {
       throw new Error('Run prisma db seed before integration tests');
     }
-    branchId = warehouse.branchId;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     variantId = variant.id;
     customerId = customer.id;
     userId = user.id;
@@ -69,15 +69,15 @@ describeIfDb('Customer debt (integration)', () => {
       userId,
       email: 'test@local.dev',
       roles: ['admin'],
-      warehouseIds: [warehouseId],
+      locationIds: [locationId],
     };
 
     const level = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     await inventoryService.applyMovement({
       variantId,
-      warehouseId,
+      locationId,
       bucket: InventoryBucket.on_hand,
       change: 50 - (level?.onHand ?? 0),
       type: MovementType.adjust,
@@ -95,12 +95,12 @@ describeIfDb('Customer debt (integration)', () => {
 
     const created = await orderService.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         customer_id: customerId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 2,
             price: 100_000,
           },
@@ -116,7 +116,7 @@ describeIfDb('Customer debt (integration)', () => {
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: BigInt(created.id) },
     });
-    expect(order.paymentStatus).toBe(PaymentStatus.mot_phan);
+    expect(order.financialStatus).toBe(OrderFinancialStatus.partially_paid);
     expect(Number(order.paidAmount)).toBe(50_000);
 
     // Phiếu thu thanh toán ban đầu
@@ -128,7 +128,7 @@ describeIfDb('Customer debt (integration)', () => {
 
     // Tất toán phần còn lại
     const paid = await orderService.pay(BigInt(created.id), {}, authUser);
-    expect(paid.payment_status).toBe(PaymentStatus.da_thanh_toan);
+    expect(paid.payment_status).toBe(OrderFinancialStatus.paid);
     expect(await debtBalance()).toBe(balanceBefore);
   });
 
@@ -137,12 +137,12 @@ describeIfDb('Customer debt (integration)', () => {
 
     const created = await orderService.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         customer_id: customerId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 1,
             price: 80_000,
           },

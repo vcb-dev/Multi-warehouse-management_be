@@ -50,7 +50,7 @@ export class PermissionGuard implements CanActivate {
     const user = req.user;
     if (!user) throw new ForbiddenException('Unauthorized');
 
-    const warehouseId = resolveWarehouseId({
+    const locationId = resolveWarehouseId({
       params: req.params,
       query: req.query,
       body: req.body,
@@ -59,10 +59,10 @@ export class PermissionGuard implements CanActivate {
 
     const ok = required.some((perm) => {
       const scope = PERMISSION_SCOPE[perm] ?? PermissionScope.system;
-      if (scope === PermissionScope.warehouse) {
-        return hasPermission(user, perm, warehouseId);
+      if (scope === PermissionScope.location) {
+        return hasPermission(user, perm, locationId);
       }
-      return hasPermission(user, perm, warehouseId);
+      return hasPermission(user, perm, locationId);
     });
 
     if (!ok) throw new ForbiddenException('FORBIDDEN');
@@ -83,18 +83,18 @@ export class BranchScopeGuard implements CanActivate {
     const user = req.user;
     if (!user) return true;
 
-    const warehouseId = resolveWarehouseId({
+    const locationId = resolveWarehouseId({
       params: req.params,
       query: req.query,
       body: req.body,
       headers: req.headers,
     });
 
-    if (!warehouseId) return true;
+    if (!locationId) return true;
 
-    const wid = BigInt(warehouseId);
-    if (isAdminAtWarehouse(user, warehouseId)) return true;
-    if (!user.warehouseIds.some((id) => id === wid)) {
+    const wid = BigInt(locationId);
+    if (isAdminAtWarehouse(user, locationId)) return true;
+    if (!user.locationIds.some((id) => id === wid)) {
       throw new ForbiddenException('FORBIDDEN_SCOPE');
     }
     return true;

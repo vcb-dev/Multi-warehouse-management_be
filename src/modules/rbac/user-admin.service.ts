@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { userDisplayName } from '../../common/utils/user-display-name';
 import {
   ListUsersQueryDto,
   PutWarehouseRolesDto,
@@ -20,26 +21,27 @@ export class UserAdminService {
   async listAssignable(search?: string) {
     const where: Prisma.UserWhereInput = {
       status: 'active',
-      isActive: true,
+      active: true,
     };
     if (search?.trim()) {
       where.OR = [
-        { name: { contains: search.trim(), mode: 'insensitive' } },
+        { firstName: { contains: search.trim(), mode: 'insensitive' } },
+        { lastName: { contains: search.trim(), mode: 'insensitive' } },
         { email: { contains: search.trim(), mode: 'insensitive' } },
       ];
     }
 
     const rows = await this.prisma.user.findMany({
       where,
-      orderBy: [{ name: 'asc' }, { email: 'asc' }],
+      orderBy: [{ firstName: 'asc' }, { email: 'asc' }],
       take: 500,
-      select: { id: true, name: true, email: true },
+      select: { id: true, firstName: true, lastName: true, email: true },
     });
 
     return {
       data: rows.map((u) => ({
         id: u.id.toString(),
-        name: u.name?.trim() || u.email,
+        name: userDisplayName(u) || u.email,
       })),
     };
   }
@@ -50,9 +52,10 @@ export class UserAdminService {
     const where: Prisma.UserWhereInput = {};
     if (query.search) {
       where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
+        { firstName: { contains: query.search, mode: 'insensitive' } },
+        { lastName: { contains: query.search, mode: 'insensitive' } },
         { email: { contains: query.search, mode: 'insensitive' } },
-        { phone: { contains: query.search, mode: 'insensitive' } },
+        { phoneNumber: { contains: query.search, mode: 'insensitive' } },
       ];
     }
     if (
@@ -65,10 +68,10 @@ export class UserAdminService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdOn: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: { _count: { select: { warehouseRoles: true } } },
+        include: { _count: { select: { locationRoles: true } } },
       }),
       this.prisma.user.count({ where }),
     ]);
@@ -76,12 +79,12 @@ export class UserAdminService {
     return {
       data: rows.map((u) => ({
         id: u.id.toString(),
-        name: u.name,
+        name: userDisplayName(u),
         email: u.email,
-        phone: u.phone,
+        phone_number: u.phoneNumber,
         status: u.status,
         roles: u.roles,
-        warehouse_role_count: u._count.warehouseRoles,
+        warehouse_role_count: u._count.locationRoles,
       })),
       meta: { page, limit, total, total_pages: Math.ceil(total / limit) },
     };
@@ -91,9 +94,9 @@ export class UserAdminService {
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(id) },
       include: {
-        warehouseRoles: {
+        locationRoles: {
           include: {
-            warehouse: true,
+            location: true,
             role: { include: { _count: { select: { permissions: true } } } },
           },
         },
@@ -103,13 +106,13 @@ export class UserAdminService {
     return {
       data: {
         id: user.id.toString(),
-        name: user.name,
+        name: userDisplayName(user),
         email: user.email,
-        phone: user.phone,
+        phone_number: user.phoneNumber,
         status: user.status,
-        warehouse_roles: user.warehouseRoles.map((wr) => ({
-          warehouse_id: wr.warehouseId.toString(),
-          warehouse_name: wr.warehouse.name,
+        warehouse_roles: user.locationRoles.map((wr) => ({
+          location_id: wr.locationId.toString(),
+          location_name: wr.location.name,
           role_id: wr.roleId.toString(),
           role_name: wr.role.name,
           permission_count: wr.role._count.permissions,
@@ -126,7 +129,7 @@ export class UserAdminService {
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        isActive,
+        active: isActive,
         status: isActive
           ? user.passwordHash
             ? 'active'
@@ -145,19 +148,19 @@ export class UserAdminService {
 
     const seen = new Set<string>();
     for (const a of dto.assignments) {
-      if (seen.has(a.warehouse_id)) {
+      if (seen.has(a.location_id)) {
         throw new BadRequestException('DUPLICATE_WAREHOUSE');
       }
-      seen.add(a.warehouse_id);
+      seen.add(a.location_id);
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.userWarehouseRole.deleteMany({ where: { userId: user.id } });
+      await tx.userLocationRole.deleteMany({ where: { userId: user.id } });
       if (dto.assignments.length) {
-        await tx.userWarehouseRole.createMany({
+        await tx.userLocationRole.createMany({
           data: dto.assignments.map((a) => ({
             userId: user.id,
-            warehouseId: BigInt(a.warehouse_id),
+            locationId: BigInt(a.location_id),
             roleId: BigInt(a.role_id),
           })),
         });
@@ -166,18 +169,18 @@ export class UserAdminService {
     return this.findOne(id);
   }
 
-  async removeWarehouseRole(id: string, warehouseId: string) {
-    await this.prisma.userWarehouseRole.deleteMany({
-      where: { userId: BigInt(id), warehouseId: BigInt(warehouseId) },
+  async removeWarehouseRole(id: string, locationId: string) {
+    await this.prisma.userLocationRole.deleteMany({
+      where: { userId: BigInt(id), locationId: BigInt(locationId) },
     });
   }
 
-  private async getWarehouseRoleAssignment(id: string, warehouseId: string) {
-    const assignment = await this.prisma.userWarehouseRole.findUnique({
+  private async getWarehouseRoleAssignment(id: string, locationId: string) {
+    const assignment = await this.prisma.userLocationRole.findUnique({
       where: {
-        userId_warehouseId: {
+        userId_locationId: {
           userId: BigInt(id),
-          warehouseId: BigInt(warehouseId),
+          locationId: BigInt(locationId),
         },
       },
       include: {
@@ -189,10 +192,10 @@ export class UserAdminService {
   }
 
   /** Quyền hiệu lực = quyền mặc định của role tại kho, chồng lệch (override) riêng của user. */
-  async getWarehousePermissions(id: string, warehouseId: string) {
-    const assignment = await this.getWarehouseRoleAssignment(id, warehouseId);
+  async getWarehousePermissions(id: string, locationId: string) {
+    const assignment = await this.getWarehouseRoleAssignment(id, locationId);
     const overrides = await this.prisma.userPermissionOverride.findMany({
-      where: { userId: BigInt(id), warehouseId: BigInt(warehouseId) },
+      where: { userId: BigInt(id), locationId: BigInt(locationId) },
       include: { permission: true },
     });
 
@@ -219,10 +222,10 @@ export class UserAdminService {
   /** Lưu lệch quyền (chỉ diff so với mặc định của role) cho user tại một kho. */
   async updateWarehousePermissions(
     id: string,
-    warehouseId: string,
+    locationId: string,
     dto: UpdateUserPermissionsDto,
   ) {
-    const assignment = await this.getWarehouseRoleAssignment(id, warehouseId);
+    const assignment = await this.getWarehouseRoleAssignment(id, locationId);
     if (assignment.role.isSystem) throw new ForbiddenException('ROLE_SYSTEM');
 
     const allPermissions = await this.prisma.permission.findMany({
@@ -251,7 +254,7 @@ export class UserAdminService {
       await tx.userPermissionOverride.deleteMany({
         where: {
           userId: assignment.userId,
-          warehouseId: assignment.warehouseId,
+          locationId: assignment.locationId,
         },
       });
       const rows = [
@@ -268,7 +271,7 @@ export class UserAdminService {
         await tx.userPermissionOverride.createMany({
           data: rows.map((r) => ({
             userId: assignment.userId,
-            warehouseId: assignment.warehouseId,
+            locationId: assignment.locationId,
             permissionId: r.permissionId,
             granted: r.granted,
           })),
@@ -276,6 +279,6 @@ export class UserAdminService {
       }
     });
 
-    return this.getWarehousePermissions(id, warehouseId);
+    return this.getWarehousePermissions(id, locationId);
   }
 }

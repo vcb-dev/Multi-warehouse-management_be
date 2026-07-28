@@ -22,8 +22,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
   let prisma: PrismaService;
 
   let supplierId: bigint;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
   let userId: bigint;
 
@@ -37,16 +36,15 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     prisma = module.get(PrismaService);
 
     const supplier = await prisma.supplier.findFirst({ where: { isActive: true } });
-    const branch = await prisma.branch.findFirst();
-    const warehouse = await prisma.warehouse.findFirst();
+    const branch = await prisma.location.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const variant = await prisma.productVariant.findFirst();
     const user = await prisma.user.findFirst();
     if (!supplier || !branch || !warehouse || !variant || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
     supplierId = supplier.id;
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     variantId = variant.id;
     userId = user.id;
   });
@@ -60,14 +58,13 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
       userId,
       email: 'test@local.dev',
       roles: ['admin'],
-      warehouseIds: [warehouseId],
+      locationIds: [locationId],
     };
 
     const { data: po } = await poService.create(
       {
         supplier_id: supplierId.toString(),
-        branch_id: branchId.toString(),
-        warehouse_id: warehouseId.toString(),
+        location_id: locationId.toString(),
         items: [{ variant_id: variantId.toString(), quantity: 10, unit_price: 50000 }],
       },
       authUser,
@@ -76,7 +73,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     await poService.transition(BigInt(po.id), 'submit', authUser);
 
     let level = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     expect(level?.incoming).toBe(10);
     expect(level?.onHand).toBe(0);
@@ -84,7 +81,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     const { data: rei } = await reiService.create(
       {
         supplier_id: supplierId.toString(),
-        warehouse_id: warehouseId.toString(),
+        location_id: locationId.toString(),
         purchase_order_id: po.id,
         items: [
           {
@@ -100,7 +97,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     await reiService.confirm(BigInt(rei.id), authUser);
 
     level = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     expect(level?.incoming).toBe(0);
     expect(level?.onHand).toBe(10);

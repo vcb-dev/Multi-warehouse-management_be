@@ -82,7 +82,7 @@ export class UpdateUserStatusDto {
 
 class WarehouseRoleAssignmentDto {
   @IsString()
-  warehouse_id!: string;
+  location_id!: string;
 
   @IsString()
   role_id!: string;
