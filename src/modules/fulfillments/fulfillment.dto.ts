@@ -26,7 +26,7 @@ export class CreatePackingDto {
 }
 
 export class UpdatePackingStatusDto {
-  @IsIn([PackingStatus.cho_dan_phieu, PackingStatus.da_dong_goi])
+  @IsIn([PackingStatus.packing, PackingStatus.packed])
   status!: PackingStatus;
 }
 
@@ -46,7 +46,7 @@ export class PushShipmentDto {
 
   @IsOptional()
   @IsString()
-  tracking_code?: string;
+  tracking_number?: string;
 
   @IsOptional()
   @IsNumber()
@@ -120,23 +120,23 @@ export class PushShipmentDto {
 
   @IsOptional()
   @IsString()
-  from_name?: string;
+  origin_name?: string;
 
   @IsOptional()
   @IsString()
-  from_phone?: string;
+  origin_phone?: string;
 
   @IsOptional()
   @IsString()
-  from_address?: string;
+  origin_address1?: string;
 }
 
 export class UpdateShipmentStatusDto {
   @IsIn([
-    ShipmentStatus.dang_giao,
-    ShipmentStatus.da_giao,
-    ShipmentStatus.giao_loi,
-    ShipmentStatus.da_hoan,
+    ShipmentStatus.delivering,
+    ShipmentStatus.delivered,
+    ShipmentStatus.retry_delivery,
+    ShipmentStatus.returned,
   ])
   status!: ShipmentStatus;
 }
@@ -149,7 +149,7 @@ export class CancelFulfillmentDto {
 
 export class CarrierWebhookDto {
   @IsString()
-  tracking_code!: string;
+  tracking_number!: string;
 
   @IsString()
   status!: string;

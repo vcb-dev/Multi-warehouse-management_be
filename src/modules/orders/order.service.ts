@@ -7,6 +7,7 @@ import {
   OrderFulfillmentStatus,
   OrderStatus,
   Prisma,
+  RestockType,
 } from '@prisma/client';
 import { assertAnyLocationAccess, assertLocationAccess } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -21,6 +22,7 @@ import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from './customer-debt.service';
 import { generateOrderCode } from './order-code';
+import { recomputeOrderRefundStatuses } from './order-refund-status';
 import {
   calcLineTotal,
   calcOrderTotals,
@@ -78,10 +80,13 @@ export class OrderService {
         : undefined;
 
     if (stockFilter) {
-      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn còn chờ xử lý (chưa đóng/hủy) —
-      // đơn đã giao/hủy thì tồn tại thời điểm đó không còn phản ánh gì cho
-      // hành động sắp tới. "open" gộp cả ordered/processing cũ.
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ. Không thể chỉ lọc
+      // status='open': dữ liệu Sapo thật có 75.125 đơn 'open' nhưng 73.402 trong
+      // số đó đã giao xong (Sapo không đóng đơn sau khi giao) — nạp hết sẽ vượt
+      // statement_timeout. Thêm fulfillment_status IS NULL để về đúng ~1.7k đơn
+      // thật sự đang chờ, khôi phục giả định "tập này luôn nhỏ" bên dưới.
       where.status = OrderStatus.open;
+      where.fulfillmentStatus = null;
     } else if (query.status === 'closed') {
       // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
       // status='closed' — khớp guard ở order-return.service.ts, vì đa số
@@ -106,12 +111,12 @@ export class OrderService {
       where.assignedToId = BigInt(query.assigned_to);
     }
     if (query.from || query.to) {
-      where.orderedAt = {};
+      where.createdOn = {};
       if (query.from) {
-        where.orderedAt.gte = new Date(query.from);
+        where.createdOn.gte = new Date(query.from);
       }
       if (query.to) {
-        where.orderedAt.lte = new Date(query.to);
+        where.createdOn.lte = new Date(query.to);
       }
     }
     if (query.tags?.trim()) {
@@ -133,7 +138,7 @@ export class OrderService {
         where: { closedAt: null },
         take: 1,
         select: {
-          packingStatus: true,
+          packedStatus: true,
           shipmentStatus: true,
           provider: { select: { name: true } },
         },
@@ -180,7 +185,7 @@ export class OrderService {
       // luôn nhỏ (đơn đã giao/hủy không nằm trong tập này).
       const all = await this.repo.client.order.findMany({
         where,
-        orderBy: { orderedAt: 'desc' },
+        orderBy: { createdOn: 'desc' },
         include: listInclude,
       });
       const stockReadyMap = await computeStockReady(this.repo, all);
@@ -201,7 +206,7 @@ export class OrderService {
     const [rows, total] = await Promise.all([
       this.repo.client.order.findMany({
         where,
-        orderBy: { orderedAt: 'desc' },
+        orderBy: { createdOn: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: listInclude,
@@ -241,18 +246,18 @@ export class OrderService {
             this.repo.client.order.aggregate({
               where: { customerId: order.customerId },
               _count: { _all: true },
-              _sum: { totalAmount: true },
+              _sum: { totalPrice: true },
             }),
             this.repo.client.order.findFirst({
               where: { customerId: order.customerId },
-              orderBy: { orderedAt: 'desc' },
-              select: { id: true, code: true },
+              orderBy: { createdOn: 'desc' },
+              select: { id: true, name: true },
             }),
           ]).then(([agg, last]) => ({
             total_orders: agg._count._all,
-            total_spent: Number(agg._sum.totalAmount ?? 0),
+            total_spent: Number(agg._sum.totalPrice ?? 0),
             last_order_id: last?.id.toString() ?? null,
-            last_order_code: last?.code ?? null,
+            last_order_code: last?.name ?? null,
           }))
         : Promise.resolve(null),
     ]);
@@ -301,34 +306,34 @@ export class OrderService {
       );
     }
 
-    const discountTotal =
-      dto.discount_total !== undefined
-        ? dto.discount_total
-        : Number(order.discountTotal);
-    const shippingFee =
-      dto.shipping_fee !== undefined
-        ? dto.shipping_fee
-        : Number(order.shippingFee);
+    const totalDiscounts =
+      dto.total_discounts !== undefined
+        ? dto.total_discounts
+        : Number(order.totalDiscounts);
+    const totalShippingPrice =
+      dto.total_shipping_price !== undefined
+        ? dto.total_shipping_price
+        : Number(order.totalShippingPrice);
 
     const pricedLines: PricedLine[] = order.items.map((i) => ({
       quantity: i.quantity,
       price: Number(i.price),
-      discount: Number(i.discount),
+      discount: Number(i.totalDiscount),
     }));
-    const subtotal = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
+    const subTotalPrice = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
     const taxRate =
       dto.tax_rate !== undefined
         ? dto.tax_rate
-        : deriveTaxRate(subtotal, discountTotal, Number(order.taxTotal));
+        : deriveTaxRate(subTotalPrice, totalDiscounts, Number(order.totalTax));
     const totals = calcOrderTotals(
       pricedLines,
-      discountTotal,
-      shippingFee,
+      totalDiscounts,
+      totalShippingPrice,
       taxRate,
     );
 
-    const paidAmount = Number(order.paidAmount);
-    if (totals.totalAmount < paidAmount) {
+    const totalReceived = Number(order.totalReceived);
+    if (totals.totalPrice < totalReceived) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Giá trị đơn sau sửa nhỏ hơn số tiền khách đã thanh toán',
@@ -337,16 +342,16 @@ export class OrderService {
     }
 
     const data: Prisma.OrderUpdateInput = {
-      discountTotal,
-      shippingFee,
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      totalAmount: totals.totalAmount,
-      totalQuantity: totals.totalQuantity,
+      totalDiscounts,
+      totalShippingPrice,
+      subTotalPrice: totals.subTotalPrice,
+      totalTax: totals.totalTax,
+      totalPrice: totals.totalPrice,
+      subtotalLineItemsQuantity: totals.subtotalLineItemsQuantity,
       financialStatus:
-        paidAmount >= totals.totalAmount
+        totalReceived >= totals.totalPrice
           ? OrderFinancialStatus.paid
-          : paidAmount > 0
+          : totalReceived > 0
             ? OrderFinancialStatus.partially_paid
             : OrderFinancialStatus.pending,
     };
@@ -355,16 +360,16 @@ export class OrderService {
     if (dto.assigned_to !== undefined) {
       data.assignedTo = { connect: { id: BigInt(dto.assigned_to) } };
     }
-    if (dto.expected_delivery_at !== undefined) {
-      data.expectedDeliveryAt = dto.expected_delivery_at
-        ? new Date(dto.expected_delivery_at)
+    if (dto.expected_delivery_date !== undefined) {
+      data.expectedDeliveryDate = dto.expected_delivery_date
+        ? new Date(dto.expected_delivery_date)
         : null;
     }
     if (dto.shipping_method !== undefined) {
       data.shippingMethod = dto.shipping_method.trim() || null;
     }
 
-    const totalDelta = totals.totalAmount - Number(order.totalAmount);
+    const totalDelta = totals.totalPrice - Number(order.totalPrice);
 
     const updated = await this.repo.client.$transaction(async (tx) => {
       // Sửa đơn làm đổi giá trị → điều chỉnh nợ phải thu theo chênh lệch
@@ -373,9 +378,9 @@ export class OrderService {
           {
             customerId: order.customerId,
             referenceType: CustomerLedgerReferenceType.adjustment,
-            referenceCode: order.code,
+            referenceCode: order.name,
             transactionLabel: 'Sửa đơn hàng',
-            reason: `Cập nhật giá trị đơn ${order.code}`,
+            reason: `Cập nhật giá trị đơn ${order.name}`,
             amount: totalDelta,
             createdById: user.userId,
           },
@@ -395,7 +400,7 @@ export class OrderService {
           action: 'order.update',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.code },
+          metadata: { code: order.name },
         },
       });
 
@@ -422,11 +427,11 @@ export class OrderService {
       return {
         id: order.id.toString(),
         payment_status: OrderFinancialStatus.paid,
-        paid_amount: order.paidAmount.toString(),
+        paid_amount: order.totalReceived.toString(),
       };
     }
 
-    const remaining = Number(order.totalAmount) - Number(order.paidAmount);
+    const remaining = Number(order.totalPrice) - Number(order.totalReceived);
     const payAmount = dto.amount ?? remaining;
 
     if (payAmount <= 0) {
@@ -444,8 +449,8 @@ export class OrderService {
       );
     }
 
-    const newPaidAmount = Number(order.paidAmount) + payAmount;
-    const reachedPaid = newPaidAmount >= Number(order.totalAmount);
+    const newPaidAmount = Number(order.totalReceived) + payAmount;
+    const reachedPaid = newPaidAmount >= Number(order.totalPrice);
     const newStatus = reachedPaid
       ? OrderFinancialStatus.paid
       : OrderFinancialStatus.partially_paid;
@@ -455,7 +460,7 @@ export class OrderService {
         where: { id },
         data: {
           financialStatus: newStatus,
-          paidAmount: newPaidAmount,
+          totalReceived: newPaidAmount,
           ...(reachedPaid ? { paidOn: new Date() } : {}),
         },
       });
@@ -465,10 +470,10 @@ export class OrderService {
           locationId: order.locationId,
           amount: payAmount,
           createdById: user.userId,
-          sourceDocument: order.code,
+          sourceDocument: order.name,
           referenceType: 'order',
           referenceId: order.id,
-          reason: `Thanh toán đơn ${order.code}`,
+          reason: `Thanh toán đơn ${order.name}`,
         },
         tx,
       );
@@ -478,9 +483,9 @@ export class OrderService {
           {
             customerId: order.customerId,
             referenceType: CustomerLedgerReferenceType.payment,
-            referenceCode: order.code,
+            referenceCode: order.name,
             transactionLabel: 'Thanh toán',
-            reason: `Thanh toán đơn ${order.code}`,
+            reason: `Thanh toán đơn ${order.name}`,
             amount: -payAmount,
             createdById: user.userId,
           },
@@ -494,7 +499,7 @@ export class OrderService {
           action: 'order.pay',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.code, amount: payAmount },
+          metadata: { code: order.name, amount: payAmount },
         },
       });
 
@@ -531,8 +536,8 @@ export class OrderService {
     const locationId = BigInt(dto.location_id);
     await this.repo.client.location.findUniqueOrThrow({ where: { id: locationId } });
 
-    if (dto.code) {
-      const dup = await this.repo.findByCode(dto.code.trim());
+    if (dto.name) {
+      const dup = await this.repo.findByCode(dto.name.trim());
       if (dup) {
         throw new BusinessException(
           'DUPLICATE_CODE',
@@ -550,8 +555,8 @@ export class OrderService {
     }));
     const totals = calcOrderTotals(
       pricedLines,
-      dto.discount_total ?? 0,
-      dto.shipping_fee ?? 0,
+      dto.total_discounts ?? 0,
+      dto.total_shipping_price ?? 0,
       dto.tax_rate ?? 0,
     );
 
@@ -560,8 +565,8 @@ export class OrderService {
       ? BigInt(dto.assigned_to)
       : user.userId;
 
-    const initialPaid = dto.paid_amount ?? 0;
-    if (initialPaid > totals.totalAmount) {
+    const initialPaid = dto.total_received ?? 0;
+    if (initialPaid > totals.totalPrice) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Số tiền thanh toán vượt quá giá trị đơn',
@@ -571,13 +576,13 @@ export class OrderService {
 
     try {
       const order = await this.repo.client.$transaction(async (tx) => {
-        const code =
-          dto.code?.trim() || (await generateOrderCode(tx, locationId));
+        const name =
+          dto.name?.trim() || (await generateOrderCode(tx, locationId));
 
-        const initialPaidReachesFull = initialPaid >= totals.totalAmount && totals.totalAmount > 0;
+        const initialPaidReachesFull = initialPaid >= totals.totalPrice && totals.totalPrice > 0;
         const record = await tx.order.create({
           data: {
-            code,
+            name,
             locationId,
             customerId,
             sourceName: dto.source_name?.trim() || null,
@@ -586,14 +591,14 @@ export class OrderService {
             createdById: user.userId,
             email: dto.email?.trim() || null,
             phone: dto.phone?.trim() || null,
-            subtotal: totals.subtotal,
-            discountTotal: dto.discount_total ?? 0,
-            taxTotal: totals.taxTotal,
-            shippingFee: dto.shipping_fee ?? 0,
+            subTotalPrice: totals.subTotalPrice,
+            totalDiscounts: dto.total_discounts ?? 0,
+            totalTax: totals.totalTax,
+            totalShippingPrice: dto.total_shipping_price ?? 0,
             shippingMethod: dto.shipping_method?.trim() || null,
-            totalAmount: totals.totalAmount,
-            totalQuantity: totals.totalQuantity,
-            paidAmount: initialPaid,
+            totalPrice: totals.totalPrice,
+            subtotalLineItemsQuantity: totals.subtotalLineItemsQuantity,
+            totalReceived: initialPaid,
             financialStatus: initialPaidReachesFull
               ? OrderFinancialStatus.paid
               : initialPaid > 0
@@ -602,17 +607,28 @@ export class OrderService {
             ...(initialPaidReachesFull ? { paidOn: new Date() } : {}),
             note: dto.note?.trim() || null,
             tags: dto.tags ?? [],
-            orderedAt: dto.ordered_at ? new Date(dto.ordered_at) : new Date(),
-            expectedDeliveryAt: dto.expected_delivery_at
-              ? new Date(dto.expected_delivery_at)
+            createdOn: dto.created_on ? new Date(dto.created_on) : new Date(),
+            expectedDeliveryDate: dto.expected_delivery_date
+              ? new Date(dto.expected_delivery_date)
               : null,
             deliveryMode: dto.delivery_mode ?? undefined,
-            deliveryToName: dto.delivery_to_name?.trim() || null,
-            deliveryToPhone: dto.delivery_to_phone?.trim() || null,
-            deliveryToAddress: dto.delivery_to_address?.trim() || null,
-            deliveryToWard: dto.delivery_to_ward?.trim() || null,
-            deliveryToDistrict: dto.delivery_to_district?.trim() || null,
-            deliveryToProvince: dto.delivery_to_province?.trim() || null,
+            shippingName: dto.shipping_address?.name?.trim() || null,
+            shippingFirstName: dto.shipping_address?.first_name?.trim() || null,
+            shippingLastName: dto.shipping_address?.last_name?.trim() || null,
+            shippingPhone: dto.shipping_address?.phone?.trim() || null,
+            shippingAddress1: dto.shipping_address?.address1?.trim() || null,
+            shippingAddress2: dto.shipping_address?.address2?.trim() || null,
+            shippingWard: dto.shipping_address?.ward?.trim() || null,
+            shippingWardCode: dto.shipping_address?.ward_code?.trim() || null,
+            shippingDistrict: dto.shipping_address?.district?.trim() || null,
+            shippingDistrictCode: dto.shipping_address?.district_code?.trim() || null,
+            shippingProvince: dto.shipping_address?.province?.trim() || null,
+            shippingProvinceCode: dto.shipping_address?.province_code?.trim() || null,
+            shippingCity: dto.shipping_address?.city?.trim() || null,
+            shippingCountry: dto.shipping_address?.country?.trim() || null,
+            shippingCountryCode: dto.shipping_address?.country_code?.trim() || null,
+            shippingZip: dto.shipping_address?.zip?.trim() || null,
+            shippingCompany: dto.shipping_address?.company?.trim() || null,
             deliveryCodAmount: dto.delivery_cod_amount ?? null,
             deliveryWeightGrams: dto.delivery_weight_grams ?? null,
             deliveryLengthCm: dto.delivery_length_cm ?? null,
@@ -634,12 +650,13 @@ export class OrderService {
             items: {
               create: resolvedItems.map((i) => ({
                 variantId: i.variantId,
-                productName: i.productName,
+                name: i.productName,
                 sku: i.sku,
                 quantity: i.quantity,
                 price: i.price,
-                discount: i.discount,
-                total: i.total,
+                totalDiscount: i.discount,
+                discountedTotal: i.total,
+                originalTotal: i.quantity * i.price,
               })),
             },
           },
@@ -668,10 +685,10 @@ export class OrderService {
             {
               customerId,
               referenceType: CustomerLedgerReferenceType.order,
-              referenceCode: record.code,
+              referenceCode: record.name,
               transactionLabel: 'Bán hàng',
-              reason: `Đơn hàng ${record.code}`,
-              amount: totals.totalAmount,
+              reason: `Đơn hàng ${record.name}`,
+              amount: totals.totalPrice,
               createdById: user.userId,
             },
             tx,
@@ -684,10 +701,10 @@ export class OrderService {
               locationId,
               amount: initialPaid,
               createdById: user.userId,
-              sourceDocument: record.code,
+              sourceDocument: record.name,
               referenceType: 'order',
               referenceId: record.id,
-              reason: `Thanh toán đơn ${record.code}`,
+              reason: `Thanh toán đơn ${record.name}`,
             },
             tx,
           );
@@ -696,9 +713,9 @@ export class OrderService {
               {
                 customerId,
                 referenceType: CustomerLedgerReferenceType.payment,
-                referenceCode: record.code,
+                referenceCode: record.name,
                 transactionLabel: 'Thanh toán',
-                reason: `Thanh toán khi tạo đơn ${record.code}`,
+                reason: `Thanh toán khi tạo đơn ${record.name}`,
                 amount: -initialPaid,
                 createdById: user.userId,
               },
@@ -713,14 +730,14 @@ export class OrderService {
             action: 'order.create',
             entityType: 'order',
             entityId: record.id,
-            metadata: { code: record.code, status: record.status },
+            metadata: { code: record.name, status: record.status },
           },
         });
 
         return record;
       });
 
-      return { id: order.id.toString(), code: order.code, status: order.status };
+      return { id: order.id.toString(), code: order.name, status: order.status };
     } catch (e) {
       if (e instanceof InsufficientStockException) throw e;
       throw e;
@@ -807,7 +824,7 @@ export class OrderService {
             action: 'order.transition_processing',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
@@ -826,7 +843,7 @@ export class OrderService {
         id,
         'Hủy vận đơn trước khi hủy đơn hàng',
       );
-      if (order.shippedAt) {
+      if (order.deliveredOn) {
         throw new BusinessException(
           'INVALID_TRANSITION',
           'Đơn đã xuất hàng, không thể hủy — dùng đổi trả hàng',
@@ -856,15 +873,47 @@ export class OrderService {
             {
               customerId: order.customerId,
               referenceType: CustomerLedgerReferenceType.order,
-              referenceCode: order.code,
+              referenceCode: order.name,
               transactionLabel: 'Hủy đơn',
-              reason: `Hủy đơn hàng ${order.code}`,
-              amount: -Number(order.totalAmount),
+              reason: `Hủy đơn hàng ${order.name}`,
+              amount: -Number(order.totalPrice),
               createdById: user.userId,
             },
             tx,
           );
         }
+
+        // Sapo ghi nhận việc huỷ bằng một bản ghi `refund` không gắn phiếu trả
+        // hàng (`return_id` = null), các dòng mang `restock_type = cancel` —
+        // hàng chưa từng rời kho nên không tính là khách trả về.
+        // `total_refunded` = số khách đã trả: huỷ đơn chưa thu tiền thì bằng 0,
+        // đúng như Sapo (đơn huỷ chưa thu vẫn giữ financial_status cũ).
+        const refundedAmount = Number(order.totalReceived);
+        await tx.orderRefund.create({
+          data: {
+            orderId: id,
+            returnId: null,
+            note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
+            restock: false,
+            totalRefunded: refundedAmount,
+            createdById: user.userId,
+            lineItems: {
+              create: order.items.map((i) => ({
+                orderItemId: i.id,
+                variantId: i.variantId,
+                locationId: order.locationId,
+                productName: i.name,
+                sku: i.sku,
+                variantTitle: i.variantTitle,
+                quantity: i.quantity,
+                price: i.price,
+                subtotal: Number(i.price) * i.quantity,
+                restockType: RestockType.cancel,
+              })),
+            },
+          },
+        });
+
         await tx.order.update({
           where: { id },
           data: {
@@ -873,13 +922,27 @@ export class OrderService {
             cancelReason: dto.reason?.trim() || null,
           },
         });
+
+        // Đặt lại financial/refund/restock_status từ toàn bộ refund của đơn
+        await recomputeOrderRefundStatuses(tx, id);
+        if (refundedAmount > 0) {
+          await tx.order.update({
+            where: { id },
+            data: {
+              financialStatus:
+                refundedAmount >= Number(order.totalPrice)
+                  ? OrderFinancialStatus.refunded
+                  : OrderFinancialStatus.partially_refunded,
+            },
+          });
+        }
         await tx.activityLog.create({
           data: {
             userId: user.userId,
             action: 'order.cancel',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
@@ -898,15 +961,15 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
-      if (order.shippedAt) {
+      if (order.deliveredOn) {
         throw new BusinessException('INVALID_TRANSITION', 'Đơn đã xuất hàng', 409);
       }
-      const shippedAt = await this.repo.client.$transaction(async (tx) => {
+      const deliveredOn = await this.repo.client.$transaction(async (tx) => {
         await this.shipOrderItems(order, user, tx);
         const now = new Date();
         await tx.order.update({
           where: { id },
-          data: { shippedAt: now, fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+          data: { deliveredOn: now, fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
         });
         await tx.activityLog.create({
           data: {
@@ -914,7 +977,7 @@ export class OrderService {
             action: 'order.ship',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
         return now;
@@ -922,7 +985,7 @@ export class OrderService {
       return {
         id: id.toString(),
         status: order.status,
-        shipped_at: shippedAt.toISOString(),
+        shipped_at: deliveredOn.toISOString(),
       };
     }
 
@@ -941,7 +1004,7 @@ export class OrderService {
       await this.repo.client.$transaction(async (tx) => {
         // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
         // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
-        if (!order.shippedAt) {
+        if (!order.deliveredOn) {
           await this.shipOrderItems(order, user, tx);
         }
         const now = new Date();
@@ -952,7 +1015,7 @@ export class OrderService {
             closedOn: now,
             completedOn: now,
             fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
-            shippedAt: order.shippedAt ?? now,
+            deliveredOn: order.deliveredOn ?? now,
           },
         });
         await tx.activityLog.create({
@@ -961,7 +1024,7 @@ export class OrderService {
             action: 'order.complete',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
@@ -978,8 +1041,8 @@ export class OrderService {
       sourceName?: string;
       customerId?: bigint | null;
       items: ResolvedItem[];
-      discountTotal?: number;
-      shippingFee?: number;
+      totalDiscounts?: number;
+      totalShippingPrice?: number;
       note?: string;
       phone?: string;
     },
@@ -996,8 +1059,8 @@ export class OrderService {
         price: i.price,
         discount: i.discount,
       })),
-      discount_total: params.discountTotal,
-      shipping_fee: params.shippingFee,
+      total_discounts: params.totalDiscounts,
+      total_shipping_price: params.totalShippingPrice,
       note: params.note,
       phone: params.phone,
     };

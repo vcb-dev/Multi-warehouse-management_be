@@ -115,7 +115,7 @@ export class ProductRepository {
         select: { variantId: true },
         distinct: ['variantId'],
       }),
-      db.orderReturnItem.findMany({
+      db.orderRefundLineItem.findMany({
         where: { variantId: { in: variantIds } },
         select: { variantId: true },
         distinct: ['variantId'],

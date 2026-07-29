@@ -129,12 +129,12 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       { order_id: orderId.toString() },
       authUser as never,
     );
-    expect(f.packing_status).toBe('cho_dong_goi');
+    expect(f.packed_status).toBe('unknown');
 
     // Đóng gói xong: committed → packing
     await fulfillments.updatePackingStatus(
       BigInt(f.id),
-      { status: 'da_dong_goi' } as never,
+      { status: 'packed' } as never,
       authUser as never,
     );
     let lv = await level();
@@ -163,26 +163,33 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       } as never,
       authUser as never,
     );
-    expect(pushed.shipment_status).toBe('cho_lay_hang');
+    expect(pushed.shipment_status).toBe('pending');
     // 1200g = 3 nấc 500g → base + 2 * extra
     expect(pushed.shipping_fee).toBe(40000 + 2 * 5000);
 
-    // ĐTVC lấy hàng: on_hand −2, packing −2
+    // ĐTVC lấy hàng (Sapo `picked_up`): on_hand −2, packed −2
     await fulfillments.updateShipmentStatus(
       BigInt(f.id),
-      { status: 'dang_giao' } as never,
+      { status: 'picked_up' } as never,
       authUser as never,
     );
     lv = await level();
     expect(lv.onHand).toBe(before.onHand - 2);
     expect(lv.packed).toBe(before.packed);
     const shipped = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(shipped.shippedAt).not.toBeNull();
+    expect(shipped.deliveredOn).not.toBeNull();
 
-    // Giao thành công → đơn completed, fulfillment đóng
+    // Bắt đầu giao → không đụng tồn kho
     await fulfillments.updateShipmentStatus(
       BigInt(f.id),
-      { status: 'da_giao' } as never,
+      { status: 'delivering' } as never,
+      authUser as never,
+    );
+
+    // Giao thành công → đơn closed, fulfillment đóng
+    await fulfillments.updateShipmentStatus(
+      BigInt(f.id),
+      { status: 'delivered' } as never,
       authUser as never,
     );
     const done = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -208,11 +215,15 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       authUser as never,
     );
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'dang_giao' } as never, authUser as never);
+      BigInt(pushed.id), { status: 'picked_up' } as never, authUser as never);
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'giao_loi' } as never, authUser as never);
+      BigInt(pushed.id), { status: 'delivering' } as never, authUser as never);
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'da_hoan' } as never, authUser as never);
+      BigInt(pushed.id), { status: 'retry_delivery' } as never, authUser as never);
+    await fulfillments.updateShipmentStatus(
+      BigInt(pushed.id), { status: 'returning' } as never, authUser as never);
+    await fulfillments.updateShipmentStatus(
+      BigInt(pushed.id), { status: 'returned' } as never, authUser as never);
 
     // Tồn về như trước khi lấy hàng (on_hand +1 trả lại, committed giữ chỗ lại)
     const lv = await level();
@@ -223,7 +234,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     // "processing" cũ = status open & đã xác nhận (confirmedOn khác null)
     expect(o.status).toBe('open');
     expect(o.confirmedOn).not.toBeNull();
-    expect(o.shippedAt).toBeNull();
+    expect(o.deliveredOn).toBeNull();
 
     // Fulfillment đã đóng → giờ hủy đơn được (giải phóng committed)
     await orders.transition(orderId, { action: 'cancel' }, authUser as never);
@@ -238,7 +249,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     const f = await fulfillments.createPackingRequest(
       { order_id: orderId.toString() }, authUser as never);
     await fulfillments.updatePackingStatus(
-      BigInt(f.id), { status: 'da_dong_goi' } as never, authUser as never);
+      BigInt(f.id), { status: 'packed' } as never, authUser as never);
 
     await fulfillments.cancel(BigInt(f.id), {}, authUser as never);
     const lv = await level();

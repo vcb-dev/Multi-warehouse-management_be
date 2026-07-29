@@ -7,7 +7,7 @@ describe('order-pricing', () => {
       0,
       20000,
     );
-    expect(t.subtotal).toBe(200000);
-    expect(t.totalAmount).toBe(220000);
+    expect(t.subTotalPrice).toBe(200000);
+    expect(t.totalPrice).toBe(220000);
   });
 });

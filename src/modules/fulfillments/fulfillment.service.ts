@@ -157,10 +157,10 @@ export class FulfillmentService {
       }
       const record = await tx.fulfillment.create({
         data: {
-          code: await generateFulfillmentCode(tx, order.id, order.code),
+          name: await generateFulfillmentCode(tx, order.id, order.name),
           orderId: order.id,
-          packingStatus: PackingStatus.cho_dong_goi,
-          packerId: dto.packer_id ? BigInt(dto.packer_id) : null,
+          packedStatus: PackingStatus.unknown,
+          assignedPackerId: dto.packer_id ? BigInt(dto.packer_id) : null,
           createdById: user.userId,
         },
         include: {
@@ -174,8 +174,8 @@ export class FulfillmentService {
           entityType: 'order',
           entityId: order.id,
           metadata: {
-            code: order.code,
-            fulfillment_code: record.code,
+            code: order.name,
+            fulfillment_code: record.name,
             packer_name: record.packer
               ? (userDisplayName(record.packer) ?? record.packer.email)
               : null,
@@ -197,14 +197,14 @@ export class FulfillmentService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
     }
     const allowed: Record<string, PackingStatus[]> = {
-      [PackingStatus.cho_dong_goi]: [
-        PackingStatus.cho_dan_phieu,
-        PackingStatus.da_dong_goi,
+      [PackingStatus.unknown]: [
+        PackingStatus.packing,
+        PackingStatus.packed,
       ],
-      [PackingStatus.cho_dan_phieu]: [PackingStatus.da_dong_goi],
-      [PackingStatus.da_dong_goi]: [],
+      [PackingStatus.packing]: [PackingStatus.packed],
+      [PackingStatus.packed]: [],
     };
-    if (!f.packingStatus || !allowed[f.packingStatus]?.includes(dto.status)) {
+    if (!f.packedStatus || !allowed[f.packedStatus]?.includes(dto.status)) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Trạng thái đóng gói không hợp lệ',
@@ -212,7 +212,7 @@ export class FulfillmentService {
       );
     }
     await this.prisma.$transaction(async (tx) => {
-      if (dto.status === PackingStatus.da_dong_goi) {
+      if (dto.status === PackingStatus.packed) {
         // committed → packed: giữ nguyên available, hàng vào khu đóng gói
         for (const item of sortForLocking(f.order.items)) {
           await this.inventory.applyMovements(
@@ -245,9 +245,9 @@ export class FulfillmentService {
       await tx.fulfillment.update({
         where: { id },
         data: {
-          packingStatus: dto.status,
-          ...(dto.status === PackingStatus.da_dong_goi
-            ? { packedAt: new Date() }
+          packedStatus: dto.status,
+          ...(dto.status === PackingStatus.packed
+            ? { packedOn: new Date() }
             : {}),
         },
       });
@@ -258,8 +258,8 @@ export class FulfillmentService {
           entityType: 'order',
           entityId: f.orderId,
           metadata: {
-            code: f.order.code,
-            fulfillment_code: f.code,
+            code: f.order.name,
+            fulfillment_code: f.name,
             status: dto.status,
           },
         },
@@ -282,7 +282,7 @@ export class FulfillmentService {
             action: 'fulfillment.print',
             entityType: 'order',
             entityId: f.orderId,
-            metadata: { code: f.order.code, fulfillment_code: f.code },
+            metadata: { code: f.order.name, fulfillment_code: f.name },
           },
         });
       });
@@ -345,7 +345,7 @@ export class FulfillmentService {
     }
 
     const codAmount =
-      dto.cod_amount ?? Number(order.totalAmount) - Number(order.paidAmount);
+      dto.cod_amount ?? Number(order.totalPrice) - Number(order.totalReceived);
 
     let location: { name: string; phone: string | null; address: string | null; ward: string | null; district: string | null; province: string | null } | null = null;
     const locationId = dto.location_id
@@ -381,12 +381,12 @@ export class FulfillmentService {
         );
       }
       const shipmentData = {
-        shipmentStatus: ShipmentStatus.cho_lay_hang,
+        shipmentStatus: ShipmentStatus.pending,
         shippingType: dto.shipping_type,
         providerId: provider.id,
         serviceCode: dto.service_code ?? null,
         serviceName,
-        trackingCode: dto.tracking_code ?? null,
+        trackingNumber: dto.tracking_number ?? null,
         shippingFee,
         feePayer: dto.fee_payer,
         codAmount,
@@ -403,19 +403,19 @@ export class FulfillmentService {
         toDistrict: dto.to_district,
         toProvince: dto.to_province,
         locationId,
-        fromName: dto.from_name ?? location?.name ?? null,
-        fromPhone: dto.from_phone ?? location?.phone ?? null,
-        fromAddress:
-          dto.from_address ??
+        originName: dto.origin_name ?? location?.name ?? null,
+        originPhone: dto.origin_phone ?? location?.phone ?? null,
+        originAddress1:
+          dto.origin_address1 ??
           (fromAddressParts.length ? fromAddressParts.join(', ') : null),
-        pushedAt: new Date(),
+        shipmentCreatedOn: new Date(),
       };
 
       const record = open
         ? await tx.fulfillment.update({ where: { id: open.id }, data: shipmentData })
         : await tx.fulfillment.create({
             data: {
-              code: await generateFulfillmentCode(tx, order.id, order.code),
+              name: await generateFulfillmentCode(tx, order.id, order.name),
               orderId: order.id,
               createdById: user.userId,
               ...shipmentData,
@@ -439,10 +439,10 @@ export class FulfillmentService {
           entityType: 'order',
           entityId: order.id,
           metadata: {
-            code: order.code,
-            fulfillment_code: record.code,
+            code: order.name,
+            fulfillment_code: record.name,
             provider_name: provider.name,
-            tracking_code: dto.tracking_code ?? null,
+            tracking_number: dto.tracking_number ?? null,
           },
         },
       });
@@ -468,16 +468,20 @@ export class FulfillmentService {
     if (f.closedAt) {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
     }
+    // Vòng đời vận đơn theo đúng Sapo: pending → picked_up → delivering →
+    // delivered, nhánh lỗi retry_delivery → returning → returned.
     const allowed: Partial<Record<ShipmentStatus, ShipmentStatus[]>> = {
-      [ShipmentStatus.cho_lay_hang]: [ShipmentStatus.dang_giao],
-      [ShipmentStatus.dang_giao]: [
-        ShipmentStatus.da_giao,
-        ShipmentStatus.giao_loi,
+      [ShipmentStatus.pending]: [ShipmentStatus.picked_up],
+      [ShipmentStatus.picked_up]: [ShipmentStatus.delivering],
+      [ShipmentStatus.delivering]: [
+        ShipmentStatus.delivered,
+        ShipmentStatus.retry_delivery,
       ],
-      [ShipmentStatus.giao_loi]: [
-        ShipmentStatus.dang_giao,
-        ShipmentStatus.da_hoan,
+      [ShipmentStatus.retry_delivery]: [
+        ShipmentStatus.delivering,
+        ShipmentStatus.returning,
       ],
+      [ShipmentStatus.returning]: [ShipmentStatus.returned],
     };
     if (!f.shipmentStatus || !allowed[f.shipmentStatus]?.includes(status)) {
       throw new BusinessException(
@@ -490,9 +494,9 @@ export class FulfillmentService {
     await this.prisma.$transaction(async (tx) => {
       const now = new Date();
 
-      if (status === ShipmentStatus.dang_giao && !f.pickedUpAt) {
-        // ĐTVC lấy hàng: xuất kho — trừ on_hand và giải phóng packing/committed
-        const reservedBucket = f.packedAt
+      if (status === ShipmentStatus.picked_up) {
+        // ĐTVC lấy hàng: xuất kho — trừ on_hand và giải phóng packed/committed
+        const reservedBucket = f.packedOn
           ? InventoryBucket.packed
           : InventoryBucket.committed;
         for (const item of sortForLocking(f.order.items)) {
@@ -524,7 +528,7 @@ export class FulfillmentService {
         }
         await tx.order.update({
           where: { id: f.orderId },
-          data: { shippedAt: now },
+          data: { deliveredOn: now },
         });
         await tx.fulfillment.update({
           where: { id: f.id },
@@ -534,8 +538,8 @@ export class FulfillmentService {
         return;
       }
 
-      if (status === ShipmentStatus.dang_giao) {
-        // Giao lại sau khi giao lỗi — hàng vẫn đang ở ĐTVC, không đụng tồn kho
+      if (status === ShipmentStatus.delivering) {
+        // Bắt đầu giao / giao lại sau khi lỗi — hàng đang ở ĐTVC, không đụng tồn kho
         await tx.fulfillment.update({
           where: { id: f.id },
           data: { shipmentStatus: status },
@@ -544,10 +548,10 @@ export class FulfillmentService {
         return;
       }
 
-      if (status === ShipmentStatus.da_giao) {
+      if (status === ShipmentStatus.delivered) {
         await tx.fulfillment.update({
           where: { id: f.id },
-          data: { shipmentStatus: status, deliveredAt: now, closedAt: now },
+          data: { shipmentStatus: status, deliveredOn: now, closedAt: now },
         });
         await tx.order.update({
           where: { id: f.orderId },
@@ -562,7 +566,7 @@ export class FulfillmentService {
         return;
       }
 
-      if (status === ShipmentStatus.giao_loi) {
+      if (status === ShipmentStatus.retry_delivery) {
         await tx.fulfillment.update({
           where: { id: f.id },
           data: { shipmentStatus: status },
@@ -571,7 +575,17 @@ export class FulfillmentService {
         return;
       }
 
-      // da_hoan: hàng về kho — nhập lại on_hand và giữ chỗ committed như trước khi xuất
+      if (status === ShipmentStatus.returning) {
+        // ĐTVC đang chuyển hoàn — hàng chưa về tới kho nên chưa nhập lại tồn
+        await tx.fulfillment.update({
+          where: { id: f.id },
+          data: { shipmentStatus: status },
+        });
+        await this.logShipment(tx, f, 'fulfillment.returning', user);
+        return;
+      }
+
+      // returned: hàng đã về tới kho — nhập lại on_hand và giữ chỗ committed như trước khi xuất
       for (const item of sortForLocking(f.order.items)) {
         await this.inventory.applyMovements(
           [
@@ -605,7 +619,7 @@ export class FulfillmentService {
       });
       await tx.order.update({
         where: { id: f.orderId },
-        data: { shippedAt: null },
+        data: { deliveredOn: null },
       });
       await this.logShipment(tx, f, 'fulfillment.returned', user);
     });
@@ -625,9 +639,9 @@ export class FulfillmentService {
         entityType: 'order',
         entityId: f.orderId,
         metadata: {
-          code: f.order.code,
-          fulfillment_code: f.code,
-          tracking_code: f.trackingCode,
+          code: f.order.name,
+          fulfillment_code: f.name,
+          tracking_number: f.trackingNumber,
         },
       },
     });
@@ -638,7 +652,7 @@ export class FulfillmentService {
     if (f.closedAt) {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
     }
-    if (f.shipmentStatus && f.shipmentStatus !== ShipmentStatus.cho_lay_hang) {
+    if (f.shipmentStatus && f.shipmentStatus !== ShipmentStatus.pending) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Vận đơn đã lấy hàng, không thể hủy',
@@ -646,7 +660,7 @@ export class FulfillmentService {
       );
     }
     await this.prisma.$transaction(async (tx) => {
-      if (f.packedAt) {
+      if (f.packedOn) {
         // Trả hàng từ khu đóng gói về trạng thái giữ chỗ
         for (const item of sortForLocking(f.order.items)) {
           await this.inventory.applyMovements(
@@ -680,8 +694,8 @@ export class FulfillmentService {
       await tx.fulfillment.update({
         where: { id },
         data: {
-          ...(f.shipmentStatus ? { shipmentStatus: ShipmentStatus.huy } : {}),
-          cancelledAt: now,
+          ...(f.shipmentStatus ? { shipmentStatus: ShipmentStatus.cancelled } : {}),
+          cancelledOn: now,
           closedAt: now,
           cancelReason: dto.reason,
         },
@@ -693,8 +707,8 @@ export class FulfillmentService {
           entityType: 'order',
           entityId: f.orderId,
           metadata: {
-            code: f.order.code,
-            fulfillment_code: f.code,
+            code: f.order.name,
+            fulfillment_code: f.name,
             reason: dto.reason ?? null,
           },
         },
@@ -722,7 +736,7 @@ export class FulfillmentService {
     const f = await this.prisma.fulfillment.findFirst({
       where: {
         providerId: provider.id,
-        trackingCode: dto.tracking_code,
+        trackingNumber: dto.tracking_number,
         closedAt: null,
       },
       include: { order: { include: { items: true } } },

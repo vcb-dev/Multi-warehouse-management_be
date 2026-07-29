@@ -54,7 +54,7 @@ export class OrderRepository {
   }
 
   findByCode(code: string) {
-    return this.prisma.order.findUnique({ where: { code } });
+    return this.prisma.order.findUnique({ where: { name: code } });
   }
 
   get client() {

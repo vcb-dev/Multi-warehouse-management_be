@@ -105,7 +105,7 @@ describeIfDb('Customer debt (integration)', () => {
             price: 100_000,
           },
         ],
-        paid_amount: 50_000,
+        total_received: 50_000,
       },
       authUser,
     );
@@ -117,7 +117,7 @@ describeIfDb('Customer debt (integration)', () => {
       where: { id: BigInt(created.id) },
     });
     expect(order.financialStatus).toBe(OrderFinancialStatus.partially_paid);
-    expect(Number(order.paidAmount)).toBe(50_000);
+    expect(Number(order.totalReceived)).toBe(50_000);
 
     // Phiếu thu thanh toán ban đầu
     const receipts = await prisma.voucher.findMany({

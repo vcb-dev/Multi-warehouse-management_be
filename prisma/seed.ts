@@ -315,18 +315,18 @@ async function main() {
   });
 
   const rootCategory = await prisma.category.upsert({
-    where: { slug: 'tat-ca' },
+    where: { alias: 'tat-ca' },
     update: {},
     create: {
       name: 'Tất cả',
-      slug: 'tat-ca',
+      alias: 'tat-ca',
       conditionType: 'manual',
     },
   });
 
   console.log('Seed OK extras:', {
     customerGroups: customerGroups.length,
-    rootCategory: rootCategory.slug,
+    rootCategory: rootCategory.alias,
   });
 
   let customer = await prisma.customer.findFirst({
