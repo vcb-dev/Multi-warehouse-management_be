@@ -5,12 +5,14 @@ import {
   CarrierServiceConfig,
 } from './carrier-adapter';
 
+// Trạng thái webhook của ĐTVC → trạng thái vận đơn (đã trùng tên với Sapo)
 const WEBHOOK_STATUS_MAP: Record<string, ShipmentStatus> = {
-  picked_up: ShipmentStatus.dang_giao,
-  delivering: ShipmentStatus.dang_giao,
-  delivered: ShipmentStatus.da_giao,
-  failed: ShipmentStatus.giao_loi,
-  returned: ShipmentStatus.da_hoan,
+  picked_up: ShipmentStatus.picked_up,
+  delivering: ShipmentStatus.delivering,
+  delivered: ShipmentStatus.delivered,
+  failed: ShipmentStatus.retry_delivery,
+  returning: ShipmentStatus.returning,
+  returned: ShipmentStatus.returned,
 };
 
 /** Adapter mặc định: phí tính từ services_config, chưa gọi API hãng nào. */

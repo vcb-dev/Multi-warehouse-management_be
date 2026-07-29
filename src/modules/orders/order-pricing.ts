@@ -4,11 +4,12 @@ export type PricedLine = {
   discount?: number;
 };
 
+/** Tên field theo Sapo Order (sub_total_price / total_tax / total_price / ...) */
 export type OrderTotals = {
-  subtotal: number;
-  taxTotal: number;
-  totalAmount: number;
-  totalQuantity: number;
+  subTotalPrice: number;
+  totalTax: number;
+  totalPrice: number;
+  subtotalLineItemsQuantity: number;
 };
 
 export function calcLineTotal(line: PricedLine): number {
@@ -17,25 +18,25 @@ export function calcLineTotal(line: PricedLine): number {
 
 export function calcOrderTotals(
   lines: PricedLine[],
-  discountTotal = 0,
-  shippingFee = 0,
+  totalDiscounts = 0,
+  totalShippingPrice = 0,
   taxRate = 0,
 ): OrderTotals {
-  const subtotal = lines.reduce((s, l) => s + calcLineTotal(l), 0);
-  const taxable = Math.max(0, subtotal - discountTotal);
-  const taxTotal = Math.round(taxable * taxRate);
-  const totalAmount = taxable + taxTotal + shippingFee;
-  const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0);
-  return { subtotal, taxTotal, totalAmount, totalQuantity };
+  const subTotalPrice = lines.reduce((s, l) => s + calcLineTotal(l), 0);
+  const taxable = Math.max(0, subTotalPrice - totalDiscounts);
+  const totalTax = Math.round(taxable * taxRate);
+  const totalPrice = taxable + totalTax + totalShippingPrice;
+  const subtotalLineItemsQuantity = lines.reduce((s, l) => s + l.quantity, 0);
+  return { subTotalPrice, totalTax, totalPrice, subtotalLineItemsQuantity };
 }
 
 /** Khôi phục tỷ lệ thuế từ totals đã lưu khi client không gửi tax_rate */
 export function deriveTaxRate(
-  subtotal: number,
-  discountTotal: number,
-  taxTotal: number,
+  subTotalPrice: number,
+  totalDiscounts: number,
+  totalTax: number,
 ): number {
-  const taxable = Math.max(0, subtotal - discountTotal);
-  if (taxable <= 0 || taxTotal <= 0) return 0;
-  return taxTotal / taxable;
+  const taxable = Math.max(0, subTotalPrice - totalDiscounts);
+  if (taxable <= 0 || totalTax <= 0) return 0;
+  return totalTax / taxable;
 }

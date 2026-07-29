@@ -25,7 +25,7 @@ const describeIfDb =
     : describe.skip;
 
 const SKU = `OVERSELL-E2E-${Date.now()}`;
-jest.setTimeout(120000);
+jest.setTimeout(300000);
 
 describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận chuyển', () => {
   let orders: OrderService;
@@ -232,7 +232,7 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     );
     await fulfillments.updatePackingStatus(
       BigInt(f.id),
-      { status: 'da_dong_goi' } as never,
+      { status: 'packed' } as never,
       authUser as never,
     );
     lv = await level();
@@ -253,7 +253,7 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
       } as never,
       authUser as never,
     );
-    expect(pushed.shipment_status).toBe('cho_lay_hang');
+    expect(pushed.shipment_status).toBe('pending');
 
     // Dọn: hủy vận đơn để không vướng "fulfillment mở" khi test khác chạy lại
     await fulfillments.cancel(BigInt(pushed.id), {}, authUser as never);

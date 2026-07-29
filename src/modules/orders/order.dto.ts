@@ -35,6 +35,27 @@ export class OrderItemDto {
   discount?: number;
 }
 
+/** Sapo `shipping_address` / `billing_address` */
+export class ShippingAddressDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() first_name?: string;
+  @IsOptional() @IsString() last_name?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() address1?: string;
+  @IsOptional() @IsString() address2?: string;
+  @IsOptional() @IsString() ward?: string;
+  @IsOptional() @IsString() ward_code?: string;
+  @IsOptional() @IsString() district?: string;
+  @IsOptional() @IsString() district_code?: string;
+  @IsOptional() @IsString() province?: string;
+  @IsOptional() @IsString() province_code?: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() country?: string;
+  @IsOptional() @IsString() country_code?: string;
+  @IsOptional() @IsString() zip?: string;
+  @IsOptional() @IsString() company?: string;
+}
+
 export class CreateOrderDto {
   @IsString()
   location_id!: string;
@@ -54,15 +75,15 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  code?: string;
+  name?: string;
 
   @IsOptional()
   @IsString()
-  ordered_at?: string;
+  created_on?: string;
 
   @IsOptional()
   @IsString()
-  expected_delivery_at?: string;
+  expected_delivery_date?: string;
 
   @IsOptional()
   @IsArray()
@@ -89,12 +110,12 @@ export class CreateOrderDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  discount_total?: number;
+  total_discounts?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
-  shipping_fee?: number;
+  total_shipping_price?: number;
 
   @IsOptional()
   @IsString()
@@ -109,36 +130,18 @@ export class CreateOrderDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  paid_amount?: number;
+  total_received?: number;
 
   // --- Giao hàng (chỉ lưu thông tin, không tự tạo vận đơn) ---
   @IsOptional()
   @IsEnum(OrderDeliveryMode)
   delivery_mode?: OrderDeliveryMode;
 
+  /// Sapo gửi/nhận địa chỉ giao hàng dưới dạng object `shipping_address`
   @IsOptional()
-  @IsString()
-  delivery_to_name?: string;
-
-  @IsOptional()
-  @IsString()
-  delivery_to_phone?: string;
-
-  @IsOptional()
-  @IsString()
-  delivery_to_address?: string;
-
-  @IsOptional()
-  @IsString()
-  delivery_to_ward?: string;
-
-  @IsOptional()
-  @IsString()
-  delivery_to_district?: string;
-
-  @IsOptional()
-  @IsString()
-  delivery_to_province?: string;
+  @ValidateNested()
+  @Type(() => ShippingAddressDto)
+  shipping_address?: ShippingAddressDto;
 
   @IsOptional()
   @IsNumber()
@@ -284,17 +287,17 @@ export class UpdateOrderDto {
 
   @IsOptional()
   @IsString()
-  expected_delivery_at?: string;
+  expected_delivery_date?: string;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
-  discount_total?: number;
+  total_discounts?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
-  shipping_fee?: number;
+  total_shipping_price?: number;
 
   @IsOptional()
   @IsString()

@@ -3,6 +3,7 @@ import {
   CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
+  RestockType,
   OrderFulfillmentStatus,
   OrderRefundStatus,
   OrderReturnStatus,
@@ -22,6 +23,7 @@ import { CustomerDebtService } from '../orders/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
 import { CreateOrderReturnDto, ListOrderReturnsQueryDto } from '../orders/order.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { recomputeOrderRefundStatuses } from '../orders/order-refund-status';
 import { serializeOrderReturnLine } from './order-return.serializer';
 
 @Injectable()
@@ -36,7 +38,7 @@ export class OrderReturnService {
   async list(query: ListOrderReturnsQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where: Prisma.OrderReturnItemWhereInput = {};
+    const where: Prisma.OrderRefundLineItemWhereInput = {};
 
     where.locationId = { in: user.locationIds };
 
@@ -45,31 +47,30 @@ export class OrderReturnService {
       where.OR = [
         { sku: { contains: q, mode: 'insensitive' } },
         { productName: { contains: q, mode: 'insensitive' } },
-        { orderReturn: { code: { contains: q, mode: 'insensitive' } } },
+        { refund: { orderReturn: { code: { contains: q, mode: 'insensitive' } } } },
         {
-          orderReturn: {
-            order: { code: { contains: q, mode: 'insensitive' } },
-          },
+          refund: { order: { name: { contains: q, mode: 'insensitive' } } },
         },
       ];
     }
 
     const [rows, total] = await Promise.all([
-      this.prisma.orderReturnItem.findMany({
+      this.prisma.orderRefundLineItem.findMany({
         where,
-        orderBy: { orderReturn: { createdAt: 'desc' } },
+        orderBy: { refund: { createdOn: 'desc' } },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          orderReturn: {
+          refund: {
             include: {
               order: { include: { location: true } },
+              orderReturn: true,
               createdBy: true,
             },
           },
         },
       }),
-      this.prisma.orderReturnItem.count({ where }),
+      this.prisma.orderRefundLineItem.count({ where }),
     ]);
 
     return {
@@ -135,15 +136,26 @@ export class OrderReturnService {
     }
 
     const record = await this.prisma.$transaction(async (tx) => {
+      // Sapo: phiếu trả hàng (`return`) chỉ giữ mã + lý do; tiền và việc nhập
+      // kho nằm ở bản ghi `refund` trỏ về nó qua `return_id`.
       const ret = await tx.orderReturn.create({
         data: {
           code,
           orderId,
           reason: dto.reason?.trim() || null,
-          refundAmount: dto.refund_amount,
-          restock,
           createdById: user.userId,
-          items: {
+        },
+      });
+
+      const refund = await tx.orderRefund.create({
+        data: {
+          orderId,
+          returnId: ret.id,
+          note: dto.reason?.trim() || null,
+          restock,
+          totalRefunded: dto.refund_amount,
+          createdById: user.userId,
+          lineItems: {
             create: dto.items.map((i) => {
               const key = `${i.variant_id}:${i.location_id}`;
               const oi = orderItemMap.get(key);
@@ -155,22 +167,28 @@ export class OrderReturnService {
                     .join(' / ') || null
                 : null;
               return {
+                orderItemId: oi?.id ?? null,
                 variantId: BigInt(i.variant_id),
                 locationId: BigInt(i.location_id),
-                productName: oi?.productName ?? variant?.product.name ?? '',
+                productName: oi?.name ?? variant?.product.name ?? '',
                 sku: oi?.sku ?? variant?.sku ?? '',
                 variantTitle,
                 quantity: i.quantity,
                 price: i.price,
+                subtotal: i.price * i.quantity,
+                // Khách trả hàng: nhập lại kho -> `return_item`, không nhập -> `no_restock`
+                restockType: restock
+                  ? RestockType.return_item
+                  : RestockType.no_restock,
               };
             }),
           },
         },
-        include: { items: true },
+        include: { lineItems: true },
       });
 
       if (restock) {
-        for (const item of sortForLocking(ret.items)) {
+        for (const item of sortForLocking(refund.lineItems)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -193,32 +211,34 @@ export class OrderReturnService {
         ReturnType<VoucherService['createPayment']>
       > | null = null;
 
-      if (deductFromDebt) {
-        await this.customerDebt.recordEntry(
-          {
-            customerId: order.customerId!,
-            referenceType: CustomerLedgerReferenceType.order_return,
-            referenceCode: ret.code,
-            transactionLabel: 'Trả hàng — trừ công nợ',
-            reason: dto.reason?.trim() || `Trả hàng đơn ${order.code}`,
-            amount: -dto.refund_amount,
-            createdById: user.userId,
-          },
-          tx,
-        );
-      } else {
-        voucher = await this.vouchers.createPayment(
-          {
-            locationId: order.locationId,
-            amount: dto.refund_amount,
-            createdById: user.userId,
-            sourceDocument: order.code,
-            referenceType: 'order_return',
-            referenceId: ret.id,
-            reason: dto.reason?.trim() || `Hoàn tiền đơn ${order.code}`,
-          },
-          tx,
-        );
+      if (dto.refund_amount > 0) {
+        if (deductFromDebt) {
+          await this.customerDebt.recordEntry(
+            {
+              customerId: order.customerId!,
+              referenceType: CustomerLedgerReferenceType.order_return,
+              referenceCode: ret.code,
+              transactionLabel: 'Trả hàng — trừ công nợ',
+              reason: dto.reason?.trim() || `Trả hàng đơn ${order.name}`,
+              amount: -dto.refund_amount,
+              createdById: user.userId,
+            },
+            tx,
+          );
+        } else {
+          voucher = await this.vouchers.createPayment(
+            {
+              locationId: order.locationId,
+              amount: dto.refund_amount,
+              createdById: user.userId,
+              sourceDocument: order.name,
+              referenceType: 'order_return',
+              referenceId: ret.id,
+              reason: dto.reason?.trim() || `Hoàn tiền đơn ${order.name}`,
+            },
+            tx,
+          );
+        }
       }
 
       await tx.activityLog.create({
@@ -238,43 +258,15 @@ export class OrderReturnService {
         },
       });
 
-      // return_status/refund_status độc lập với status (theo Sapo) — không còn
-      // ghi đè status='returned' như trước (điều đó xóa mất việc đơn đã 'closed').
-      const totalOrderedQty = order.items.reduce((s, i) => s + i.quantity, 0);
-      const returnedAgg = await tx.orderReturnItem.aggregate({
-        where: { orderReturn: { orderId } },
-        _sum: { quantity: true },
-      });
-      const totalReturnedQty = returnedAgg._sum.quantity ?? 0;
-      const returnStatus =
-        totalReturnedQty >= totalOrderedQty
-          ? OrderReturnStatus.returned
-          : OrderReturnStatus.in_progress;
+      await recomputeOrderRefundStatuses(tx, orderId);
 
-      const refundAgg = await tx.orderReturn.aggregate({
-        where: { orderId },
-        _sum: { refundAmount: true },
-      });
-      const totalRefunded = Number(refundAgg._sum.refundAmount ?? 0);
-      const refundStatus =
-        totalRefunded >= Number(order.totalAmount)
-          ? OrderRefundStatus.refunded
-          : totalRefunded > 0
-            ? OrderRefundStatus.partial
-            : OrderRefundStatus.no_refund;
-
-      await tx.order.update({
-        where: { id: orderId },
-        data: { returnStatus, refundStatus },
-      });
-
-      return { ret, voucher };
+      return { ret, refund, voucher };
     });
 
     return {
       id: record.ret.id.toString(),
       code: record.ret.code,
-      refund_amount: Number(record.ret.refundAmount),
+      refund_amount: Number(record.refund.totalRefunded),
       voucher: record.voucher,
     };
   }
@@ -294,9 +286,9 @@ export class OrderReturnService {
       purchased.set(key, (purchased.get(key) ?? 0) + i.quantity);
     }
 
-    const returned = await this.prisma.orderReturnItem.groupBy({
+    const returned = await this.prisma.orderRefundLineItem.groupBy({
       by: ['variantId', 'locationId'],
-      where: { orderReturn: { orderId } },
+      where: { refund: { orderId } },
       _sum: { quantity: true },
     });
     const already = new Map<string, number>();
