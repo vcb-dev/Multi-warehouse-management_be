@@ -3,13 +3,13 @@ import { PrismaClient } from '@prisma/client';
 /** Sinh mã đơn theo tiền tố chi nhánh (O-3) */
 export async function generateOrderCode(
   prisma: PrismaClient | Parameters<Parameters<PrismaClient['$transaction']>[0]>[0],
-  branchId: bigint,
+  locationId: bigint,
 ): Promise<string> {
-  const branch = await prisma.branch.findUniqueOrThrow({
-    where: { id: branchId },
+  const branch = await prisma.location.findUniqueOrThrow({
+    where: { id: locationId },
   });
-  const prefix = branch.code.replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6);
-  const count = await prisma.order.count({ where: { branchId } });
+  const prefix = (branch.code ?? branch.name).replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6);
+  const count = await prisma.order.count({ where: { locationId } });
   return `${prefix}${String(count + 1).padStart(6, '0')}`;
 }
 

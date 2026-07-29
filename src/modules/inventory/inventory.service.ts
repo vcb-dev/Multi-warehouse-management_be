@@ -3,7 +3,7 @@ import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { assertWarehouseAccess as assertUserWarehouseAccess } from '../../common/auth/access';
+import { assertLocationAccess as assertUserLocationAccess } from '../../common/auth/access';
 import { InventoryRepository } from './inventory.repository';
 import {
   ApplyMovementInput,
@@ -20,6 +20,23 @@ import {
  */
 const MOVEMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
+/**
+ * Các bước trong vòng đời đơn hàng được phép giữ chỗ/di chuyển vượt tồn thực
+ * tế (bán âm/backorder giống Sapo) — cảnh báo "Hết hàng" ở giao diện thay vì
+ * chặn cứng lúc đặt/đóng gói/xuất đơn. Tồn vật lý (on_hand) tự nó không bao
+ * giờ được âm (vẫn chặn ở nhánh riêng bên dưới); việc kiểm tra đủ hàng thật
+ * trước khi bàn giao cho ĐTVC chuyển sang FulfillmentService.pushShipment().
+ * Các module khác (nhập/chuyển/trả hàng...) không nằm trong danh sách này
+ * nên vẫn bị chặn âm tồn như cũ.
+ */
+const ORDER_LIFECYCLE_TYPES: ReadonlySet<MovementType> = new Set([
+  MovementType.order_reserve,
+  MovementType.order_release,
+  MovementType.packing_start,
+  MovementType.packing_cancel,
+  MovementType.order_ship,
+]);
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -27,8 +44,8 @@ export class InventoryService {
     private repo: InventoryRepository,
   ) {}
 
-  assertWarehouseAccess(user: AuthUser, warehouseId: bigint): void {
-    assertUserWarehouseAccess(user, warehouseId);
+  assertLocationAccess(user: AuthUser, locationId: bigint): void {
+    assertUserLocationAccess(user, locationId);
   }
 
   /** Một điểm vào duy nhất thay đổi tồn (Nguyên tắc III) */
@@ -60,7 +77,7 @@ export class InventoryService {
   adjustOnHandTo(
     input: {
       variantId: bigint;
-      warehouseId: bigint;
+      locationId: bigint;
       targetOnHand: number;
       referenceType?: string;
       referenceId?: bigint;
@@ -69,18 +86,18 @@ export class InventoryService {
     tx?: Prisma.TransactionClient,
   ) {
     const run = async (client: Prisma.TransactionClient) => {
-      await this.ensureLevelLocked(client, input.variantId, input.warehouseId);
+      await this.ensureLevelLocked(client, input.variantId, input.locationId);
       const level = await this.getLevelState(
         client,
         input.variantId,
-        input.warehouseId,
+        input.locationId,
       );
       const change = input.targetOnHand - level.onHand;
       if (change === 0) return null;
       return this.applyMovementsInternal(client, [
         {
           variantId: input.variantId,
-          warehouseId: input.warehouseId,
+          locationId: input.locationId,
           bucket: InventoryBucket.on_hand,
           change,
           type: MovementType.adjust,
@@ -102,20 +119,20 @@ export class InventoryService {
       throw new Error('applyMovementsInternal requires at least one input');
     }
 
-    const { variantId, warehouseId } = inputs[0];
-    await this.ensureLevelLocked(tx, variantId, warehouseId);
+    const { variantId, locationId } = inputs[0];
+    await this.ensureLevelLocked(tx, variantId, locationId);
 
     const movementIds: bigint[] = [];
 
     for (const input of inputs) {
       if (
         input.variantId !== variantId ||
-        input.warehouseId !== warehouseId
+        input.locationId !== locationId
       ) {
-        throw new Error('Batch movements must share variant_id and warehouse_id');
+        throw new Error('Batch movements must share variant_id and location_id');
       }
 
-      const level = await this.getLevelState(tx, variantId, warehouseId);
+      const level = await this.getLevelState(tx, variantId, locationId);
       const current = getBucketValue(level, input.bucket);
       const next = current + input.change;
 
@@ -124,7 +141,7 @@ export class InventoryService {
           const wouldAvailable = computeAvailable({
             onHand: next,
             committed: level.committed,
-            packing: level.packing,
+            packed: level.packed,
             unavailable: level.unavailable,
           });
           if (wouldAvailable < 0 && input.type !== 'adjust') {
@@ -141,11 +158,21 @@ export class InventoryService {
 
       const available = computeAvailable(level);
 
-      if (available < 0 && input.bucket !== InventoryBucket.unavailable) {
+      // Bucket on_hand kéo available lên khi tăng; các bucket còn lại (giữ
+      // chỗ) kéo available xuống khi tăng — dùng để biết đúng chiều tác động.
+      const worsensAvailable =
+        input.bucket === InventoryBucket.on_hand ? input.change < 0 : input.change > 0;
+
+      if (
+        available < 0 &&
+        worsensAvailable &&
+        input.bucket !== InventoryBucket.unavailable &&
+        !ORDER_LIFECYCLE_TYPES.has(input.type)
+      ) {
         throw new InsufficientStockException();
       }
 
-      await this.repo.updateLevel(tx, variantId, warehouseId, {
+      await this.repo.updateLevel(tx, variantId, locationId, {
         ...level,
         available,
         ...(input.price !== undefined ? { price: input.price } : {}),
@@ -157,7 +184,7 @@ export class InventoryService {
     }
 
     const finalLevel = await tx.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
 
     return { movementIds, level: finalLevel };
@@ -166,51 +193,53 @@ export class InventoryService {
   private async ensureLevelLocked(
     tx: Prisma.TransactionClient,
     variantId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
   ) {
-    const locked = await this.repo.lockLevel(tx, variantId, warehouseId);
+    const locked = await this.repo.lockLevel(tx, variantId, locationId);
     if (!locked.length) {
-      await this.repo.createLevel(tx, variantId, warehouseId);
-      await this.repo.lockLevel(tx, variantId, warehouseId);
+      await this.repo.createLevel(tx, variantId, locationId);
+      await this.repo.lockLevel(tx, variantId, locationId);
     }
   }
 
   private async getLevelState(
     tx: Prisma.TransactionClient,
     variantId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
   ): Promise<LevelState> {
     const row = await tx.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     return {
       onHand: row.onHand,
       committed: row.committed,
-      packing: row.packing,
+      packed: row.packed,
       unavailable: row.unavailable,
       incoming: row.incoming,
     };
   }
 
   /** Đối soát INV-2a/2b */
-  async reconcile(variantId: bigint, warehouseId: bigint) {
+  async reconcile(variantId: bigint, locationId: bigint) {
     const level = await this.prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     if (!level) return { ok: true, buckets: {} };
 
     const buckets: InventoryBucket[] = [
       InventoryBucket.on_hand,
       InventoryBucket.committed,
-      InventoryBucket.packing,
+      InventoryBucket.packed,
       InventoryBucket.unavailable,
       InventoryBucket.incoming,
     ];
 
     const fieldMap: Record<InventoryBucket, keyof typeof level> = {
       on_hand: 'onHand',
+      available: 'available',
       committed: 'committed',
-      packing: 'packing',
+      packed: 'packed',
+      reserved: 'reserved',
       unavailable: 'unavailable',
       incoming: 'incoming',
     };
@@ -220,7 +249,7 @@ export class InventoryService {
 
     for (const bucket of buckets) {
       const agg = await this.prisma.inventoryMovement.aggregate({
-        where: { variantId, warehouseId, bucket },
+        where: { variantId, locationId, bucket },
         _sum: { change: true },
       });
       const ledger = agg._sum.change ?? 0;
@@ -234,7 +263,7 @@ export class InventoryService {
       computeAvailable({
         onHand: level.onHand,
         committed: level.committed,
-        packing: level.packing,
+        packed: level.packed,
         unavailable: level.unavailable,
       });
 

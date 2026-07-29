@@ -71,16 +71,16 @@ export class InventoryController {
   @UseInterceptors(FileInterceptor('file'))
   async import(
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
-    @Query('warehouse_id') warehouseId: string | undefined,
+    @Query('location_id') locationId: string | undefined,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file?.buffer) {
       return { updated: 0, errors: [{ row: 0, message: 'Thiếu file' }] };
     }
-    if (!warehouseId) {
+    if (!locationId) {
       return { updated: 0, errors: [{ row: 0, message: 'Thiếu kho áp dụng' }] };
     }
-    return this.importer.importExcel(file.buffer, BigInt(warehouseId), user);
+    return this.importer.importExcel(file.buffer, BigInt(locationId), user);
   }
 
   @Get(':variantId/movements')

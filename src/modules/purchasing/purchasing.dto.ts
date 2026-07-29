@@ -34,11 +34,7 @@ export class CreatePurchaseOrderDto {
 
   @IsString()
   @IsNotEmpty()
-  branch_id!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  warehouse_id!: string;
+  location_id!: string;
 
   @IsArray()
   @ValidateNested({ each: true })
@@ -61,12 +57,7 @@ export class UpdatePurchaseOrderDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  branch_id?: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  warehouse_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsArray()
@@ -135,7 +126,7 @@ export class CreateGoodsReceiptDto {
 
   @IsString()
   @IsNotEmpty()
-  warehouse_id!: string;
+  location_id!: string;
 
   @IsOptional()
   @IsString()
@@ -249,7 +240,7 @@ export class CreatePurchaseReturnDto {
 
   @IsString()
   @IsNotEmpty()
-  warehouse_id!: string;
+  location_id!: string;
 
   /** Có giá trị khi tạo "trả hàng nhập theo đơn" — gắn phiếu trả với đúng đơn nhập gốc */
   @IsOptional()

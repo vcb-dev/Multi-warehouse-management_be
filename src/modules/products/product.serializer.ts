@@ -9,15 +9,14 @@ function dec(v: Prisma.Decimal | null | undefined): number | null {
 export function serializeProductListItem(
   p: {
     id: bigint;
-    slug: string;
+    alias: string;
     name: string;
     imageUrl: string | null;
-    brand: string | null;
+    vendor: string | null;
     productType: string | null;
-    unit: string | null;
     tags: string[];
-    isPublished: boolean;
-    variants: { sku: string; price: Prisma.Decimal }[];
+    status: string;
+    variants: { sku: string; price: Prisma.Decimal; unit: string | null }[];
   },
   opts?: { searchQuery?: string },
 ) {
@@ -30,42 +29,47 @@ export function serializeProductListItem(
 
   return {
     id: p.id.toString(),
-    slug: p.slug,
+    alias: p.alias,
     name: p.name,
     image_url: p.imageUrl,
     default_sku: skus[0] ?? null,
     skus,
     variant_count: skus.length,
     matched_sku: matchedSku,
-    brand: p.brand,
+    vendor: p.vendor,
     product_type: p.productType,
-    unit: p.unit,
+    unit: p.variants[0]?.unit ?? null,
     tags: p.tags,
     price_from: prices.length ? Math.min(...prices) : 0,
-    is_published: p.isPublished,
+    is_published: p.status === 'active',
   };
 }
 
 export function serializeProductDetail(p: ProductWithRelations) {
+  // requires_shipping/taxable/track_inventory/allow_backorder/unit sống ở variant
+  // theo Sapo (Phase 2) — rollup từ variant đầu tiên để form 1-bộ-cờ hiện tại của
+  // FE không phải đổi; variant[].* trong response vẫn có giá trị đầy đủ per-row.
+  const firstVariant = p.variants[0];
+
   return {
     id: p.id.toString(),
-    slug: p.slug,
+    alias: p.alias,
     name: p.name,
-    brand: p.brand,
+    vendor: p.vendor,
     product_type: p.productType,
-    unit: p.unit,
+    unit: firstVariant?.unit ?? null,
     tags: p.tags,
-    requires_shipping: p.requiresShipping,
-    is_published: p.isPublished,
-    taxable: p.taxable,
+    requires_shipping: firstVariant?.requiresShipping ?? true,
+    is_published: p.status === 'active',
+    taxable: firstVariant?.taxable ?? true,
     image_url: p.imageUrl,
-    seo_title: p.seoTitle,
-    seo_description: p.seoDescription,
-    description: p.description,
-    short_description: p.shortDescription,
-    track_inventory: p.trackInventory,
-    allow_backorder: p.allowBackorder,
-    tax_industry_group: p.taxIndustryGroup,
+    meta_title: p.metaTitle,
+    meta_description: p.metaDescription,
+    content: p.content,
+    summary: p.summary,
+    track_inventory: (firstVariant?.inventoryManagement ?? 'bizweb') !== '',
+    allow_backorder: firstVariant?.inventoryPolicy === 'continue',
+    vat_pit_category_code: p.vatPitCategoryCode,
     images: p.images.map((img) => ({
       id: img.id.toString(),
       url: img.url,
@@ -97,14 +101,19 @@ export function serializeProductDetail(p: ProductWithRelations) {
       weight_unit: v.weightUnit,
       image_url: v.imageUrl,
       enabled: v.enabled,
+      unit: v.unit,
+      taxable: v.taxable,
+      requires_shipping: v.requiresShipping,
+      track_inventory: v.inventoryManagement !== '',
+      allow_backorder: v.inventoryPolicy === 'continue',
       option_values: v.optionValues
         .sort((a, b) => a.option.position - b.option.position)
         .map((ov) => ov.value),
     })),
     category_ids: p.categories.map((c) => c.categoryId.toString()),
     sales_channels: p.salesChannels.map((sc) => sc.channel),
-    created_at: p.createdAt.toISOString(),
-    updated_at: p.updatedAt.toISOString(),
+    created_at: p.createdOn.toISOString(),
+    updated_at: p.modifiedOn.toISOString(),
   };
 }
 

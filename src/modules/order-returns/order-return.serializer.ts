@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 function dec(v: Prisma.Decimal): number {
   return Number(v);
@@ -20,10 +21,12 @@ export function serializeOrderReturnLine(row: {
     createdAt: Date;
     order: {
       code: string;
-      source: string;
-      branch: { name: string };
+      sourceName: string | null;
+      returnStatus: string;
+      refundStatus: string;
+      location: { name: string };
     };
-    createdBy: { name: string | null; email: string };
+    createdBy: { firstName: string | null; lastName: string | null; email: string };
   };
 }) {
   const ret = row.orderReturn;
@@ -32,10 +35,10 @@ export function serializeOrderReturnLine(row: {
     return_id: ret.id.toString(),
     return_code: ret.code,
     order_code: ret.order.code,
-    branch_name: ret.order.branch.name,
-    source: ret.order.source,
-    return_status: 'da_xu_ly',
-    refund_status: 'da_hoan_tien',
+    location_name: ret.order.location.name,
+    source_name: ret.order.sourceName,
+    return_status: ret.order.returnStatus,
+    refund_status: ret.order.refundStatus,
     restock_status: ret.restock ? 'da_nhap_kho' : 'khong_nhap_kho',
     sku: row.sku,
     product_name: row.productName,
@@ -45,7 +48,7 @@ export function serializeOrderReturnLine(row: {
     line_total: dec(row.price) * row.quantity,
     refund_amount: dec(ret.refundAmount),
     reason: ret.reason,
-    created_by_name: ret.createdBy.name ?? ret.createdBy.email,
+    created_by_name: userDisplayName(ret.createdBy) ?? ret.createdBy.email,
     created_at: ret.createdAt.toISOString(),
   };
 }

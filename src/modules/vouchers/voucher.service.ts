@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { userDisplayName } from '../../common/utils/user-display-name';
 import { generateVoucherCode } from './voucher-code';
 import { ListVouchersQueryDto } from './voucher.dto';
 
 export type CreatePaymentVoucherInput = {
-  branchId: bigint;
+  locationId: bigint;
   amount: number;
   createdById: bigint;
   sourceDocument: string;
@@ -30,7 +31,7 @@ export class VoucherService {
         code,
         type: VoucherType.payment,
         amountOut: input.amount,
-        branchId: input.branchId,
+        locationId: input.locationId,
         createdById: input.createdById,
         sourceDocument: input.sourceDocument,
         referenceType: input.referenceType,
@@ -58,7 +59,7 @@ export class VoucherService {
         code,
         type: VoucherType.receipt,
         amountIn: input.amount,
-        branchId: input.branchId,
+        locationId: input.locationId,
         createdById: input.createdById,
         sourceDocument: input.sourceDocument,
         referenceType: input.referenceType,
@@ -80,7 +81,7 @@ export class VoucherService {
     const where: Prisma.VoucherWhereInput = {};
 
     if (query.type) where.type = query.type as VoucherType;
-    if (query.branch_id) where.branchId = BigInt(query.branch_id);
+    if (query.location_id) where.locationId = BigInt(query.location_id);
     if (query.q?.trim()) {
       where.OR = [
         { code: { contains: query.q.trim(), mode: 'insensitive' } },
@@ -101,8 +102,8 @@ export class VoucherService {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          branch: { select: { name: true } },
-          createdBy: { select: { name: true, email: true } },
+          location: { select: { name: true } },
+          createdBy: { select: { firstName: true, lastName: true, email: true } },
         },
       }),
       this.prisma.voucher.count({ where }),
@@ -115,13 +116,13 @@ export class VoucherService {
         type: v.type,
         amount_in: Number(v.amountIn),
         amount_out: Number(v.amountOut),
-        branch_id: v.branchId.toString(),
-        branch_name: v.branch.name,
+        location_id: v.locationId.toString(),
+        location_name: v.location.name,
         source_document: v.sourceDocument,
         reference_type: v.referenceType,
         reference_id: v.referenceId?.toString() ?? null,
         reason: v.reason,
-        created_by_name: v.createdBy.name ?? v.createdBy.email,
+        created_by_name: userDisplayName(v.createdBy) ?? v.createdBy.email,
         recorded_at: v.recordedAt.toISOString(),
       })),
       total,

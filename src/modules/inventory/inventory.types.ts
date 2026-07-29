@@ -6,7 +6,7 @@ import {
 
 export type ApplyMovementInput = {
   variantId: bigint;
-  warehouseId: bigint;
+  locationId: bigint;
   bucket: InventoryBucket;
   change: number;
   type: MovementType;
@@ -19,10 +19,10 @@ export type ApplyMovementInput = {
 
 export type InventoryLevelDto = {
   variantId: bigint;
-  warehouseId: bigint;
+  locationId: bigint;
   onHand: number;
   committed: number;
-  packing: number;
+  packed: number;
   unavailable: number;
   incoming: number;
   available: number;
@@ -31,25 +31,25 @@ export type InventoryLevelDto = {
 export type LevelState = {
   onHand: number;
   committed: number;
-  packing: number;
+  packed: number;
   unavailable: number;
   incoming: number;
 };
 
 /**
- * Sắp items theo (variantId, warehouseId) để mọi transaction khóa các dòng
+ * Sắp items theo (variantId, locationId) để mọi transaction khóa các dòng
  * inventory_levels theo cùng một thứ tự — hai chứng từ chứa cùng cặp biến thể
  * theo thứ tự ngược nhau sẽ không deadlock.
  */
 export function sortForLocking<
-  T extends { variantId: bigint; warehouseId?: bigint },
+  T extends { variantId: bigint; locationId?: bigint },
 >(items: readonly T[]): T[] {
   return [...items].sort((a, b) => {
     if (a.variantId !== b.variantId) {
       return a.variantId < b.variantId ? -1 : 1;
     }
-    const aw = a.warehouseId ?? 0n;
-    const bw = b.warehouseId ?? 0n;
+    const aw = a.locationId ?? 0n;
+    const bw = b.locationId ?? 0n;
     return aw < bw ? -1 : aw > bw ? 1 : 0;
   });
 }
@@ -57,10 +57,10 @@ export function sortForLocking<
 export function computeAvailable(level: {
   onHand: number;
   committed: number;
-  packing: number;
+  packed: number;
   unavailable: number;
 }): number {
-  return level.onHand - level.committed - level.packing - level.unavailable;
+  return level.onHand - level.committed - level.packed - level.unavailable;
 }
 
 export function setBucketValue(
@@ -75,14 +75,19 @@ export function setBucketValue(
     case InventoryBucket.committed:
       level.committed = value;
       break;
-    case InventoryBucket.packing:
-      level.packing = value;
+    case InventoryBucket.packed:
+      level.packed = value;
       break;
     case InventoryBucket.unavailable:
       level.unavailable = value;
       break;
     case InventoryBucket.incoming:
       level.incoming = value;
+      break;
+    // `available` là số dẫn xuất (computeAvailable) và `reserved` do Sapo giữ —
+    // hai bucket này không nhận bút toán trực tiếp từ nghiệp vụ nội bộ.
+    case InventoryBucket.available:
+    case InventoryBucket.reserved:
       break;
   }
 }
@@ -93,11 +98,15 @@ export function getBucketValue(level: LevelState, bucket: InventoryBucket): numb
       return level.onHand;
     case InventoryBucket.committed:
       return level.committed;
-    case InventoryBucket.packing:
-      return level.packing;
+    case InventoryBucket.packed:
+      return level.packed;
     case InventoryBucket.unavailable:
       return level.unavailable;
     case InventoryBucket.incoming:
       return level.incoming;
+    case InventoryBucket.available:
+      return computeAvailable(level);
+    case InventoryBucket.reserved:
+      return 0;
   }
 }

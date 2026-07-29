@@ -29,28 +29,27 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
   let orders: OrderService;
   let fulfillments: FulfillmentService;
   let prisma: PrismaService;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
   let productId: bigint;
   let providerId: bigint;
   let userId: bigint;
-  let authUser: { userId: bigint; email: string; roles: string[]; warehouseIds: bigint[] };
+  let authUser: { userId: bigint; email: string; roles: string[]; locationIds: bigint[] };
 
   async function level() {
     return prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
   }
 
   async function createConfirmedOrder(qty = 2) {
     const created = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: qty,
             price: 1000,
           },
@@ -70,18 +69,15 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     fulfillments = module.get(FulfillmentService);
     prisma = module.get(PrismaService);
 
-    const branch = await prisma.branch.findFirstOrThrow();
-    const warehouse = await prisma.warehouse.findFirstOrThrow({
-      where: { branchId: branch.id },
-    });
+    const branch = await prisma.location.findFirstOrThrow();
+    const warehouse = await prisma.location.findFirstOrThrow();
     const user = await prisma.user.findFirstOrThrow();
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     userId = user.id;
-    authUser = { userId, email: 't', roles: ['admin'], warehouseIds: [warehouseId] };
+    authUser = { userId, email: 't', roles: ['admin'], locationIds: [locationId] };
 
     const product = await prisma.product.create({
-      data: { name: `Fulfillment E2E ${SKU}`, slug: SKU.toLowerCase() },
+      data: { name: `Fulfillment E2E ${SKU}`, alias: SKU.toLowerCase() },
     });
     productId = product.id;
     const variant = await prisma.productVariant.create({
@@ -89,7 +85,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     });
     variantId = variant.id;
     await prisma.inventoryLevel.create({
-      data: { variantId, warehouseId, onHand: 100, available: 100, price: 1000, cost: 500 },
+      data: { variantId, locationId, onHand: 100, available: 100, price: 1000, cost: 500 },
     });
 
     const provider = await prisma.shippingProvider.create({
@@ -143,7 +139,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     );
     let lv = await level();
     expect(lv.committed).toBe(before.committed - 2);
-    expect(lv.packing).toBe(before.packing + 2);
+    expect(lv.packed).toBe(before.packed + 2);
 
     // Chặn thao tác thủ công khi có fulfillment mở
     await expect(
@@ -179,7 +175,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     );
     lv = await level();
     expect(lv.onHand).toBe(before.onHand - 2);
-    expect(lv.packing).toBe(before.packing);
+    expect(lv.packed).toBe(before.packed);
     const shipped = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(shipped.shippedAt).not.toBeNull();
 
@@ -190,7 +186,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       authUser as never,
     );
     const done = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(done.status).toBe('completed');
+    expect(done.status).toBe('closed');
     const closed = await prisma.fulfillment.findUniqueOrThrow({ where: { id: BigInt(f.id) } });
     expect(closed.closedAt).not.toBeNull();
   });
@@ -224,7 +220,9 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     expect(lv.committed).toBe(before.committed);
 
     const o = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
-    expect(o.status).toBe('processing');
+    // "processing" cũ = status open & đã xác nhận (confirmedOn khác null)
+    expect(o.status).toBe('open');
+    expect(o.confirmedOn).not.toBeNull();
     expect(o.shippedAt).toBeNull();
 
     // Fulfillment đã đóng → giờ hủy đơn được (giải phóng committed)
@@ -244,7 +242,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
 
     await fulfillments.cancel(BigInt(f.id), {}, authUser as never);
     const lv = await level();
-    expect(lv.packing).toBe(before.packing);
+    expect(lv.packed).toBe(before.packed);
     expect(lv.committed).toBe(before.committed);
 
     // Không còn fulfillment mở → hủy đơn OK
@@ -254,11 +252,11 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
   it('chặn đóng gói khi đơn chưa xác nhận', async () => {
     const created = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 1,
             price: 1000,
           },

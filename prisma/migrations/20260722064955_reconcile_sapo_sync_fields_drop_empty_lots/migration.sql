@@ -51,4 +51,7 @@ ALTER TABLE "categories"
 CREATE UNIQUE INDEX IF NOT EXISTS "categories_sapo_id_key" ON "categories"("sapo_id");
 
 -- DropTable (bảng rỗng, xác nhận 0 dòng trước khi drop)
-DROP TABLE IF EXISTS "lots";
+-- CASCADE: chỉ xóa các FK constraint rỗng (lot_id ở goods_receipt_items,
+-- inventory_movements, purchase_return_items, stock_transfer_items đều 100% NULL
+-- trên DB production — đã xác nhận trước khi thêm CASCADE), không xóa cột/dữ liệu.
+DROP TABLE IF EXISTS "lots" CASCADE;

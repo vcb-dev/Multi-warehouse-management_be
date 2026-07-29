@@ -1,4 +1,5 @@
 import { Prisma, StockTransfer, StockTransferItem } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 type StnWithRelations = StockTransfer & {
   items: (StockTransferItem & {
@@ -8,9 +9,9 @@ type StnWithRelations = StockTransfer & {
       product?: { name: string };
     };
   })[];
-  fromWarehouse?: { code: string; name: string };
-  toWarehouse?: { code: string; name: string };
-  createdBy?: { name: string | null; email: string } | null;
+  fromLocation?: { code: string | null; name: string };
+  toLocation?: { code: string | null; name: string };
+  createdBy?: { firstName: string | null; lastName: string | null; email: string } | null;
 };
 
 export function serializeStockTransfer(stn: StnWithRelations) {
@@ -24,17 +25,17 @@ export function serializeStockTransfer(stn: StnWithRelations) {
   return {
     id: stn.id.toString(),
     code: stn.code,
-    from_warehouse_id: stn.fromWarehouseId.toString(),
-    from_warehouse_code: stn.fromWarehouse?.code,
-    from_warehouse_name: stn.fromWarehouse?.name,
-    to_warehouse_id: stn.toWarehouseId.toString(),
-    to_warehouse_code: stn.toWarehouse?.code,
-    to_warehouse_name: stn.toWarehouse?.name,
+    from_location_id: stn.fromLocationId.toString(),
+    from_location_code: stn.fromLocation?.code,
+    from_location_name: stn.fromLocation?.name,
+    to_location_id: stn.toLocationId.toString(),
+    to_location_code: stn.toLocation?.code,
+    to_location_name: stn.toLocation?.name,
     status: stn.status,
     note: stn.note,
     total_quantity: stn.totalQuantity,
     transfer_value: transferValue.toString(),
-    created_by_name: stn.createdBy?.name ?? stn.createdBy?.email ?? null,
+    created_by_name: userDisplayName(stn.createdBy) ?? stn.createdBy?.email ?? null,
     created_at: stn.createdAt.toISOString(),
     shipped_at: stn.shippedAt?.toISOString() ?? null,
     received_at: stn.receivedAt?.toISOString() ?? null,

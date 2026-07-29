@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OrderSource } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -39,8 +38,8 @@ export class ChannelSyncService {
 
     const result = await this.orders.create(
       {
-        branch_id: dto.branch_id,
-        source: dto.source as OrderSource,
+        location_id: dto.location_id,
+        source_name: dto.source,
         customer_id: customerId?.toString(),
         phone: dto.customer_phone,
         items: dto.items,

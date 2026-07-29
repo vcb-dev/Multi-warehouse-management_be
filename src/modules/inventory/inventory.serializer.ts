@@ -3,28 +3,28 @@ import {
   InventoryMovement,
   Product,
   ProductVariant,
-  Warehouse,
+  Location,
 } from '@prisma/client';
 
 type LevelWithRelations = InventoryLevel & {
   variant: ProductVariant & { product: Product };
-  warehouse: Warehouse;
+  location: Location;
 };
 
 export function serializeLevel(level: LevelWithRelations) {
   return {
     variant_id: level.variantId.toString(),
-    warehouse_id: level.warehouseId.toString(),
+    location_id: level.locationId.toString(),
     product_id: level.variant.productId.toString(),
     sku: level.variant.sku,
     product_name: level.variant.product.name,
     image_url: level.variant.imageUrl ?? level.variant.product.imageUrl ?? null,
-    unit: level.variant.product.unit ?? null,
-    warehouse_code: level.warehouse.code,
-    warehouse_name: level.warehouse.name,
+    unit: level.variant.unit ?? null,
+    location_code: level.location.code,
+    location_name: level.location.name,
     on_hand: level.onHand,
     committed: level.committed,
-    packing: level.packing,
+    packed: level.packed,
     unavailable: level.unavailable,
     incoming: level.incoming,
     available: level.available,
@@ -38,7 +38,7 @@ export function serializeMovement(m: InventoryMovement) {
   return {
     id: m.id.toString(),
     variant_id: m.variantId.toString(),
-    warehouse_id: m.warehouseId.toString(),
+    location_id: m.locationId.toString(),
     bucket: m.bucket,
     change: m.change,
     type: m.type,

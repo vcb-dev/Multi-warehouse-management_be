@@ -23,7 +23,7 @@ enum UserRole {
 
 enum PermissionScope {
   system
-  warehouse
+  location
 }
 
 enum AccountStatus {
@@ -34,8 +34,10 @@ enum AccountStatus {
 
 enum InventoryBucket {
   on_hand
+  available
   committed
-  packing
+  packed
+  reserved
   unavailable
   incoming
 }
@@ -97,12 +99,44 @@ enum CategoryConditionType {
   auto
 }
 
+/// Theo Sapo — chỉ còn 3 giá trị thô (open/closed/cancelled). "ordered" vs
+/// "processing" cũ nay phân biệt bằng Order.confirmedOn (null = chưa xác nhận);
+/// "returned" cũ tách hẳn thành OrderReturnStatus, không còn ghi đè status nữa.
 enum OrderStatus {
-  ordered
-  processing
-  completed
+  open
+  closed
   cancelled
+}
+
+/// Theo Sapo `financial_status` — thay cho PaymentStatus (PaymentStatus vẫn
+/// dùng riêng cho GoodsReceipt, không đụng tới).
+enum OrderFinancialStatus {
+  pending
+  partially_paid
+  paid
+  refunded
+  partially_refunded
+}
+
+/// Theo Sapo `fulfillment_status` — null (chưa xử lý) mô hình bằng field nullable,
+/// enum chỉ giữ 2 giá trị non-null.
+enum OrderFulfillmentStatus {
+  partial
+  fulfilled
+}
+
+/// Theo Sapo `return_status`
+enum OrderReturnStatus {
+  no_return
+  in_progress
   returned
+}
+
+/// Theo Sapo `refund_status`
+enum OrderRefundStatus {
+  no_refund
+  refunded
+  partial
 }
 
 enum DraftOrderStatus {
@@ -153,6 +187,13 @@ enum ShippingFeePayer {
   khach_tra
 }
 
+enum OrderDeliveryMode {
+  giao_hang_sau
+  cong_van_chuyen
+  tu_giao_hang
+  da_giao_hang
+}
+
 // --- Auth & config ---
 
 // --- CQA multi-tenant ---
@@ -180,23 +221,31 @@ model Tenant {
 }
 
 model User {
-  id           BigInt        @id @default(autoincrement())
-  email        String        @unique
-  passwordHash String?       @map("password_hash")
-  name         String?
-  phone        String?
-  avatarUrl    String?       @map("avatar_url")
-  tenantId     String?       @map("tenant_id") @db.Uuid
-  roles        UserRole[]    @default([])
-  status       AccountStatus @default(active)
-  isActive     Boolean       @default(true) @map("is_active")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  id              BigInt        @id @default(autoincrement())
+  sapoId          BigInt?       @unique @map("sapo_id")
+  email           String        @unique
+  passwordHash    String?       @map("password_hash")
+  firstName       String?       @map("first_name")
+  lastName        String?       @map("last_name")
+  phoneNumber     String?       @map("phone_number")
+  url             String?
+  tenantId        String?       @map("tenant_id") @db.Uuid
+  roles           UserRole[]    @default([])
+  status          AccountStatus @default(active)
+  active          Boolean       @default(true)
+  // Tham chiếu thô từ /admin/users.json — KHÔNG điều khiển nghiệp vụ (RBAC
+  // nội bộ vẫn là nguồn thật duy nhất). Bảng users hiện không đồng bộ với
+  // Sapo (không có sapo_id nào khớp thật), nên các field này luôn NULL cho
+  // tới khi có luồng đồng bộ tài khoản Sapo thật.
+  sapoRoles       String?       @map("sapo_roles")
+  sapoPermissions Json?         @map("sapo_permissions")
+  createdOn       DateTime      @default(now()) @map("created_on")
+  modifiedOn      DateTime      @updatedAt @map("modified_on")
 
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
-  warehouses             UserWarehouse[]
-  warehouseRoles         UserWarehouseRole[]
+  locations              UserLocation[]
+  locationRoles          UserLocationRole[]
   permissionOverrides    UserPermissionOverride[]
   invitations            UserInvitation[]
   inventoryMoves         InventoryMovement[]         @relation("MovementCreatedBy")
@@ -226,15 +275,15 @@ model User {
   @@map("users")
 }
 
-model UserWarehouse {
-  userId      BigInt @map("user_id")
-  warehouseId BigInt @map("warehouse_id")
+model UserLocation {
+  userId     BigInt @map("user_id")
+  locationId BigInt @map("location_id")
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  @@id([userId, warehouseId])
-  @@map("user_warehouses")
+  @@id([userId, locationId])
+  @@map("user_locations")
 }
 
 // --- RBAC động (009) ---
@@ -249,8 +298,8 @@ model Role {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  permissions    RolePermission[]
-  warehouseRoles UserWarehouseRole[]
+  permissions   RolePermission[]
+  locationRoles UserLocationRole[]
 
   @@map("roles")
 }
@@ -279,19 +328,19 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-model UserWarehouseRole {
-  id          BigInt   @id @default(autoincrement())
-  userId      BigInt   @map("user_id")
-  warehouseId BigInt   @map("warehouse_id")
-  roleId      BigInt   @map("role_id")
-  createdAt   DateTime @default(now()) @map("created_at")
+model UserLocationRole {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  locationId BigInt   @map("location_id")
+  roleId     BigInt   @map("role_id")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  role      Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  role     Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
-  @@unique([userId, warehouseId])
-  @@map("user_warehouse_roles")
+  @@unique([userId, locationId])
+  @@map("user_location_roles")
 }
 
 // Lệch quyền riêng cho một user tại một kho, chồng lên quyền mặc định của
@@ -300,17 +349,17 @@ model UserWarehouseRole {
 model UserPermissionOverride {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @map("user_id")
-  warehouseId  BigInt   @map("warehouse_id")
+  locationId   BigInt   @map("location_id")
   permissionId BigInt   @map("permission_id")
   granted      Boolean
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  warehouse  Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  location   Location   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, warehouseId, permissionId])
+  @@unique([userId, locationId, permissionId])
   @@map("user_permission_overrides")
 }
 
@@ -328,39 +377,45 @@ model UserInvitation {
   @@map("user_invitations")
 }
 
-model Branch {
-  id       BigInt  @id @default(autoincrement())
-  code     String  @unique
-  name     String
-  isActive Boolean @default(true) @map("is_active")
-  phone    String?
-  province String?
-  district String?
-  ward     String?
-  address  String?
+/// Location — theo Sapo Admin API `/admin/locations.json`.
+/// Sapo gộp điểm bán / kho / chi nhánh / trụ sở làm MỘT đối tượng,
+/// nên model này thay thế cả `Branch` lẫn `Warehouse` trước đây.
+model Location {
+  id                     BigInt    @id @default(autoincrement())
+  sapoId                 BigInt?   @unique @map("sapo_id")
+  storeId                BigInt?   @map("store_id")
+  /// 15/16 location trên Sapo để trống code ⇒ phải nullable
+  code                   String?   @unique
+  name                   String
+  email                  String?
+  phone                  String?
+  address1               String?
+  address2               String?
+  city                   String?
+  province               String?
+  provinceCode           String?   @map("province_code")
+  district               String?
+  districtCode           String?   @map("district_code")
+  ward                   String?
+  wardCode               String?   @map("ward_code")
+  country                String?
+  countryCode            String?   @map("country_code")
+  zip                    String?
+  /// Sapo dùng chuỗi "active"/"inactive", không phải boolean
+  status                 String    @default("active")
+  defaultLocation        Boolean   @default(false) @map("default_location")
+  fulfillOrder           Boolean   @default(false) @map("fulfill_order")
+  fulfillmentPickup      Boolean   @default(false) @map("fulfillment_pickup")
+  inventoryManagement    Boolean   @default(true) @map("inventory_management")
+  deactivateInventoryAt  DateTime? @map("deactivate_inventory_at")
+  offlineStore           Boolean   @default(false) @map("offline_store")
+  ownerType              String?   @map("owner_type")
+  inventoryProcessStatus String?   @map("inventory_process_status")
+  createdOn              DateTime  @default(now()) @map("created_on")
+  modifiedOn             DateTime  @updatedAt @map("modified_on")
 
-  warehouses Warehouse[]
-
-  purchaseOrders PurchaseOrder[]
-  priceLists     PriceList[]
-  orders         Order[]
-  draftOrders    DraftOrder[]
-  vouchers       Voucher[]
-  fulfillments   Fulfillment[]
-
-  @@map("branches")
-}
-
-model Warehouse {
-  id       BigInt  @id @default(autoincrement())
-  code     String  @unique
-  name     String
-  branchId BigInt  @map("branch_id")
-  isActive Boolean @default(true) @map("is_active")
-
-  branch              Branch                   @relation(fields: [branchId], references: [id])
-  users               UserWarehouse[]
-  userRoles           UserWarehouseRole[]
+  users               UserLocation[]
+  userRoles           UserLocationRole[]
   permissionOverrides UserPermissionOverride[]
   inventoryLevels     InventoryLevel[]
   movements           InventoryMovement[]
@@ -369,11 +424,15 @@ model Warehouse {
   transfersFrom       StockTransfer[]          @relation("TransferFrom")
   transfersTo         StockTransfer[]          @relation("TransferTo")
   purchaseReturns     PurchaseReturn[]
-  orderItems          OrderItem[]
-  draftOrderItems     DraftOrderItem[]
   orderReturnItems    OrderReturnItem[]
+  priceLists          PriceList[]
+  orders              Order[]
+  draftOrders         DraftOrder[]
+  vouchers            Voucher[]
+  fulfillments        Fulfillment[]
 
-  @@map("warehouses")
+  @@index([status])
+  @@map("locations")
 }
 
 // --- Module Sản phẩm (005) ---
@@ -389,35 +448,38 @@ model CustomerGroup {
   @@map("customer_groups")
 }
 
+/// Theo Sapo `/admin/products.json`. Các cờ requires_shipping/taxable/
+/// inventory_management/inventory_policy/unit sống ở ProductVariant như Sapo
+/// (xem docs/sapo-schema-mapping.md mục Phase 2).
 model Product {
-  id               BigInt    @id @default(autoincrement())
-  sapoId           BigInt?   @unique @map("sapo_id")
-  slug             String    @unique
-  name             String
-  brand            String?
-  category         String?
-  material         String?
-  craftType        String?   @map("craft_type")
-  isDiscontinued   Boolean   @default(false) @map("is_discontinued")
-  productType      String?   @map("product_type")
-  unit             String?
-  tags             String[]  @default([])
-  requiresShipping Boolean   @default(true) @map("requires_shipping")
-  isPublished      Boolean   @default(false) @map("is_published")
-  taxable          Boolean   @default(true)
-  imageUrl         String?   @map("image_url")
-  seoTitle         String?   @map("seo_title")
-  seoDescription   String?   @map("seo_description")
-  description      String?   @db.Text
-  shortDescription String?   @map("short_description") @db.Text
-  trackInventory   Boolean   @default(true) @map("track_inventory")
-  allowBackorder   Boolean   @default(false) @map("allow_backorder")
-  taxIndustryGroup String?   @map("tax_industry_group")
-  publishedAt      DateTime? @map("published_at")
-  sapoCreatedAt    DateTime? @map("sapo_created_at")
-  sapoUpdatedAt    DateTime? @map("sapo_updated_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id             BigInt    @id @default(autoincrement())
+  sapoId         BigInt?   @unique @map("sapo_id")
+  alias          String    @unique
+  name           String
+  vendor         String?
+  /// Không có ở Sapo — field riêng của dự án, giữ nguyên
+  category       String?
+  material       String?
+  craftType      String?   @map("craft_type")
+  isDiscontinued Boolean   @default(false) @map("is_discontinued")
+  productType    String?   @map("product_type")
+  /// Sapo trả tags dạng chuỗi phân tách dấu phẩy; dự án giữ mảng để không phá
+  /// logic lọc/khớp danh mục tự động — quy đổi khi đồng bộ với Sapo.
+  tags           String[]  @default([])
+  /// Không có ở Sapo — ảnh đại diện tiện dụng, nguồn thật là ProductImage đầu tiên
+  imageUrl       String?   @map("image_url")
+  metaTitle      String?   @map("meta_title")
+  metaDescription String?  @map("meta_description")
+  content        String?   @db.Text
+  summary        String?   @db.Text
+  vatPitCategoryCode String? @map("vat_pit_category_code")
+  templateLayout String?   @map("template_layout")
+  type           String    @default("normal")
+  /// Sapo dùng chuỗi ("active"/"draft"/...), không phải boolean is_published
+  status         String    @default("draft")
+  publishedOn    DateTime? @map("published_on")
+  createdOn      DateTime  @default(now()) @map("created_on")
+  modifiedOn     DateTime  @updatedAt @map("modified_on")
 
   variants      ProductVariant[]
   images        ProductImage[]
@@ -425,7 +487,7 @@ model Product {
   salesChannels ProductSalesChannel[]
   categories    ProductCategory[]
 
-  @@index([brand, productType])
+  @@index([vendor, productType])
   @@map("products")
 }
 
@@ -459,17 +521,33 @@ model ProductVariant {
   id             BigInt   @id @default(autoincrement())
   productId      BigInt   @map("product_id")
   sapoId         BigInt?  @unique @map("sapo_id")
+  /// Sapo InventoryItem.id — quan hệ 1:1 với variant, dùng để gọi API InventoryLevel
+  inventoryItemId BigInt? @unique @map("inventory_item_id")
   sku            String   @unique
   title          String?
   barcode        String?
   price          Decimal  @default(0) @db.Decimal(18, 2)
   compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
+  /// Không map trực tiếp field nào của Sapo variant — đồng bộ từ InventoryItem.cost_price (1:1 với variant)
   cost           Decimal  @default(0) @db.Decimal(18, 2)
   weight         Decimal? @db.Decimal(18, 4)
   weightUnit     String?  @map("weight_unit")
+  /// Không có ở Sapo (Sapo dùng image_id trỏ ProductImage) — giữ URL tiện dụng, đỡ phải join
   imageUrl       String?  @map("image_url")
+  /// Không có ở Sapo — cho phép ẩn variant khỏi bán mà không xóa (đã phát sinh chứng từ)
   enabled        Boolean  @default(true)
   unit           String?
+  /// Dời từ Product xuống đây theo đúng Sapo (Phase 2)
+  requiresShipping Boolean @default(true) @map("requires_shipping")
+  taxable        Boolean  @default(true)
+  /// Sapo: "bizweb" = có quản lý tồn qua hệ thống, "" = không quản lý
+  inventoryManagement String @default("bizweb") @map("inventory_management")
+  /// Sapo: "deny" | "continue" (continue = cho phép bán khi hết hàng)
+  inventoryPolicy String  @default("deny") @map("inventory_policy")
+  lotManagement  Boolean  @default(false) @map("lot_management")
+  position       Int      @default(0)
+  type           String   @default("normal")
+  requiresComponents Boolean @default(false) @map("requires_components")
 
   product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues     VariantOptionValue[]
@@ -548,12 +626,12 @@ model PriceList {
   id              BigInt   @id @default(autoincrement())
   code            String   @unique
   name            String
-  branchId        BigInt?  @map("branch_id")
+  locationId        BigInt?  @map("location_id")
   customerGroupId BigInt?  @map("customer_group_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  branch        Branch?         @relation(fields: [branchId], references: [id])
+  location Location?         @relation(fields: [locationId], references: [id])
   customerGroup CustomerGroup?  @relation(fields: [customerGroupId], references: [id])
   items         PriceListItem[]
 
@@ -578,32 +656,40 @@ model PriceListItem {
 
 // --- Inventory core ---
 
+/// Theo Sapo `/admin/inventory_levels.json`.
 model InventoryLevel {
-  variantId   BigInt   @map("variant_id")
-  warehouseId BigInt   @map("warehouse_id")
-  onHand      Int      @default(0) @map("on_hand")
-  committed   Int      @default(0)
-  packing     Int      @default(0)
-  unavailable Int      @default(0)
-  incoming    Int      @default(0)
-  available   Int      @default(0)
-  price       Decimal  @default(0) @db.Decimal(18, 2)
-  cost        Decimal  @default(0) @db.Decimal(18, 2)
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  variantId        BigInt   @map("variant_id")
+  locationId       BigInt   @map("location_id")
+  /// Id của InventoryItem bên Sapo (quan hệ 1:1 với variant)
+  inventoryItemId  BigInt?  @map("inventory_item_id")
+  onHand           Int      @default(0) @map("on_hand")
+  available        Int      @default(0)
+  committed        Int      @default(0)
+  incoming         Int      @default(0)
+  incomingOwned    Int      @default(0) @map("incoming_owned")
+  incomingNotOwned Int      @default(0) @map("incoming_not_owned")
+  /// Sapo gọi là `packed` (trước đây dự án đặt là `packing`)
+  packed           Int      @default(0)
+  reserved         Int      @default(0)
+  unavailable      Int      @default(0)
+  price            Decimal  @default(0) @db.Decimal(18, 2)
+  cost             Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
-  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  variant  ProductVariant @relation(fields: [variantId], references: [id])
+  location Location       @relation(fields: [locationId], references: [id])
 
-  // PK (variant_id, warehouse_id) — index T046
-  @@id([variantId, warehouseId])
-  @@index([warehouseId])
+  @@id([variantId, locationId])
+  @@index([locationId])
+  @@index([inventoryItemId])
   @@map("inventory_levels")
 }
 
 model InventoryMovement {
   id            BigInt          @id @default(autoincrement())
   variantId     BigInt          @map("variant_id")
-  warehouseId   BigInt          @map("warehouse_id")
+  locationId   BigInt          @map("location_id")
   bucket        InventoryBucket
   change        Int
   type          MovementType
@@ -613,10 +699,10 @@ model InventoryMovement {
   createdAt     DateTime        @default(now()) @map("created_at")
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
-  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  location Location      @relation(fields: [locationId], references: [id])
   createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
 
-  @@index([variantId, warehouseId, bucket, createdAt]) // T046
+  @@index([variantId, locationId, bucket, createdAt]) // T046
   @@map("inventory_movements")
 }
 
@@ -700,8 +786,8 @@ model PurchaseOrder {
   id            BigInt   @id @default(autoincrement())
   code          String   @unique
   supplierId    BigInt   @map("supplier_id")
-  branchId      BigInt   @map("branch_id")
-  warehouseId   BigInt   @map("warehouse_id")
+  /// Gộp từ branch_id + warehouse_id cũ — Sapo chỉ có một location cho đơn nhập
+  locationId    BigInt   @map("location_id")
   status        PoStatus @default(don_nhap)
   totalQuantity Int      @default(0) @map("total_quantity")
   totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
@@ -711,8 +797,7 @@ model PurchaseOrder {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   supplier          Supplier            @relation(fields: [supplierId], references: [id])
-  branch            Branch              @relation(fields: [branchId], references: [id])
-  warehouse         Warehouse           @relation(fields: [warehouseId], references: [id])
+  location          Location            @relation(fields: [locationId], references: [id])
   createdBy         User                @relation("PoCreatedBy", fields: [createdById], references: [id])
   items             PurchaseOrderItem[]
   goodsReceipts     GoodsReceipt[]
@@ -744,7 +829,7 @@ model GoodsReceipt {
   id                BigInt             @id @default(autoincrement())
   code              String             @unique
   supplierId        BigInt             @map("supplier_id")
-  warehouseId       BigInt             @map("warehouse_id")
+  locationId       BigInt             @map("location_id")
   purchaseOrderId   BigInt?            @map("purchase_order_id")
   status            GoodsReceiptStatus @default(chua_nhap)
   paymentStatus     PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
@@ -764,7 +849,7 @@ model GoodsReceipt {
   receivedAt        DateTime?          @map("received_at")
 
   supplier        Supplier           @relation(fields: [supplierId], references: [id])
-  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
+  location Location          @relation(fields: [locationId], references: [id])
   purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   createdBy       User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
   assignedTo      User?              @relation("ReiAssignedTo", fields: [assignedToId], references: [id])
@@ -800,8 +885,8 @@ model GoodsReceiptItem {
 model StockTransfer {
   id              BigInt              @id @default(autoincrement())
   code            String              @unique
-  fromWarehouseId BigInt              @map("from_warehouse_id")
-  toWarehouseId   BigInt              @map("to_warehouse_id")
+  fromLocationId BigInt              @map("from_location_id")
+  toLocationId   BigInt              @map("to_location_id")
   status          StockTransferStatus @default(nhap)
   note            String?
   totalQuantity   Int                 @default(0) @map("total_quantity")
@@ -811,14 +896,14 @@ model StockTransfer {
   receivedAt      DateTime?           @map("received_at")
   receivedById    BigInt?             @map("received_by")
 
-  fromWarehouse Warehouse           @relation("TransferFrom", fields: [fromWarehouseId], references: [id])
-  toWarehouse   Warehouse           @relation("TransferTo", fields: [toWarehouseId], references: [id])
+  fromLocation Location           @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location           @relation("TransferTo", fields: [toLocationId], references: [id])
   createdBy     User                @relation("StnCreatedBy", fields: [createdById], references: [id])
   receivedBy    User?               @relation("StnReceivedBy", fields: [receivedById], references: [id])
   items         StockTransferItem[]
 
-  @@index([fromWarehouseId])
-  @@index([toWarehouseId])
+  @@index([fromLocationId])
+  @@index([toLocationId])
   @@index([createdAt])
   @@map("stock_transfers")
 }
@@ -843,7 +928,7 @@ model PurchaseReturn {
   id             BigInt       @id @default(autoincrement())
   code           String       @unique
   supplierId     BigInt       @map("supplier_id")
-  warehouseId    BigInt       @map("warehouse_id")
+  locationId    BigInt       @map("location_id")
   // Đơn nhập hàng gốc — có giá trị khi tạo phiếu trả "theo đơn", null khi trả tự do
   goodsReceiptId BigInt?      @map("goods_receipt_id")
   totalQuantity  Int          @default(0) @map("total_quantity")
@@ -854,7 +939,7 @@ model PurchaseReturn {
   createdAt      DateTime     @default(now()) @map("created_at")
 
   supplier     Supplier             @relation(fields: [supplierId], references: [id])
-  warehouse    Warehouse            @relation(fields: [warehouseId], references: [id])
+  location Location            @relation(fields: [locationId], references: [id])
   goodsReceipt GoodsReceipt?        @relation(fields: [goodsReceiptId], references: [id])
   createdBy    User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
   items        PurchaseReturnItem[]
@@ -936,9 +1021,25 @@ model Order {
   sapoId             BigInt?       @unique @map("sapo_id")
   code               String        @unique
   customerId         BigInt?       @map("customer_id")
-  branchId           BigInt        @map("branch_id")
-  source             OrderSource   @default(other)
-  status             OrderStatus   @default(ordered)
+  locationId           BigInt        @map("location_id")
+  /// Sapo `source_name` — kênh bán (facebook/tiktokshop/shopee/web/pos/zalo/...).
+  /// Là chuỗi tự do (không enum) vì Sapo liên tục thêm kênh mới.
+  sourceName         String?       @map("source_name")
+  status             OrderStatus   @default(open)
+  financialStatus    OrderFinancialStatus    @default(pending) @map("financial_status")
+  fulfillmentStatus  OrderFulfillmentStatus? @map("fulfillment_status")
+  returnStatus       OrderReturnStatus       @default(no_return) @map("return_status")
+  refundStatus       OrderRefundStatus       @default(no_refund) @map("refund_status")
+  /// Field đồng bộ/báo cáo từ Sapo — không điều khiển nghiệp vụ nội bộ
+  issueStatus        String?       @map("issue_status")
+  restockStatus       String?      @map("restock_status")
+  cancelReason       String?       @map("cancel_reason")
+  cancelledOn        DateTime?     @map("cancelled_on")
+  closedOn           DateTime?     @map("closed_on")
+  /// null = chưa xác nhận (~"ordered" cũ); có giá trị = đã xác nhận (~"processing" cũ)
+  confirmedOn        DateTime?     @map("confirmed_on")
+  completedOn        DateTime?     @map("completed_on")
+  paidOn             DateTime?     @map("paid_on")
   assignedToId       BigInt?       @map("assigned_to")
   createdById        BigInt        @map("created_by")
   email              String?
@@ -950,18 +1051,45 @@ model Order {
   shippingMethod     String?       @map("shipping_method")
   totalAmount        Decimal       @default(0) @map("total_amount") @db.Decimal(18, 2)
   totalQuantity      Int           @default(0) @map("total_quantity")
-  paymentStatus      PaymentStatus @default(chua_thanh_toan) @map("payment_status")
   paidAmount         Decimal       @default(0) @map("paid_amount") @db.Decimal(18, 2)
   note               String?       @db.Text
   tags               String[]      @default([])
   orderedAt          DateTime      @default(now()) @map("ordered_at")
   expectedDeliveryAt DateTime?     @map("expected_delivery_at")
   shippedAt          DateTime?     @map("shipped_at")
+
+  // Giao hàng (nhập lúc tạo đơn — chỉ lưu thông tin, không tự tạo vận đơn)
+  deliveryMode        OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
+  deliveryToName       String?  @map("delivery_to_name")
+  deliveryToPhone      String?  @map("delivery_to_phone")
+  deliveryToAddress    String?  @map("delivery_to_address")
+  deliveryToWard       String?  @map("delivery_to_ward")
+  deliveryToDistrict   String?  @map("delivery_to_district")
+  deliveryToProvince   String?  @map("delivery_to_province")
+  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
+  deliveryLengthCm     Int?     @map("delivery_length_cm")
+  deliveryWidthCm      Int?     @map("delivery_width_cm")
+  deliveryHeightCm     Int?     @map("delivery_height_cm")
+  deliveryRequirement  String?  @map("delivery_requirement")
+  deliveryNote         String?  @map("delivery_note") @db.Text
+
+  // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
+  invoiceTaxCode         String?  @map("invoice_tax_code")
+  invoiceCompanyName     String?  @map("invoice_company_name")
+  invoiceAddress         String?  @map("invoice_address")
+  invoiceBuyerName       String?  @map("invoice_buyer_name")
+  invoiceIdCard          String?  @map("invoice_id_card")
+  invoiceBudgetCode      String?  @map("invoice_budget_code")
+  invoicePhone           String?  @map("invoice_phone")
+  invoiceEmail           String?  @map("invoice_email")
+  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
   customer   Customer?     @relation(fields: [customerId], references: [id])
-  branch     Branch        @relation(fields: [branchId], references: [id])
+  location Location        @relation(fields: [locationId], references: [id])
   assignedTo User?         @relation("OrderAssignedTo", fields: [assignedToId], references: [id])
   createdBy  User          @relation("OrderCreatedBy", fields: [createdById], references: [id])
   items        OrderItem[]
@@ -969,7 +1097,7 @@ model Order {
   fromDraft    DraftOrder?   @relation("DraftConverted")
   fulfillments Fulfillment[]
 
-  @@index([branchId, status, orderedAt])
+  @@index([locationId, status, orderedAt])
   @@index([orderedAt])
   @@index([customerId])
   @@index([assignedToId])
@@ -980,7 +1108,6 @@ model OrderItem {
   id          BigInt  @id @default(autoincrement())
   orderId     BigInt  @map("order_id")
   variantId   BigInt  @map("variant_id")
-  warehouseId BigInt  @map("warehouse_id")
   productName String  @map("product_name")
   sku         String
   quantity    Int
@@ -988,13 +1115,13 @@ model OrderItem {
   discount    Decimal @default(0) @db.Decimal(18, 2)
   total       Decimal @db.Decimal(18, 2)
 
-  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
-  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id])
 
+  // Không còn location riêng theo dòng: Sapo đặt location ở cấp đơn (`orders.location_id`).
+  // Đã kiểm chứng 87.795/87.795 đơn chỉ dùng đúng 1 kho ⇒ không mất dữ liệu.
   @@index([orderId])
   @@index([variantId])
-  @@index([warehouseId])
   @@map("order_items")
 }
 
@@ -1051,7 +1178,7 @@ model Fulfillment {
   toDistrict            String?               @map("to_district")
   toProvince            String?               @map("to_province")
   // Địa chỉ lấy hàng (snapshot)
-  fromBranchId          BigInt?               @map("from_branch_id")
+  locationId          BigInt?               @map("location_id")
   fromName              String?               @map("from_name")
   fromPhone             String?               @map("from_phone")
   fromAddress           String?               @map("from_address")
@@ -1070,7 +1197,7 @@ model Fulfillment {
   order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   packer     User?             @relation("FulfillmentPacker", fields: [packerId], references: [id])
   provider   ShippingProvider? @relation(fields: [providerId], references: [id])
-  fromBranch Branch?           @relation(fields: [fromBranchId], references: [id])
+  location   Location?           @relation(fields: [locationId], references: [id])
   createdBy  User              @relation("FulfillmentCreatedBy", fields: [createdById], references: [id])
 
   @@index([orderId])
@@ -1081,7 +1208,7 @@ model Fulfillment {
 model DraftOrder {
   id               BigInt           @id @default(autoincrement())
   code             String           @unique
-  branchId         BigInt           @map("branch_id")
+  locationId         BigInt           @map("location_id")
   customerId       BigInt?          @map("customer_id")
   source           OrderSource      @default(other)
   status           DraftOrderStatus @default(draft)
@@ -1097,10 +1224,38 @@ model DraftOrder {
   tags             String[]         @default([])
   expectedDeliveryAt DateTime?      @map("expected_delivery_at")
   convertedOrderId BigInt?          @unique @map("converted_order_id")
+
+  // Giao hàng (nhập lúc tạo đơn — chỉ lưu thông tin, không tự tạo vận đơn)
+  deliveryMode        OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
+  deliveryToName       String?  @map("delivery_to_name")
+  deliveryToPhone      String?  @map("delivery_to_phone")
+  deliveryToAddress    String?  @map("delivery_to_address")
+  deliveryToWard       String?  @map("delivery_to_ward")
+  deliveryToDistrict   String?  @map("delivery_to_district")
+  deliveryToProvince   String?  @map("delivery_to_province")
+  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
+  deliveryLengthCm     Int?     @map("delivery_length_cm")
+  deliveryWidthCm      Int?     @map("delivery_width_cm")
+  deliveryHeightCm     Int?     @map("delivery_height_cm")
+  deliveryRequirement  String?  @map("delivery_requirement")
+  deliveryNote         String?  @map("delivery_note") @db.Text
+
+  // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
+  invoiceTaxCode         String?  @map("invoice_tax_code")
+  invoiceCompanyName     String?  @map("invoice_company_name")
+  invoiceAddress         String?  @map("invoice_address")
+  invoiceBuyerName       String?  @map("invoice_buyer_name")
+  invoiceIdCard          String?  @map("invoice_id_card")
+  invoiceBudgetCode      String?  @map("invoice_budget_code")
+  invoicePhone           String?  @map("invoice_phone")
+  invoiceEmail           String?  @map("invoice_email")
+  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
-  branch         Branch           @relation(fields: [branchId], references: [id])
+  location Location           @relation(fields: [locationId], references: [id])
   customer       Customer?        @relation(fields: [customerId], references: [id])
   createdBy      User             @relation("DraftOrderCreatedBy", fields: [createdById], references: [id])
   convertedOrder Order?           @relation("DraftConverted", fields: [convertedOrderId], references: [id])
@@ -1115,7 +1270,6 @@ model DraftOrderItem {
   id           BigInt  @id @default(autoincrement())
   draftOrderId BigInt  @map("draft_order_id")
   variantId    BigInt  @map("variant_id")
-  warehouseId  BigInt  @map("warehouse_id")
   productName  String  @map("product_name")
   sku          String
   quantity     Int
@@ -1124,11 +1278,10 @@ model DraftOrderItem {
 
   draftOrder DraftOrder     @relation(fields: [draftOrderId], references: [id], onDelete: Cascade)
   variant    ProductVariant @relation(fields: [variantId], references: [id])
-  warehouse  Warehouse      @relation(fields: [warehouseId], references: [id])
 
+  // Location ở cấp đơn nháp (`draft_orders.location_id`) — xem ghi chú ở OrderItem.
   @@index([draftOrderId])
   @@index([variantId])
-  @@index([warehouseId])
   @@map("draft_order_items")
 }
 
@@ -1155,7 +1308,7 @@ model OrderReturnItem {
   id            BigInt  @id @default(autoincrement())
   orderReturnId BigInt  @map("order_return_id")
   variantId     BigInt  @map("variant_id")
-  warehouseId   BigInt  @map("warehouse_id")
+  locationId   BigInt  @map("location_id")
   productName   String  @map("product_name")
   sku           String
   variantTitle  String? @map("variant_title")
@@ -1164,11 +1317,11 @@ model OrderReturnItem {
 
   orderReturn OrderReturn    @relation(fields: [orderReturnId], references: [id], onDelete: Cascade)
   variant     ProductVariant @relation(fields: [variantId], references: [id])
-  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
+  location Location      @relation(fields: [locationId], references: [id])
 
   @@index([orderReturnId])
   @@index([variantId])
-  @@index([warehouseId])
+  @@index([locationId])
   @@map("order_return_items")
 }
 
@@ -1178,7 +1331,7 @@ model Voucher {
   type           VoucherType
   amountIn       Decimal     @default(0) @map("amount_in") @db.Decimal(18, 2)
   amountOut      Decimal     @default(0) @map("amount_out") @db.Decimal(18, 2)
-  branchId       BigInt      @map("branch_id")
+  locationId       BigInt      @map("location_id")
   createdById    BigInt      @map("created_by")
   sourceDocument String?     @map("source_document")
   referenceType  String?     @map("reference_type")
@@ -1187,10 +1340,10 @@ model Voucher {
   recordedAt     DateTime    @default(now()) @map("recorded_at")
   createdAt      DateTime    @default(now()) @map("created_at")
 
-  branch    Branch @relation(fields: [branchId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
   createdBy User   @relation("VoucherCreatedBy", fields: [createdById], references: [id])
 
-  @@index([branchId, type, recordedAt])
+  @@index([locationId, type, recordedAt])
   @@map("vouchers")
 }
 

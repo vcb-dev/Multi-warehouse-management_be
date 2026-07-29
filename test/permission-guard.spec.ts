@@ -34,7 +34,7 @@ const baseUser: AuthUser = {
   userId: 1n,
   email: 't@t',
   roles: [],
-  warehouseIds: [1n, 2n],
+  locationIds: [1n, 2n],
   warehousePermissions: {
     '1': ['order:view', 'order:pack', 'customer:view'],
     '2': ['order:view'],
@@ -62,7 +62,7 @@ describe('PermissionGuard', () => {
   it('warehouse-scope: không cấp qua kho khác', () => {
     const guard = guardWith(['order:pack']);
     expect(() =>
-      guard.canActivate(ctx(baseUser, { query: { warehouse_id: '2' } })),
+      guard.canActivate(ctx(baseUser, { query: { location_id: '2' } })),
     ).toThrow(ForbiddenException);
   });
 
@@ -73,14 +73,14 @@ describe('PermissionGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
-  it('warehouse-scope: kiểm tra theo warehouse_id trong query', () => {
+  it('warehouse-scope: kiểm tra theo location_id trong query', () => {
     const guard = guardWith(['order:pack']);
     expect(
-      guard.canActivate(ctx(baseUser, { query: { warehouse_id: '1' } })),
+      guard.canActivate(ctx(baseUser, { query: { location_id: '1' } })),
     ).toBe(true);
   });
 
-  it('warehouse-scope: thiếu warehouse_id -> kiểm tra bất kỳ kho nào', () => {
+  it('warehouse-scope: thiếu location_id -> kiểm tra bất kỳ kho nào', () => {
     const guard = guardWith(['order:pack']);
     expect(guard.canActivate(ctx(baseUser))).toBe(true);
     const noPack: AuthUser = {
@@ -98,10 +98,10 @@ describe('PermissionGuard', () => {
     };
     const guard = guardWith(['staff:manage']);
     expect(
-      guard.canActivate(ctx(admin, { query: { warehouse_id: '1' } })),
+      guard.canActivate(ctx(admin, { query: { location_id: '1' } })),
     ).toBe(true);
     expect(() =>
-      guard.canActivate(ctx(admin, { query: { warehouse_id: '2' } })),
+      guard.canActivate(ctx(admin, { query: { location_id: '2' } })),
     ).toThrow(ForbiddenException);
   });
 

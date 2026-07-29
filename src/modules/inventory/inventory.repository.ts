@@ -7,22 +7,22 @@ import { ApplyMovementInput } from './inventory.types';
 export class InventoryRepository {
   constructor(private prisma: PrismaService) {}
 
-  lockLevel(tx: Prisma.TransactionClient, variantId: bigint, warehouseId: bigint) {
+  lockLevel(tx: Prisma.TransactionClient, variantId: bigint, locationId: bigint) {
     return tx.$queryRaw<
       Array<{
         variant_id: bigint;
-        warehouse_id: bigint;
+        location_id: bigint;
         on_hand: number;
         committed: number;
-        packing: number;
+        packed: number;
         unavailable: number;
         incoming: number;
         available: number;
       }>
     >`
-      SELECT variant_id, warehouse_id, on_hand, committed, packing, unavailable, incoming, available
+      SELECT variant_id, location_id, on_hand, committed, packed, unavailable, incoming, available
       FROM inventory_levels
-      WHERE variant_id = ${variantId} AND warehouse_id = ${warehouseId}
+      WHERE variant_id = ${variantId} AND location_id = ${locationId}
       FOR UPDATE
     `;
   }
@@ -33,17 +33,17 @@ export class InventoryRepository {
   createLevel(
     tx: Prisma.TransactionClient,
     variantId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
     price?: Prisma.Decimal,
     cost?: Prisma.Decimal,
   ) {
     return tx.inventoryLevel.createMany({
       data: {
         variantId,
-        warehouseId,
+        locationId,
         onHand: 0,
         committed: 0,
-        packing: 0,
+        packed: 0,
         unavailable: 0,
         incoming: 0,
         available: 0,
@@ -57,11 +57,11 @@ export class InventoryRepository {
   updateLevel(
     tx: Prisma.TransactionClient,
     variantId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
     data: {
       onHand: number;
       committed: number;
-      packing: number;
+      packed: number;
       unavailable: number;
       incoming: number;
       available: number;
@@ -70,11 +70,11 @@ export class InventoryRepository {
     },
   ) {
     return tx.inventoryLevel.update({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
       data: {
         onHand: data.onHand,
         committed: data.committed,
-        packing: data.packing,
+        packed: data.packed,
         unavailable: data.unavailable,
         incoming: data.incoming,
         available: data.available,
@@ -88,7 +88,7 @@ export class InventoryRepository {
     return tx.inventoryMovement.create({
       data: {
         variantId: input.variantId,
-        warehouseId: input.warehouseId,
+        locationId: input.locationId,
         bucket: input.bucket,
         change: input.change,
         type: input.type,
@@ -102,11 +102,11 @@ export class InventoryRepository {
   sumMovements(
     tx: Prisma.TransactionClient,
     variantId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
     bucket: InventoryBucket,
   ) {
     return tx.inventoryMovement.aggregate({
-      where: { variantId, warehouseId, bucket },
+      where: { variantId, locationId, bucket },
       _sum: { change: true },
     });
   }

@@ -1,34 +1,43 @@
 import { Prisma } from '@prisma/client';
 import { serializeFulfillment } from '../fulfillments/fulfillment.serializer';
+import { userDisplayName } from '../../common/utils/user-display-name';
 import { OrderWithRelations } from './order.repository';
 
 function dec(v: Prisma.Decimal): number {
   return Number(v);
 }
 
-export function serializeOrderListItem(o: {
-  id: bigint;
-  code: string;
-  status: string;
-  source: string;
-  paymentStatus: string;
-  shippingMethod: string | null;
-  totalAmount: Prisma.Decimal;
-  totalQuantity: number;
-  orderedAt: Date;
-  shippedAt: Date | null;
-  phone: string | null;
-  tags: string[];
-  customer: { firstName: string | null; lastName: string | null } | null;
-  branch: { name: string };
-  createdBy: { name: string | null; email: string };
-  items: { sku: string }[];
-  fulfillments?: {
-    packingStatus: string | null;
-    shipmentStatus: string | null;
-    provider: { name: string } | null;
-  }[];
-}) {
+export function serializeOrderListItem(
+  o: {
+    id: bigint;
+    code: string;
+    status: string;
+    confirmedOn: Date | null;
+    sourceName: string | null;
+    financialStatus: string;
+    fulfillmentStatus: string | null;
+    returnStatus: string;
+    refundStatus: string;
+    deliveryMode: string;
+    shippingMethod: string | null;
+    totalAmount: Prisma.Decimal;
+    totalQuantity: number;
+    orderedAt: Date;
+    shippedAt: Date | null;
+    phone: string | null;
+    tags: string[];
+    customer: { firstName: string | null; lastName: string | null } | null;
+    location: { name: string };
+    createdBy: { firstName: string | null; lastName: string | null; email: string };
+    items: { sku: string }[];
+    fulfillments?: {
+      packingStatus: string | null;
+      shipmentStatus: string | null;
+      provider: { name: string } | null;
+    }[];
+  },
+  stockReady = true,
+) {
   const customerName = o.customer
     ? [o.customer.firstName, o.customer.lastName].filter(Boolean).join(' ')
     : null;
@@ -37,14 +46,19 @@ export function serializeOrderListItem(o: {
     id: o.id.toString(),
     code: o.code,
     status: o.status,
-    source: o.source,
-    payment_status: o.paymentStatus,
+    confirmed_on: o.confirmedOn?.toISOString() ?? null,
+    source_name: o.sourceName,
+    financial_status: o.financialStatus,
+    fulfillment_status: o.fulfillmentStatus,
+    return_status: o.returnStatus,
+    refund_status: o.refundStatus,
+    delivery_mode: o.deliveryMode,
     shipping_method: o.shippingMethod,
     packing_status: openFulfillment?.packingStatus ?? null,
     shipment_status: openFulfillment?.shipmentStatus ?? null,
     provider_name: openFulfillment?.provider?.name ?? null,
-    branch_name: o.branch.name,
-    created_by_name: o.createdBy.name ?? o.createdBy.email,
+    location_name: o.location.name,
+    created_by_name: userDisplayName(o.createdBy) ?? o.createdBy.email,
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
     ordered_at: o.orderedAt.toISOString(),
@@ -52,7 +66,11 @@ export function serializeOrderListItem(o: {
     phone: o.phone,
     customer_name: customerName,
     tags: o.tags,
-    sku_summary: o.items.map((i) => i.sku).join(', '),
+    sku_summary: o.items
+      .slice(0, 8)
+      .map((i) => i.sku)
+      .join(', '),
+    stock_ready: stockReady,
   };
 }
 
@@ -61,10 +79,22 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     id: o.id.toString(),
     code: o.code,
     status: o.status,
-    source: o.source,
-    branch_id: o.branchId.toString(),
-    branch: o.branch,
-    branch_name: o.branch.name,
+    source_name: o.sourceName,
+    financial_status: o.financialStatus,
+    fulfillment_status: o.fulfillmentStatus,
+    return_status: o.returnStatus,
+    refund_status: o.refundStatus,
+    issue_status: o.issueStatus,
+    restock_status: o.restockStatus,
+    cancel_reason: o.cancelReason,
+    cancelled_on: o.cancelledOn?.toISOString() ?? null,
+    closed_on: o.closedOn?.toISOString() ?? null,
+    confirmed_on: o.confirmedOn?.toISOString() ?? null,
+    completed_on: o.completedOn?.toISOString() ?? null,
+    paid_on: o.paidOn?.toISOString() ?? null,
+    location_id: o.locationId.toString(),
+    location: o.location,
+    location_name: o.location.name,
     customer_id: o.customerId?.toString() ?? null,
     customer: o.customer
       ? {
@@ -79,12 +109,12 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     assigned_user: o.assignedTo
       ? {
           id: o.assignedTo.id.toString(),
-          name: o.assignedTo.name,
+          name: userDisplayName(o.assignedTo),
           email: o.assignedTo.email,
         }
       : null,
     created_by: o.createdById.toString(),
-    created_by_name: o.createdBy.name ?? o.createdBy.email,
+    created_by_name: userDisplayName(o.createdBy) ?? o.createdBy.email,
     email: o.email,
     phone: o.phone,
     subtotal: dec(o.subtotal),
@@ -94,17 +124,38 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     shipping_method: o.shippingMethod,
     total_amount: dec(o.totalAmount),
     total_quantity: o.totalQuantity,
-    payment_status: o.paymentStatus,
     paid_amount: dec(o.paidAmount),
     note: o.note,
     tags: o.tags,
     ordered_at: o.orderedAt.toISOString(),
     expected_delivery_at: o.expectedDeliveryAt?.toISOString() ?? null,
     shipped_at: o.shippedAt?.toISOString() ?? null,
+    delivery_mode: o.deliveryMode,
+    delivery_to_name: o.deliveryToName,
+    delivery_to_phone: o.deliveryToPhone,
+    delivery_to_address: o.deliveryToAddress,
+    delivery_to_ward: o.deliveryToWard,
+    delivery_to_district: o.deliveryToDistrict,
+    delivery_to_province: o.deliveryToProvince,
+    delivery_cod_amount: o.deliveryCodAmount != null ? dec(o.deliveryCodAmount) : null,
+    delivery_weight_grams: o.deliveryWeightGrams,
+    delivery_length_cm: o.deliveryLengthCm,
+    delivery_width_cm: o.deliveryWidthCm,
+    delivery_height_cm: o.deliveryHeightCm,
+    delivery_requirement: o.deliveryRequirement,
+    delivery_note: o.deliveryNote,
+    invoice_tax_code: o.invoiceTaxCode,
+    invoice_company_name: o.invoiceCompanyName,
+    invoice_address: o.invoiceAddress,
+    invoice_buyer_name: o.invoiceBuyerName,
+    invoice_id_card: o.invoiceIdCard,
+    invoice_budget_code: o.invoiceBudgetCode,
+    invoice_phone: o.invoicePhone,
+    invoice_email: o.invoiceEmail,
+    invoice_sell_to_consumer: o.invoiceSellToConsumer,
     items: o.items.map((i) => ({
       id: i.id.toString(),
       variant_id: i.variantId.toString(),
-      warehouse_id: i.warehouseId.toString(),
       product_id: i.variant?.productId.toString() ?? null,
       product_name: i.productName,
       sku: i.sku,

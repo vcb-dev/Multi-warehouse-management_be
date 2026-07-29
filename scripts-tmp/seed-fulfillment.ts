@@ -82,17 +82,17 @@ async function main() {
   console.log('✓ shipping providers');
 
   // 2. Địa chỉ chi nhánh (chỉ điền khi đang trống)
-  const branches = await prisma.branch.findMany();
+  const branches = await prisma.location.findMany();
   for (const b of branches) {
-    if (!b.address) {
-      await prisma.branch.update({
+    if (!b.address1) {
+      await prisma.location.update({
         where: { id: b.id },
         data: {
           phone: b.phone ?? '0243 123 4567',
           province: 'Hà Nội',
           district: 'Quận Cầu Giấy',
           ward: 'Phường Dịch Vọng',
-          address: 'Số 1 Trần Thái Tông',
+          address1: 'Số 1 Trần Thái Tông',
         },
       });
     }

@@ -28,10 +28,10 @@ export class PricingController {
   @RequirePermission('product:view', 'product:manage')
   resolve(
     @Query('variant_id') variantId: string,
-    @Query('branch_id') branchId?: string,
+    @Query('location_id') locationId?: string,
     @Query('customer_group_id') customerGroupId?: string,
   ) {
-    return this.pricing.resolveQuery(variantId, branchId, customerGroupId);
+    return this.pricing.resolveQuery(variantId, locationId, customerGroupId);
   }
 
   @Get(':id')

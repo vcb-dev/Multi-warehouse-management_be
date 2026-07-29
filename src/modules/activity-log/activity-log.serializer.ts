@@ -1,4 +1,5 @@
 import { ActivityLog, User } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 // Nhãn tiếng Việt cho từng action — key theo convention "entity.verb" đã dùng
 // trong toàn bộ codebase khi ghi activityLog.create(...).
@@ -41,7 +42,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
 };
 
 type LogWithUser = ActivityLog & {
-  user: Pick<User, 'name' | 'email'> | null;
+  user: Pick<User, 'firstName' | 'lastName' | 'email'> | null;
 };
 
 export function serializeActivityLog(entry: LogWithUser) {
@@ -50,7 +51,7 @@ export function serializeActivityLog(entry: LogWithUser) {
     id: entry.id.toString(),
     action: entry.action,
     action_label: ACTIVITY_ACTION_LABELS[entry.action] ?? entry.action,
-    actor_name: entry.user?.name ?? entry.user?.email ?? 'Hệ thống',
+    actor_name: userDisplayName(entry.user) ?? entry.user?.email ?? 'Hệ thống',
     reference_code: typeof metadata.code === 'string' ? metadata.code : null,
     amount: typeof metadata.amount === 'number' ? metadata.amount : null,
     created_at: entry.createdAt.toISOString(),

@@ -39,7 +39,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
   let prisma: PrismaService;
 
   let supplierId: bigint;
-  let branchId: bigint;
+  let locationId: bigint;
   let warehouseK1: bigint;
   let warehouseK2: bigint;
   let variantId: bigint;
@@ -49,7 +49,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     userId,
     email: 'admin@local.dev',
     roles: ['admin'],
-    warehouseIds: [warehouseK1, warehouseK2],
+    locationIds: [warehouseK1, warehouseK2],
   });
 
   beforeAll(async () => {
@@ -72,15 +72,15 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     prisma = module.get(PrismaService);
 
     const supplier = await prisma.supplier.findFirst({ where: { isActive: true } });
-    const branch = await prisma.branch.findFirst();
-    const warehouses = await prisma.warehouse.findMany({ take: 2, orderBy: { id: 'asc' } });
+    const branch = await prisma.location.findFirst();
+    const warehouses = await prisma.location.findMany({ take: 2, orderBy: { id: 'asc' } });
     const variant = await prisma.productVariant.findFirst();
     const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
     if (!supplier || !branch || warehouses.length < 2 || !variant || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
     supplierId = supplier.id;
-    branchId = branch.id;
+    locationId = branch.id;
     warehouseK1 = warehouses[0].id;
     warehouseK2 = warehouses[1].id;
     variantId = variant.id;
@@ -92,7 +92,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
   });
 
   it('KC1 — available = on_hand - committed - packing - unavailable', async () => {
-    const key = { variantId, warehouseId: warehouseK1 };
+    const key = { variantId, locationId: warehouseK1 };
     await prisma.inventoryMovement.deleteMany({ where: key });
     await prisma.inventoryLevel.deleteMany({ where: key });
 
@@ -117,7 +117,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     });
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: key },
+      where: { variantId_locationId: key },
     });
 
     expect(level.onHand).toBe(10);
@@ -127,7 +127,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       computeAvailable({
         onHand: level.onHand,
         committed: level.committed,
-        packing: level.packing,
+        packed: level.packed,
         unavailable: level.unavailable,
       }),
     );
@@ -139,8 +139,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     const { data: po } = await poService.create(
       {
         supplier_id: supplierId.toString(),
-        branch_id: branchId.toString(),
-        warehouse_id: warehouseK1.toString(),
+        location_id: warehouseK1.toString(),
         items: [{ variant_id: variantId.toString(), quantity: 20, unit_price: 50000 }],
       },
       auth,
@@ -150,14 +149,14 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     await poService.transition(BigInt(po.id), 'submit', auth);
 
     let level = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+      where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     expect(level?.incoming).toBe(20);
 
     const { data: rei } = await reiService.create(
       {
         supplier_id: supplierId.toString(),
-        warehouse_id: warehouseK1.toString(),
+        location_id: warehouseK1.toString(),
         purchase_order_id: po.id,
         items: [
           {
@@ -173,7 +172,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     await reiService.confirm(BigInt(rei.id), auth);
 
     level = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+      where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     expect(level?.incoming).toBe(0);
     expect(level?.onHand).toBeGreaterThanOrEqual(20);
@@ -181,7 +180,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     const movements = await prisma.inventoryMovement.findMany({
       where: {
         variantId,
-        warehouseId: warehouseK1,
+        locationId: warehouseK1,
         type: { in: [MovementType.incoming_receipt, MovementType.receipt] },
       },
     });
@@ -193,7 +192,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
     async function sumOnHand() {
       const levels = await prisma.inventoryLevel.findMany({
-        where: { variantId, warehouseId: { in: [warehouseK1, warehouseK2] } },
+        where: { variantId, locationId: { in: [warehouseK1, warehouseK2] } },
       });
       return levels.reduce((s, l) => s + l.onHand, 0);
     }
@@ -202,8 +201,8 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
     const { data: stn } = await transferService.create(
       {
-        from_warehouse_id: warehouseK1.toString(),
-        to_warehouse_id: warehouseK2.toString(),
+        from_location_id: warehouseK1.toString(),
+        to_location_id: warehouseK2.toString(),
         items: [
           {
             variant_id: variantId.toString(),
@@ -246,7 +245,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     await pvnService.create(
       {
         supplier_id: supplierId.toString(),
-        warehouse_id: warehouseK1.toString(),
+        location_id: warehouseK1.toString(),
         items: [
           {
             variant_id: variantId.toString(),
@@ -259,14 +258,14 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     );
 
     const afterReturn = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+      where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     const onHandBeforeExceed = afterReturn?.onHand ?? 0;
 
     const returnOut = await prisma.inventoryMovement.findFirst({
       where: {
         variantId,
-        warehouseId: warehouseK1,
+        locationId: warehouseK1,
         type: MovementType.return_out,
       },
       orderBy: { createdAt: 'desc' },
@@ -277,7 +276,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       pvnService.create(
         {
           supplier_id: supplierId.toString(),
-          warehouse_id: warehouseK1.toString(),
+          location_id: warehouseK1.toString(),
           items: [
             {
               variant_id: variantId.toString(),
@@ -291,7 +290,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     ).rejects.toMatchObject({ code: 'RETURN_EXCEEDS_RECEIPT' });
 
     const unchanged = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+      where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     expect(unchanged?.onHand).toBe(onHandBeforeExceed);
   });
@@ -300,11 +299,11 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     const auth = adminUser();
 
     const levelBeforeSetup = await prisma.inventoryLevel.findUnique({
-      where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+      where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     await inventory.applyMovement({
       variantId,
-      warehouseId: warehouseK1,
+      locationId: warehouseK1,
       bucket: InventoryBucket.on_hand,
       change: 10 - (levelBeforeSetup?.onHand ?? 0),
       type: MovementType.adjust,
@@ -315,8 +314,8 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     await expect(
       transferService.create(
         {
-          from_warehouse_id: warehouseK1.toString(),
-          to_warehouse_id: warehouseK1.toString(),
+          from_location_id: warehouseK1.toString(),
+          to_location_id: warehouseK1.toString(),
           items: [
             {
               variant_id: variantId.toString(),
@@ -332,23 +331,23 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       userId,
       email: 'kho@local.dev',
       roles: ['warehouse_staff'],
-      warehouseIds: [warehouseK2],
+      locationIds: [warehouseK2],
     };
 
     expect(() =>
-      inventory.assertWarehouseAccess(scopedUser, warehouseK1),
+      inventory.assertLocationAccess(scopedUser, warehouseK1),
     ).toThrow(ForbiddenException);
 
     const onHandBeforeCancel = (
       await prisma.inventoryLevel.findUniqueOrThrow({
-        where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+        where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
       })
     ).onHand;
 
     const { data: stn } = await transferService.create(
       {
-        from_warehouse_id: warehouseK1.toString(),
-        to_warehouse_id: warehouseK2.toString(),
+        from_location_id: warehouseK1.toString(),
+        to_location_id: warehouseK2.toString(),
         items: [
           {
             variant_id: variantId.toString(),
@@ -361,7 +360,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
     const onHandAfterCreate = (
       await prisma.inventoryLevel.findUniqueOrThrow({
-        where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+        where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
       })
     ).onHand;
     expect(onHandAfterCreate).toBe(onHandBeforeCancel - 2);
@@ -375,7 +374,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 
     const onHandAfterCancel = (
       await prisma.inventoryLevel.findUniqueOrThrow({
-        where: { variantId_warehouseId: { variantId, warehouseId: warehouseK1 } },
+        where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
       })
     ).onHand;
     expect(onHandAfterCancel).toBe(onHandBeforeCancel);
@@ -385,7 +384,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
 describe('Quickstart KC (unit smoke)', () => {
   it('computeAvailable công thức INV-1', () => {
     expect(
-      computeAvailable({ onHand: 10, committed: 3, packing: 0, unavailable: 0 }),
+      computeAvailable({ onHand: 10, committed: 3, packed: 0, unavailable: 0 }),
     ).toBe(7);
   });
 });

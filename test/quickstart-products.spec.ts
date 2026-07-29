@@ -23,15 +23,16 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
   let categories: CategoryService;
   let pricing: PriceListService;
   let prisma: PrismaService;
+  let productRepo: import('../src/modules/products/product.repository').ProductRepository;
   let userId: bigint;
-  let branchId: bigint;
+  let locationId: bigint;
   let customerGroupId: bigint;
 
   const authUser = () => ({
     userId,
     email: 'admin@local.dev',
     roles: ['admin'],
-    warehouseIds: [] as bigint[],
+    locationIds: [] as bigint[],
   });
 
   beforeAll(async () => {
@@ -43,13 +44,15 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     categories = module.get(CategoryService);
     pricing = module.get(PriceListService);
     prisma = module.get(PrismaService);
+    const { ProductRepository } = await import('../src/modules/products/product.repository');
+    productRepo = module.get(ProductRepository);
 
     const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
-    const branch = await prisma.branch.findFirst();
+    const branch = await prisma.location.findFirst();
     const cg = await prisma.customerGroup.findFirst();
     if (!user || !branch || !cg) throw new Error('Run seed first');
     userId = user.id;
-    branchId = branch.id;
+    locationId = branch.id;
     customerGroupId = cg.id;
   });
 
@@ -128,7 +131,7 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
       data: {
         code: `KC4-${Date.now()}`,
         name: 'KC4 test',
-        branchId,
+        locationId,
         items: {
           create: { variantId: variant.id, fixedPrice: 999_000, enabled: true },
         },
@@ -136,24 +139,24 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     });
 
     const resolved = await pricing.resolvePrice(variant.id, {
-      branch_id: branchId,
+      location_id: locationId,
     });
     expect(resolved.source).toBe('branch');
     expect(resolved.price).toBe(999_000);
   });
 
   it('KC5 — danh mục auto gán theo brand', async () => {
-    const brand = `Moiss-${Date.now()}`;
+    const vendor = `Moiss-${Date.now()}`;
     const cat = await categories.create({
       name: `DM auto ${Date.now()}`,
       condition_type: 'auto',
-      auto_conditions: { brand },
+      auto_conditions: { vendor },
     });
 
     const p = await products.create(
       {
         name: 'SP Moiss',
-        brand,
+        vendor,
         variants: [{ option_values: [], sku: `MOISS-${Date.now()}`, price: 1 }],
       },
       authUser(),
@@ -172,7 +175,7 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     const { ProductExportService } = await import(
       '../src/modules/products/product-import.service'
     );
-    const exporter = new ProductExportService(products);
+    const exporter = new ProductExportService(products, productRepo);
     const buf = await exporter.exportExcel({});
     expect(buf.length).toBeGreaterThan(100);
   });

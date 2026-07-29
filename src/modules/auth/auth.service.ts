@@ -15,9 +15,9 @@ export class AuthService {
   async login(email: string, password: string) {
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { warehouseRoles: true },
+      include: { locationRoles: true },
     });
-    if (!user || !user.isActive || user.status === 'inactive') {
+    if (!user || !user.active || user.status === 'inactive') {
       throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
     }
     if (!user.passwordHash) {
@@ -42,11 +42,11 @@ export class AuthService {
       user: {
         id: user.id.toString(),
         email: user.email,
-        name: user.name,
+        name: [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || null,
         roles: user.roles,
-        warehouse_ids: resolved.warehouseIds.map((w) => w.toString()),
+        location_ids: resolved.locationIds.map((w) => w.toString()),
         warehouse_permissions: resolved.warehousePermissions,
-        admin_warehouse_ids: resolved.adminWarehouseIds.map((w) => w.toString()),
+        admin_location_ids: resolved.adminWarehouseIds.map((w) => w.toString()),
         permissions: resolved.systemPermissions,
         is_admin: resolved.isAdmin,
       },

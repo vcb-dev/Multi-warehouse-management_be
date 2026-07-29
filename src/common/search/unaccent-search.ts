@@ -17,7 +17,7 @@ export async function findProductIdsByQuery(
     FROM products p
     LEFT JOIN product_variants v ON v.product_id = p.id
     WHERE unaccent(p.name) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(p.brand, '')) ILIKE unaccent(${pattern})
+       OR unaccent(COALESCE(p.vendor, '')) ILIKE unaccent(${pattern})
        OR unaccent(v.sku) ILIKE unaccent(${pattern})
   `;
   return rows.map((r) => r.id);
