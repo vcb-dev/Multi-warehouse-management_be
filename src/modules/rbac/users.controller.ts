@@ -13,6 +13,10 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
+import {
   InviteUserDto,
   ListUsersQueryDto,
   PutWarehouseRolesDto,
@@ -31,8 +35,13 @@ export class UsersController {
     private invitations: InvitationService,
   ) {}
 
-  /** Dropdown gán đơn — chỉ id + tên, user active. */
+  /**
+   * Dropdown gán đơn — chỉ id + tên, user active. Dùng ở nhiều module (đơn
+   * hàng, nhập hàng, NCC) nên gắn `dashboard:view` — quyền mọi role có sẵn —
+   * thay vì `staff:manage`, tránh chặn nhầm nhân viên bình thường.
+   */
   @Get('assignable')
+  @RequirePermission('dashboard:view')
   listAssignable(@Query('search') search?: string) {
     return this.users.listAssignable(search);
   }
@@ -72,8 +81,9 @@ export class UsersController {
   putWarehouseRoles(
     @Param('id') id: string,
     @Body() dto: PutWarehouseRolesDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.users.putWarehouseRoles(id, dto);
+    return this.users.putWarehouseRoles(id, dto, user);
   }
 
   @Delete(':id/warehouse-roles/:locationId')

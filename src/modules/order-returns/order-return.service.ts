@@ -12,8 +12,8 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
-  assertAnyLocationAccess,
-  assertLocationAccess,
+  assertLocationPermission,
+  locationScopeFilter,
 } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
@@ -21,7 +21,10 @@ import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../orders/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
-import { CreateOrderReturnDto, ListOrderReturnsQueryDto } from '../orders/order.dto';
+import {
+  CreateOrderReturnDto,
+  ListOrderReturnsQueryDto,
+} from '../orders/order.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { recomputeOrderRefundStatuses } from '../orders/order-refund-status';
 import { serializeOrderReturnLine } from './order-return.serializer';
@@ -40,14 +43,18 @@ export class OrderReturnService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderRefundLineItemWhereInput = {};
 
-    where.locationId = { in: user.locationIds };
+    where.locationId = locationScopeFilter(user, 'order_return:view');
 
     if (query.q?.trim()) {
       const q = query.q.trim();
       where.OR = [
         { sku: { contains: q, mode: 'insensitive' } },
         { productName: { contains: q, mode: 'insensitive' } },
-        { refund: { orderReturn: { code: { contains: q, mode: 'insensitive' } } } },
+        {
+          refund: {
+            orderReturn: { code: { contains: q, mode: 'insensitive' } },
+          },
+        },
         {
           refund: { order: { name: { contains: q, mode: 'insensitive' } } },
         },
@@ -88,7 +95,7 @@ export class OrderReturnService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn');
-    assertAnyLocationAccess(user, [order.locationId]);
+    assertLocationPermission(user, 'order_return:manage', order.locationId);
     // "Đã hoàn thành" thực tế = đã giao hàng (fulfillment_status='fulfilled'),
     // KHÔNG phải status='closed' — dữ liệu Sapo thật cho thấy phần lớn đơn đã
     // giao vẫn ở status='open' (Sapo hiếm khi đóng đơn về mặt hành chính).
@@ -106,7 +113,11 @@ export class OrderReturnService {
     await this.validateReturnQty(orderId, dto);
 
     for (const item of dto.items) {
-      assertLocationAccess(user, BigInt(item.location_id));
+      assertLocationPermission(
+        user,
+        'order_return:manage',
+        BigInt(item.location_id),
+      );
     }
 
     const orderItemMap = new Map(
@@ -207,9 +218,8 @@ export class OrderReturnService {
 
       // 2 lựa chọn như Sapo: trừ vào công nợ KH (không chi tiền)
       // hoặc hoàn tiền ngay (phiếu chi, công nợ không đổi)
-      let voucher: Awaited<
-        ReturnType<VoucherService['createPayment']>
-      > | null = null;
+      let voucher: Awaited<ReturnType<VoucherService['createPayment']>> | null =
+        null;
 
       if (dto.refund_amount > 0) {
         if (deductFromDebt) {
@@ -293,10 +303,7 @@ export class OrderReturnService {
     });
     const already = new Map<string, number>();
     for (const r of returned) {
-      already.set(
-        `${r.variantId}:${r.locationId}`,
-        r._sum.quantity ?? 0,
-      );
+      already.set(`${r.variantId}:${r.locationId}`, r._sum.quantity ?? 0);
     }
 
     const req = new Map<string, number>();

@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -153,6 +154,158 @@ export class CarrierWebhookDto {
 
   @IsString()
   status!: string;
+}
+
+/**
+ * Payload webhook trạng thái đơn của GHN — GHN gửi PascalCase nên DTO giữ nguyên tên field
+ * của họ (khác `CarrierWebhookDto` là định dạng snake_case tự định nghĩa cho hãng mô phỏng).
+ * Mọi field đều optional: GHN gửi tập field khác nhau theo `Type`, và
+ * `ValidationPipe({ whitelist: true })` sẽ lược bớt field lạ chứ không báo lỗi.
+ */
+export class GhnWebhookDto {
+  @IsOptional()
+  @IsString()
+  OrderCode?: string;
+
+  @IsOptional()
+  @IsString()
+  ClientOrderCode?: string;
+
+  /** Create | Switch_status | Update_weight | Update_cod | Update_fee */
+  @IsOptional()
+  @IsString()
+  Type?: string;
+
+  @IsOptional()
+  @IsString()
+  Status?: string;
+
+  @IsOptional()
+  ShopID?: number | string;
+
+  @IsOptional()
+  @IsNumber()
+  CODAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  TotalFee?: number;
+
+  /** Khối lượng quy đổi GHN cân lại (gram) */
+  @IsOptional()
+  @IsNumber()
+  ConvertedWeight?: number;
+
+  @IsOptional()
+  @IsNumber()
+  Weight?: number;
+
+  @IsOptional()
+  @IsString()
+  Reason?: string;
+
+  @IsOptional()
+  @IsString()
+  ReasonCode?: string;
+
+  @IsOptional()
+  @IsString()
+  Warehouse?: string;
+
+  @IsOptional()
+  @IsString()
+  Time?: string;
+}
+
+/** Callback ticket của GHN — snake_case (khác webhook đơn hàng, vốn PascalCase). */
+export class GhnTicketCallbackDto {
+  @IsOptional()
+  id?: number | string;
+
+  @IsOptional()
+  @IsString()
+  order_code?: string;
+
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  status_id?: number;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  client_id?: string | number;
+
+  @IsOptional()
+  @IsString()
+  c_name?: string;
+
+  @IsOptional()
+  @IsString()
+  c_email?: string;
+
+  @IsOptional()
+  c_phone?: string | number;
+
+  @IsOptional()
+  attachments?: unknown;
+
+  @IsOptional()
+  conversations?: {
+    body?: string;
+    from_email?: string;
+    created_at?: string;
+    attachments?: unknown;
+  }[];
+
+  @IsOptional()
+  @IsString()
+  created_at?: string;
+
+  @IsOptional()
+  @IsString()
+  updated_at?: string;
+}
+
+/** 4 nhóm ticket GHN cho phép tạo — key ngắn, service map sang chuỗi tiếng Việt của GHN. */
+export const CARRIER_TICKET_CATEGORIES = [
+  'tu_van',
+  'hoi_giao_lay_tra_hang',
+  'thay_doi_thong_tin',
+  'khieu_nai',
+] as const;
+
+export class CreateCarrierTicketDto {
+  /** Vận đơn cần mở ticket (id nội bộ của fulfillment) */
+  @IsString()
+  fulfillment_id!: string;
+
+  @IsIn(CARRIER_TICKET_CATEGORIES)
+  category!: (typeof CARRIER_TICKET_CATEGORIES)[number];
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  description!: string;
+
+  @IsOptional()
+  @IsString()
+  contact_email?: string;
+}
+
+export class ReplyCarrierTicketDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  description!: string;
 }
 
 export class ListProvidersQueryDto {

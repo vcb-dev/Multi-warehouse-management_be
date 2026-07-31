@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
 import { CreateCategoryDto } from './category.dto';
 import { CategoryService } from './category.service';
 
@@ -18,12 +21,14 @@ export class CategoriesController {
 
   @Post()
   @RequirePermission('product:manage')
+  @LocationOptional()
   create(@Body() dto: CreateCategoryDto) {
     return this.categories.create(dto);
   }
 
   @Post(':id/products')
   @RequirePermission('product:manage')
+  @LocationOptional()
   assignProducts(
     @Param('id') id: string,
     @Body() body: { product_ids: string[] },

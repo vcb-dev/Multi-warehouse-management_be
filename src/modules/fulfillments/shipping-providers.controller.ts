@@ -4,7 +4,10 @@ import {
   CurrentUser,
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
 import {
   ConnectProviderDto,
   CreateShippingPartnerDto,
@@ -34,6 +37,7 @@ export class ShippingProvidersController {
 
   @Post()
   @RequirePermission('order:pack', 'shipping:manage')
+  @LocationOptional()
   createPartner(
     @Body() dto: CreateShippingPartnerDto,
     @CurrentUser() user: AuthUser,

@@ -11,8 +11,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import {
   CreateDebtAdjustmentDto,
   CreateSupplierDto,
@@ -38,6 +44,7 @@ export class SupplierController {
 
   @Post()
   @RequirePermission('purchasing:manage')
+  @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSupplierDto) {
     return this.suppliers.create(dto);
@@ -57,12 +64,14 @@ export class SupplierController {
 
   @Put(':id')
   @RequirePermission('purchasing:manage')
+  @LocationOptional()
   update(@Param('id') id: string, @Body() dto: UpdateSupplierDto) {
     return this.suppliers.update(BigInt(id), dto);
   }
 
   @Delete(':id')
   @RequirePermission('purchasing:manage')
+  @LocationOptional()
   remove(@Param('id') id: string) {
     return this.suppliers.softDelete(BigInt(id));
   }
@@ -75,12 +84,16 @@ export class SupplierController {
 
   @Get(':id/ledger')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  getLedger(@Param('id') id: string, @Query() query: ListSupplierLedgerQueryDto) {
+  getLedger(
+    @Param('id') id: string,
+    @Query() query: ListSupplierLedgerQueryDto,
+  ) {
     return this.suppliers.getLedger(BigInt(id), query);
   }
 
   @Post(':id/debt-adjustments')
   @RequirePermission('purchasing:manage')
+  @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   createDebtAdjustment(
     @Param('id') id: string,
@@ -92,6 +105,7 @@ export class SupplierController {
 
   @Post(':id/payments')
   @RequirePermission('purchasing:manage')
+  @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   createPayment(
     @Param('id') id: string,

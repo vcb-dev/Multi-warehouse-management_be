@@ -1,15 +1,21 @@
-import { Body, Controller, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { Public } from '../../common/decorators/roles.decorator';
+import { CarrierTicketService } from './carrier-ticket.service';
 import {
   CancelFulfillmentDto,
   CarrierWebhookDto,
+  CreateCarrierTicketDto,
   CreatePackingDto,
+  GhnTicketCallbackDto,
+  GhnWebhookDto,
   PushShipmentDto,
+  ReplyCarrierTicketDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
 } from './fulfillment.dto';
@@ -19,7 +25,10 @@ import { FulfillmentService } from './fulfillment.service';
 @ApiBearerAuth()
 @Controller('fulfillments')
 export class FulfillmentsController {
-  constructor(private fulfillments: FulfillmentService) {}
+  constructor(
+    private fulfillments: FulfillmentService,
+    private tickets: CarrierTicketService,
+  ) {}
 
   @Post('packing')
   @RequirePermission('order:pack')
@@ -69,7 +78,63 @@ export class FulfillmentsController {
     return this.fulfillments.cancel(BigInt(id), dto, user);
   }
 
-  /** Stub webhook ĐTVC — khi tích hợp thật sẽ chuyển sang @Public + verify chữ ký */
+  // --- Ticket hỗ trợ với hãng vận chuyển (GHN) ---
+
+  @Get('tickets')
+  @RequirePermission('order:pack')
+  listTickets(
+    @CurrentUser() user: AuthUser,
+    @Query('fulfillment_id') fulfillmentId?: string,
+  ) {
+    return this.tickets.list(user, fulfillmentId);
+  }
+
+  @Post('tickets')
+  @RequirePermission('order:pack')
+  createTicket(
+    @Body() dto: CreateCarrierTicketDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.tickets.create(dto, user);
+  }
+
+  @Post('tickets/:id/reply')
+  @RequirePermission('order:pack')
+  replyTicket(
+    @Param('id') id: string,
+    @Body() dto: ReplyCarrierTicketDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.tickets.reply(BigInt(id), dto, user);
+  }
+
+  @Post('tickets/sync')
+  @RequirePermission('order:pack')
+  syncTickets() {
+    return this.tickets.syncFromCarrier();
+  }
+
+  // --- Webhook của hãng ---
+  // Phải khai TRƯỚC `webhook/:provider_code`, nếu không route động sẽ bắt luôn `webhook/ghn`.
+
+  /**
+   * Webhook trạng thái đơn của GHN. `@Public` vì GHN không có JWT của hệ thống này —
+   * xác thực bằng đối chiếu `ShopID` trong payload với cấu hình kết nối đã lưu.
+   */
+  @Public()
+  @Post('webhook/ghn')
+  webhookGhn(@Body() dto: GhnWebhookDto) {
+    return this.fulfillments.webhookGhn(dto);
+  }
+
+  /** Callback ticket của GHN — xác thực bằng `client_id`. */
+  @Public()
+  @Post('webhook/ghn/ticket')
+  webhookGhnTicket(@Body() dto: GhnTicketCallbackDto) {
+    return this.tickets.handleCallback(dto);
+  }
+
+  /** Webhook mô phỏng cho hãng chưa tích hợp API thật (cần đăng nhập). */
   @Post('webhook/:provider_code')
   @RequirePermission('order:pack')
   webhook(

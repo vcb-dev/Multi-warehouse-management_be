@@ -9,6 +9,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  hasLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import {
@@ -17,6 +22,9 @@ import {
   UpdateStockTransferDto,
 } from './stock-transfer.dto';
 import { serializeStockTransfer } from './stock-transfer.serializer';
+
+/** Khớp @RequirePermission của các endpoint đọc trong stock-transfer.controller. */
+const READ_PERMISSIONS = ['inventory:transfer', 'inventory:view'];
 
 const stnInclude = {
   items: {
@@ -51,10 +59,11 @@ export class StockTransferService {
       where.status = query.status as StockTransferStatus;
     }
 
-    where.OR = [
-      { fromLocationId: { in: user.locationIds } },
-      { toLocationId: { in: user.locationIds } },
-    ];
+    // Phiếu chuyển liên quan hai kho — thấy được nếu có quyền ở kho đi HOẶC kho đến.
+    const readable = locationScopeFilter(user, READ_PERMISSIONS);
+    if (readable) {
+      where.OR = [{ fromLocationId: readable }, { toLocationId: readable }];
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.stockTransfer.findMany({
@@ -75,13 +84,43 @@ export class StockTransferService {
     };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, user: AuthUser) {
     const stn = await this.prisma.stockTransfer.findUnique({
       where: { id },
       include: stnInclude,
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
+    this.assertReadable(user, stn);
     return { data: serializeStockTransfer(stn) };
+  }
+
+  /** Đọc được phiếu nếu có quyền ở kho đi HOẶC kho đến. */
+  private assertReadable(
+    user: AuthUser,
+    stn: { fromLocationId: bigint; toLocationId: bigint },
+  ) {
+    const readable = READ_PERMISSIONS.some(
+      (perm) =>
+        hasLocationPermission(user, perm, stn.fromLocationId.toString()) ||
+        hasLocationPermission(user, perm, stn.toLocationId.toString()),
+    );
+    if (!readable) {
+      throw new BusinessException(
+        'FORBIDDEN_SCOPE',
+        'Bạn không có quyền xem phiếu chuyển của kho này.',
+        403,
+      );
+    }
+  }
+
+  /** Chốt quyền theo kho của phiếu cho endpoint không cần nạp cả phiếu. */
+  async assertTransferReadable(id: bigint, user: AuthUser) {
+    const stn = await this.prisma.stockTransfer.findUnique({
+      where: { id },
+      select: { fromLocationId: true, toLocationId: true },
+    });
+    if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
+    this.assertReadable(user, stn);
   }
 
   async create(dto: CreateStockTransferDto, user: AuthUser) {
@@ -104,7 +143,7 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertLocationAccess(user, fromId);
+    assertLocationPermission(user, 'inventory:transfer', fromId);
 
     await this.validateWarehouses(fromId, toId);
 
@@ -168,7 +207,7 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertLocationAccess(user, stn.fromLocationId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
     const fromId = dto.from_location_id
       ? BigInt(dto.from_location_id)
@@ -185,7 +224,7 @@ export class StockTransferService {
       );
     }
     if (dto.from_location_id) {
-      this.inventory.assertLocationAccess(user, fromId);
+      assertLocationPermission(user, 'inventory:transfer', fromId);
     }
     await this.validateWarehouses(fromId, toId);
 
@@ -240,7 +279,7 @@ export class StockTransferService {
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
 
-    this.inventory.assertLocationAccess(user, stn.fromLocationId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
     switch (action) {
       case 'submit':
@@ -301,7 +340,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(stn.id);
+    return this.findOne(stn.id, user);
   }
 
   /** Chờ chuyển → Đang chuyển: xuất kho thật, giải phóng chỗ giữ */
@@ -377,7 +416,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(stn.id);
+    return this.findOne(stn.id, user);
   }
 
   async receive(id: bigint, user: AuthUser) {
@@ -395,7 +434,7 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertLocationAccess(user, stn.toLocationId);
+    assertLocationPermission(user, 'inventory:transfer', stn.toLocationId);
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of sortForLocking(stn.items)) {
@@ -446,7 +485,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
   async cancel(id: bigint, user: AuthUser) {
@@ -467,7 +506,7 @@ export class StockTransferService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã hủy', 409);
     }
 
-    this.inventory.assertLocationAccess(user, stn.fromLocationId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
     // Phiếu nháp chưa từng đụng tồn kho — hủy = xóa hẳn, giống quy ước hủy
     // PO/REI ở trạng thái nháp (không giữ lại bản ghi "đã hủy" vô nghĩa).
@@ -556,7 +595,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
   private async validateWarehouses(fromId: bigint, toId: bigint) {

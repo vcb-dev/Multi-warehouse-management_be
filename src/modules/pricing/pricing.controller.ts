@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
-  CreatePriceListDto,
-  PriceListService,
-} from './price-list.service';
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
+import { CreatePriceListDto, PriceListService } from './price-list.service';
 
 @ApiTags('price-lists')
 @ApiBearerAuth()
@@ -18,8 +18,12 @@ export class PricingController {
     return this.pricing.list();
   }
 
+  // `location_id` (nếu có trong body) vẫn được PermissionGuard kiểm bình
+  // thường ở đúng kho đó — LocationOptional chỉ mở đường cho bảng giá TOÀN
+  // CỤC (không có location_id) chứ không bỏ qua kiểm tra khi có kho cụ thể.
   @Post()
   @RequirePermission('product:manage')
+  @LocationOptional()
   create(@Body() dto: CreatePriceListDto) {
     return this.pricing.create(dto);
   }
@@ -42,6 +46,7 @@ export class PricingController {
 
   @Put(':id/items')
   @RequirePermission('product:manage')
+  @LocationOptional()
   upsertItems(
     @Param('id') id: string,
     @Body()

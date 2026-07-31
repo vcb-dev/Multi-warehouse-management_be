@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { assertLocationPermission } from '../../common/auth/access';
 import { ListInventoryQueryDto } from './inventory.dto';
 import { InventoryQueryService } from './inventory-query.service';
 import { InventoryService } from './inventory.service';
@@ -123,7 +124,7 @@ export class InventoryImportService {
   ) {}
 
   async importExcel(buffer: Buffer, locationId: bigint, user: AuthUser) {
-    this.inventory.assertLocationAccess(user, locationId);
+    assertLocationPermission(user, 'inventory:receive', locationId);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);

@@ -8,6 +8,10 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
@@ -36,6 +40,10 @@ type PoForTransition = Prisma.PurchaseOrderGetPayload<{
   include: { items: true; supplier: { select: { name: true } } };
 }>;
 
+/** Khớp @RequirePermission trong purchasing.controller. */
+const PO_READ = ['purchasing:manage', 'inventory:view'];
+const PO_WRITE = ['purchasing:manage'];
+
 @Injectable()
 export class PurchaseOrderService {
   constructor(
@@ -44,10 +52,12 @@ export class PurchaseOrderService {
     private vouchers: VoucherService,
   ) {}
 
-  async list(query: ListPurchaseOrdersQueryDto) {
+  async list(query: ListPurchaseOrdersQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where: Prisma.PurchaseOrderWhereInput = {};
+    const where: Prisma.PurchaseOrderWhereInput = {
+      locationId: locationScopeFilter(user, PO_READ),
+    };
 
     if (query.status)
       where.status = query.status as import('@prisma/client').PoStatus;
@@ -72,13 +82,24 @@ export class PurchaseOrderService {
     };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, user: AuthUser) {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
       include: poInclude,
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
+    assertLocationPermission(user, PO_READ, po.locationId);
     return { data: serializePurchaseOrder(po) };
+  }
+
+  /** Chốt quyền theo kho của PO cho endpoint không cần nạp cả phiếu. */
+  async assertPoReadable(id: bigint, user: AuthUser) {
+    const po = await this.prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: { locationId: true },
+    });
+    if (!po) throw new NotFoundException('Không tìm thấy PO');
+    assertLocationPermission(user, PO_READ, po.locationId);
   }
 
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
@@ -92,7 +113,7 @@ export class PurchaseOrderService {
 
     await this.validateSupplier(BigInt(dto.supplier_id));
     await this.validateBranch(BigInt(dto.location_id));
-    this.inventory.assertLocationAccess(user, BigInt(dto.location_id));
+    assertLocationPermission(user, PO_WRITE, BigInt(dto.location_id));
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
     const totalAmount = dto.items.reduce(
@@ -152,6 +173,9 @@ export class PurchaseOrderService {
   async update(id: bigint, dto: UpdatePurchaseOrderDto, user: AuthUser) {
     const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
+    // Kho hiện tại của PO, chứ không chỉ kho mới trong dto — không có dòng này
+    // thì sửa được PO của kho mình không có quyền, miễn là không đổi kho.
+    assertLocationPermission(user, PO_WRITE, po.locationId);
     if (po.status !== PoStatus.don_nhap) {
       throw new BusinessException(
         'INVALID_TRANSITION',
@@ -170,7 +194,7 @@ export class PurchaseOrderService {
     if (dto.supplier_id) await this.validateSupplier(BigInt(dto.supplier_id));
     if (dto.location_id) await this.validateBranch(BigInt(dto.location_id));
     if (dto.location_id) {
-      this.inventory.assertLocationAccess(user, BigInt(dto.location_id));
+      assertLocationPermission(user, PO_WRITE, BigInt(dto.location_id));
     }
 
     const data: Prisma.PurchaseOrderUpdateInput = {};
@@ -243,7 +267,7 @@ export class PurchaseOrderService {
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
 
-    this.inventory.assertLocationAccess(user, po.locationId);
+    assertLocationPermission(user, PO_WRITE, po.locationId);
 
     switch (action) {
       case 'submit':
@@ -351,7 +375,7 @@ export class PurchaseOrderService {
       }
     }, TX_OPTIONS);
 
-    return this.findOne(po.id);
+    return this.findOne(po.id, user);
   }
 
   private async close(
@@ -384,7 +408,7 @@ export class PurchaseOrderService {
       });
     }, TX_OPTIONS);
 
-    return this.findOne(po.id);
+    return this.findOne(po.id, user);
   }
 
   private async cancel(

@@ -13,15 +13,25 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
+import { sendXlsx } from '../../common/utils/send-xlsx';
 import {
   CreateProductDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
   UpdateProductDto,
 } from './product.dto';
-import { ProductExportService, ProductImportService } from './product-import.service';
+import {
+  ProductExportService,
+  ProductImportService,
+} from './product-import.service';
 import { ProductService } from './product.service';
 
 @ApiTags('products')
@@ -42,37 +52,32 @@ export class ProductsController {
 
   @Post()
   @RequirePermission('product:manage')
+  @LocationOptional()
   create(@Body() dto: CreateProductDto, @CurrentUser() user: AuthUser) {
     return this.products.create(dto, user);
   }
 
   @Get('export')
   @RequirePermission('product:manage')
-  async export(
-    @Query() query: ListProductsQueryDto,
-    @Res() res: Response,
-  ) {
+  async export(@Query() query: ListProductsQueryDto, @Res() res: Response) {
     const buffer = await this.exporter.exportExcel(query);
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="san-pham.xlsx"',
-    );
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.send(buffer);
+    sendXlsx(res, buffer, 'san-pham.xlsx');
   }
 
   @Post('import')
   @RequirePermission('product:manage')
+  @LocationOptional()
   @UseInterceptors(FileInterceptor('file'))
   async import(
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file?.buffer) {
-      return { created: 0, updated: 0, errors: [{ row: 0, message: 'Thiếu file' }] };
+      return {
+        created: 0,
+        updated: 0,
+        errors: [{ row: 0, message: 'Thiếu file' }],
+      };
     }
     return this.importer.importExcel(file.buffer, user);
   }
@@ -95,6 +100,7 @@ export class ProductsController {
 
   @Put(':id')
   @RequirePermission('product:manage')
+  @LocationOptional()
   update(
     @Param('id') id: string,
     @Body() dto: UpdateProductDto,

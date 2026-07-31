@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
@@ -118,6 +122,9 @@ export class InventoryQueryService {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
     const locationId = BigInt(query.location_id!);
+    // Nhánh này bỏ qua buildLevelWhere nên không được thừa hưởng bộ lọc kho —
+    // thiếu dòng này thì `?location_id=` xem được tồn của kho bất kỳ.
+    assertLocationPermission(user, 'inventory:view', locationId);
 
     const location = await this.prisma.location.findUniqueOrThrow({
       where: { id: locationId },
@@ -237,9 +244,11 @@ export class InventoryQueryService {
     const where: Prisma.InventoryMovementWhereInput = { variantId };
 
     if (query.location_id) {
-      where.locationId = BigInt(query.location_id);
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'inventory:view', locationId);
+      where.locationId = locationId;
     } else {
-      where.locationId = { in: user.locationIds };
+      where.locationId = locationScopeFilter(user, 'inventory:view');
     }
 
     if (query.bucket) where.bucket = query.bucket;
@@ -274,7 +283,7 @@ export class InventoryQueryService {
   ): Promise<Prisma.InventoryLevelWhereInput> {
     const where: Prisma.InventoryLevelWhereInput = {};
 
-    where.locationId = { in: user.locationIds };
+    where.locationId = locationScopeFilter(user, 'inventory:view');
 
     if (query.variant_id) {
       where.variantId = BigInt(query.variant_id);
@@ -302,5 +311,4 @@ export class InventoryQueryService {
 
     return where;
   }
-
 }

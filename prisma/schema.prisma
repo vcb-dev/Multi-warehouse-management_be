@@ -315,6 +315,8 @@ model User {
   inboxConvViews         CskhInboxConversationView[]
   packedFulfillments     Fulfillment[]               @relation("FulfillmentPacker")
   createdFulfillments    Fulfillment[]               @relation("FulfillmentCreatedBy")
+  createdCarrierTickets  CarrierTicket[]             @relation("CarrierTicketCreatedBy")
+  savedReports           SavedReport[]               @relation("SavedReportUser")
 
   @@map("users")
 }
@@ -421,9 +423,6 @@ model UserInvitation {
   @@map("user_invitations")
 }
 
-/// Location — theo Sapo Admin API `/admin/locations.json`.
-/// Sapo gộp điểm bán / kho / chi nhánh / trụ sở làm MỘT đối tượng,
-/// nên model này thay thế cả `Branch` lẫn `Warehouse` trước đây.
 model Location {
   id                     BigInt    @id @default(autoincrement())
   sapoId                 BigInt?   @unique @map("sapo_id")
@@ -1183,7 +1182,9 @@ model Order {
   refundStatus       OrderRefundStatus       @default(no_refund) @map("refund_status")
   /// Field đồng bộ/báo cáo từ Sapo — không điều khiển nghiệp vụ nội bộ
   issueStatus        String?       @map("issue_status")
-  restockStatus       OrderRestockStatus? @map("restock_status")
+  /// Cùng họ với return_status/refund_status nên cũng phải có default: để nullable thì
+  /// mọi bộ lọc `restock_status = 'no_restock'` sẽ bỏ sót toàn bộ đơn chưa từng nhập lại.
+  restockStatus      OrderRestockStatus @default(no_restock) @map("restock_status")
   cancelReason       String?       @map("cancel_reason")
   cancelledOn        DateTime?     @map("cancelled_on")
   closedOn           DateTime?     @map("closed_on")
@@ -1295,6 +1296,7 @@ model Order {
   fromDraft    DraftOrder?   @relation("DraftConverted")
   fulfillments Fulfillment[]
   shippingLines OrderShippingLine[]
+  carrierTickets CarrierTicket[]
 
   @@index([locationId, status, createdOn])
   @@index([createdOn])
@@ -1321,6 +1323,10 @@ model OrderItem {
   totalDiscount   Decimal @default(0) @map("total_discount") @db.Decimal(18, 2)
   discountedTotal Decimal @map("discounted_total") @db.Decimal(18, 2)
   originalTotal   Decimal? @map("original_total") @db.Decimal(18, 2)
+  /// Không có ở Sapo — chốt giá vốn (`ProductVariant.cost`) tại thời điểm bán để báo cáo
+  /// lợi nhuận kỳ cũ không trôi khi giá vốn thay đổi. NULL với đơn tạo trước tính năng này
+  /// (báo cáo fallback về `variant.cost` hiện tại).
+  costPrice       Decimal? @map("cost_price") @db.Decimal(18, 2)
   /// Số lượng theo từng trạng thái xử lý (Sapo tính sẵn) — đồng bộ/báo cáo
   fulfillableQuantity    Int? @map("fulfillable_quantity")
   currentQuantity        Int? @map("current_quantity")
@@ -1356,7 +1362,8 @@ model ShippingProvider {
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
 
-  fulfillments Fulfillment[]
+  fulfillments   Fulfillment[]
+  carrierTickets CarrierTicket[]
 
   @@map("shipping_providers")
 }
@@ -1477,6 +1484,7 @@ model Fulfillment {
   location   Location?         @relation(fields: [locationId], references: [id])
   createdBy  User              @relation("FulfillmentCreatedBy", fields: [createdById], references: [id])
   items      FulfillmentLineItem[]
+  carrierTickets CarrierTicket[]
 
   @@index([orderId])
   @@index([shipmentStatus])
@@ -1540,6 +1548,77 @@ model OrderShippingLine {
   @@map("order_shipping_lines")
 }
 
+/// Trạng thái ticket của GHN ("1 - Đang xử lý" / "2 - Chờ KH phản hồi" / "3 - Hoàn thành")
+enum CarrierTicketStatus {
+  dang_xu_ly
+  cho_phan_hoi
+  hoan_thanh
+}
+
+/// 4 nhóm ticket GHN cho phép tạo
+enum CarrierTicketCategory {
+  tu_van
+  hoi_giao_lay_tra_hang
+  thay_doi_thong_tin
+  khieu_nai
+}
+
+/// Phiếu hỗ trợ mở với hãng vận chuyển (GHN `ticket/*`). Sapo không có khái niệm này nên
+/// đây là bảng riêng của dự án, đặt tên theo vốn từ của hãng.
+model CarrierTicket {
+  id            BigInt                @id @default(autoincrement())
+  providerId    BigInt                @map("provider_id")
+  fulfillmentId BigInt?               @map("fulfillment_id")
+  orderId       BigInt?               @map("order_id")
+  /// GHN `id` — khóa để upsert khi callback/đồng bộ về
+  externalId    String                @unique @map("external_id")
+  /// GHN `order_code` = mã vận đơn (`fulfillments.tracking_number`)
+  orderCode     String                @map("order_code")
+  category      CarrierTicketCategory
+  status        CarrierTicketStatus   @default(dang_xu_ly)
+  /// Giá trị thô của hãng, giữ lại vì GHN có thể thêm trạng thái mới
+  statusRaw     String?               @map("status_raw")
+  description   String                @db.Text
+  attachments   Json?
+  contactName   String?               @map("contact_name")
+  contactEmail  String?               @map("contact_email")
+  contactPhone  String?               @map("contact_phone")
+  createdById   BigInt?               @map("created_by")
+  externalCreatedAt DateTime?         @map("external_created_at")
+  externalUpdatedAt DateTime?         @map("external_updated_at")
+  syncedAt      DateTime?             @map("synced_at")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  provider    ShippingProvider        @relation(fields: [providerId], references: [id])
+  fulfillment Fulfillment?            @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+  order       Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy   User?                   @relation("CarrierTicketCreatedBy", fields: [createdById], references: [id])
+  messages    CarrierTicketMessage[]
+
+  @@index([orderCode])
+  @@index([status])
+  @@index([fulfillmentId])
+  @@map("carrier_tickets")
+}
+
+/// GHN `ticket.conversations[]` — trao đổi qua lại trong một ticket
+model CarrierTicketMessage {
+  id                BigInt    @id @default(autoincrement())
+  ticketId          BigInt    @map("ticket_id")
+  /// shop = mình gửi, carrier = hãng trả lời
+  senderType        String    @map("sender_type")
+  fromEmail         String?   @map("from_email")
+  body              String    @db.Text
+  attachments       Json?
+  externalCreatedAt DateTime? @map("external_created_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  ticket CarrierTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, externalCreatedAt])
+  @@map("carrier_ticket_messages")
+}
 
 model DraftOrder {
   id               BigInt           @id @default(autoincrement())
@@ -1719,6 +1798,28 @@ model Voucher {
 
   @@index([locationId, type, recordedAt])
   @@map("vouchers")
+}
+
+// --- Báo cáo (008) ---
+
+/// Báo cáo người dùng lưu/ghim lên màn tổng quan. Bản thân báo cáo KHÔNG có bảng dữ liệu
+/// riêng — số liệu tổng hợp trực tiếp từ các bảng nghiệp vụ theo `report_key`.
+model SavedReport {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  /// Id báo cáo trong `report-registry.ts` (vd `doanh-thu-theo-thoi-gian`)
+  reportKey  String   @map("report_key")
+  /// Bộ lọc đã lưu kèm (khoảng thời gian, kho, kênh...) — dạng snake_case như query API
+  filters    Json?
+  isPinned   Boolean  @default(true) @map("is_pinned")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation("SavedReportUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reportKey])
+  @@index([userId, isPinned])
+  @@map("saved_reports")
 }
 
 // --- Chat CSKH (002 US4) ---

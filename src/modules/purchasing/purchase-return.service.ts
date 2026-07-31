@@ -9,6 +9,10 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
@@ -30,6 +34,12 @@ const pvnInclude = {
   createdBy: { select: { firstName: true, lastName: true, email: true } },
 } satisfies Prisma.PurchaseReturnInclude;
 
+/** Khớp @RequirePermission trong purchasing.controller. */
+const PVN_READ = ['purchasing:manage', 'inventory:view'];
+const PVN_WRITE = ['purchasing:manage', 'inventory:receive'];
+/** Xác nhận hoàn tiền chặt hơn: chỉ purchasing:manage (khớp controller). */
+const PVN_REFUND = ['purchasing:manage'];
+
 @Injectable()
 export class PurchaseReturnService {
   constructor(
@@ -38,10 +48,12 @@ export class PurchaseReturnService {
     private vouchers: VoucherService,
   ) {}
 
-  async list(query: ListPurchaseReturnsQueryDto) {
+  async list(query: ListPurchaseReturnsQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where: Prisma.PurchaseReturnWhereInput = {};
+    const where: Prisma.PurchaseReturnWhereInput = {
+      locationId: locationScopeFilter(user, PVN_READ),
+    };
 
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
@@ -85,7 +97,7 @@ export class PurchaseReturnService {
     const supplierId = BigInt(dto.supplier_id);
 
     await this.validateSupplier(supplierId);
-    this.inventory.assertLocationAccess(user, locationId);
+    assertLocationPermission(user, PVN_WRITE, locationId);
 
     const goodsReceiptId = dto.goods_receipt_id
       ? await this.validateGoodsReceiptRef(
@@ -172,13 +184,24 @@ export class PurchaseReturnService {
     return { data: serializePurchaseReturn(pvn) };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, user: AuthUser) {
     const pvn = await this.prisma.purchaseReturn.findUnique({
       where: { id },
       include: pvnInclude,
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    assertLocationPermission(user, PVN_READ, pvn.locationId);
     return { data: serializePurchaseReturn(pvn) };
+  }
+
+  /** Chốt quyền theo kho của phiếu cho endpoint không cần nạp cả phiếu. */
+  async assertReturnReadable(id: bigint, user: AuthUser) {
+    const pvn = await this.prisma.purchaseReturn.findUnique({
+      where: { id },
+      select: { locationId: true },
+    });
+    if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    assertLocationPermission(user, PVN_READ, pvn.locationId);
   }
 
   async confirmRefund(id: bigint, user: AuthUser) {
@@ -195,12 +218,15 @@ export class PurchaseReturnService {
       );
     }
 
-    this.inventory.assertLocationAccess(user, pvn.locationId);
+    assertLocationPermission(user, PVN_REFUND, pvn.locationId);
 
     const voucher = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseReturn.update({
         where: { id },
-        data: { refundStatus: RefundStatus.da_hoan_tien, refundedAt: new Date() },
+        data: {
+          refundStatus: RefundStatus.da_hoan_tien,
+          refundedAt: new Date(),
+        },
       });
 
       // NCC hoàn tiền mặt thay vì trừ công nợ → đảo lại bút toán giảm nợ khi tạo phiếu trả

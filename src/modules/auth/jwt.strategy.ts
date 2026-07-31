@@ -5,45 +5,36 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { RbacService } from '../rbac/rbac.service';
+import { AuthCacheService } from '../rbac/auth-cache.service';
+import { requireEnv } from '../../common/utils/require-env';
 
 type JwtPayload = { sub: string; email: string };
 
-// Mọi request đều chạy validate() nên phải cache: tránh 2 round-trip DB
-// (user + permissions) lặp lại trên từng API call. TTL ngắn để đổi role/khoá
-// tài khoản có hiệu lực gần như ngay lập tức.
-const AUTH_CACHE_TTL_MS = 30_000;
-
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  private readonly cache = new Map<
-    string,
-    { value: AuthUser; expiresAt: number }
-  >();
-
   constructor(
     config: ConfigService,
     private prisma: PrismaService,
     private rbac: RbacService,
+    private authCache: AuthCacheService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET', 'change-me'),
+      secretOrKey: requireEnv(config, 'JWT_SECRET'),
     });
   }
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
-    const cached = this.cache.get(payload.sub);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.value;
-    }
+    const cached = this.authCache.get(payload.sub);
+    if (cached) return cached;
 
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(payload.sub) },
       include: { locations: true, locationRoles: true },
     });
     if (!user || !user.active || user.status === 'inactive') {
-      this.cache.delete(payload.sub);
+      this.authCache.invalidate(payload.sub);
       throw new UnauthorizedException();
     }
     const resolved = await this.rbac.resolvePermissions(user.id);
@@ -58,10 +49,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,
     };
-    this.cache.set(payload.sub, {
-      value: authUser,
-      expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
-    });
+    this.authCache.set(payload.sub, authUser);
     return authUser;
   }
 }
