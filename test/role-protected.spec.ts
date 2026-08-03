@@ -4,6 +4,11 @@
 import { ForbiddenException } from '@nestjs/common';
 import { RoleService } from '../src/modules/rbac/role.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
+import type { AuthCacheService } from '../src/modules/rbac/auth-cache.service';
+
+// Không test nào ở đây chạm nhánh invalidate cache (tạo role mới, hoặc sửa
+// role hệ thống bị chặn sớm) — fake rỗng chỉ để thoả kiểu.
+const fakeAuthCache = {} as AuthCacheService;
 
 function serviceWithNoExistingRole() {
   const prisma = {
@@ -13,7 +18,7 @@ function serviceWithNoExistingRole() {
     },
     permission: { findMany: jest.fn() },
   } as unknown as PrismaService;
-  return { svc: new RoleService(prisma), prisma };
+  return { svc: new RoleService(prisma, fakeAuthCache), prisma };
 }
 
 describe('RoleService protected permissions', () => {
@@ -46,7 +51,7 @@ describe('RoleService protected permissions', () => {
       rolePermission: { deleteMany: jest.fn(), createMany: jest.fn() },
       permission: { findMany: jest.fn() },
     } as unknown as PrismaService;
-    const svc = new RoleService(prisma);
+    const svc = new RoleService(prisma, fakeAuthCache);
     await expect(
       svc.update('1', { permission_keys: ['order:view'] }),
     ).rejects.toBeInstanceOf(ForbiddenException);

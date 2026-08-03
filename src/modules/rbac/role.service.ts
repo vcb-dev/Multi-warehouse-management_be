@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoleDto, UpdateRoleDto } from './rbac.dto';
+import { AuthCacheService } from './auth-cache.service';
 
 /** Quyền chỉ được gán cho role hệ thống `admin`. */
 export const PROTECTED_PERMISSION_KEYS = new Set([
@@ -16,7 +17,10 @@ export const PROTECTED_PERMISSION_KEYS = new Set([
 
 @Injectable()
 export class RoleService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private authCache: AuthCacheService,
+  ) {}
 
   async list() {
     const roles = await this.prisma.role.findMany({
@@ -145,7 +149,22 @@ export class RoleService {
         }
       }
     });
+
+    // Đổi tập quyền hoặc khoá/mở role ảnh hưởng MỌI user đang mang role này —
+    // không biết cụ thể ai nên invalidate cả loạt thay vì đoán.
+    if (dto.permission_keys !== undefined || dto.is_active !== undefined) {
+      await this.invalidateUsersWithRole(role.id);
+    }
     return this.findOne(id);
+  }
+
+  private async invalidateUsersWithRole(roleId: bigint) {
+    const holders = await this.prisma.userLocationRole.findMany({
+      where: { roleId },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    for (const h of holders) this.authCache.invalidate(h.userId);
   }
 
   async remove(id: string) {

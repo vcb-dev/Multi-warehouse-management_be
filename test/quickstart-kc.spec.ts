@@ -2,8 +2,9 @@
  * Quickstart KC1–KC6 — specs/006-quan-ly-kho/quickstart.md
  * Chạy: RUN_INTEGRATION_TESTS=1 npm run test:quickstart
  */
-import { ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { assertLocationPermission } from '../src/common/auth/access';
+import { BusinessException } from '../src/common/exceptions/business.exception';
 import {
   InventoryBucket,
   MovementType,
@@ -71,11 +72,18 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     transferService = module.get(StockTransferService);
     prisma = module.get(PrismaService);
 
-    const supplier = await prisma.supplier.findFirst({ where: { isActive: true } });
+    const supplier = await prisma.supplier.findFirst({
+      where: { isActive: true },
+    });
     const branch = await prisma.location.findFirst();
-    const warehouses = await prisma.location.findMany({ take: 2, orderBy: { id: 'asc' } });
+    const warehouses = await prisma.location.findMany({
+      take: 2,
+      orderBy: { id: 'asc' },
+    });
     const variant = await prisma.productVariant.findFirst();
-    const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
+    const user = await prisma.user.findFirst({
+      where: { email: 'admin@local.dev' },
+    });
     if (!supplier || !branch || warehouses.length < 2 || !variant || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
@@ -140,7 +148,9 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       {
         supplier_id: supplierId.toString(),
         location_id: warehouseK1.toString(),
-        items: [{ variant_id: variantId.toString(), quantity: 20, unit_price: 50000 }],
+        items: [
+          { variant_id: variantId.toString(), quantity: 20, unit_price: 50000 },
+        ],
       },
       auth,
     );
@@ -327,16 +337,24 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       ),
     ).rejects.toMatchObject({ code: 'SAME_WAREHOUSE' });
 
+    // Có quyền chuyển kho tại K2, không có gì ở K1 → thao tác trên tài nguyên
+    // của K1 phải bị chặn (kiểm theo kho của TÀI NGUYÊN, không theo kho khai).
     const scopedUser = {
       userId,
       email: 'kho@local.dev',
       roles: ['warehouse_staff'],
       locationIds: [warehouseK2],
+      warehousePermissions: {
+        [warehouseK2.toString()]: ['inventory:transfer', 'inventory:view'],
+      },
     };
 
     expect(() =>
-      inventory.assertLocationAccess(scopedUser, warehouseK1),
-    ).toThrow(ForbiddenException);
+      assertLocationPermission(scopedUser, 'inventory:transfer', warehouseK1),
+    ).toThrow(BusinessException);
+    expect(() =>
+      assertLocationPermission(scopedUser, 'inventory:transfer', warehouseK2),
+    ).not.toThrow();
 
     const onHandBeforeCancel = (
       await prisma.inventoryLevel.findUniqueOrThrow({

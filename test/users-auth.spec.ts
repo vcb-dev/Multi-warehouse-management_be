@@ -13,12 +13,16 @@ describe('UsersController authorization metadata', () => {
     expect(perms).toContain('staff:manage');
   });
 
-  it('GET assignable không yêu cầu staff:manage', () => {
+  it('GET assignable chỉ cần dashboard:view — không chặn nhân viên thường', () => {
+    // Dropdown gán đơn dùng ở nhiều module (đơn hàng, nhập hàng, NCC); mọi role
+    // seed đều có dashboard:view nên đây gần như "đã đăng nhập" chứ không phải
+    // staff:manage (finding #9: endpoint này từng không gắn quyền gì).
     const perms = Reflect.getMetadata(
       PERMISSION_KEY,
       UsersController.prototype.listAssignable,
     ) as string[] | undefined;
-    expect(perms).toBeUndefined();
+    expect(perms).toEqual(['dashboard:view']);
+    expect(perms).not.toContain('staff:manage');
   });
 
   it('GET :id yêu cầu staff:manage', () => {

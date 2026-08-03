@@ -9,7 +9,10 @@ import {
   Prisma,
   RestockType,
 } from '@prisma/client';
-import { assertAnyLocationAccess, assertLocationAccess } from '../../common/auth/access';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
 import {
@@ -36,8 +39,15 @@ import {
   PayOrderDto,
   UpdateOrderDto,
 } from './order.dto';
-import { OrderRepository, orderInclude, OrderWithRelations } from './order.repository';
-import { serializeOrderDetail, serializeOrderListItem } from './order.serializer';
+import {
+  OrderRepository,
+  orderInclude,
+  OrderWithRelations,
+} from './order.repository';
+import {
+  serializeOrderDetail,
+  serializeOrderListItem,
+} from './order.serializer';
 
 type ResolvedItem = {
   variantId: bigint;
@@ -48,6 +58,8 @@ type ResolvedItem = {
   price: number;
   discount: number;
   total: number;
+  /// Giá vốn chốt tại thời điểm bán — cho báo cáo lợi nhuận không trôi khi giá vốn đổi
+  costPrice: Prisma.Decimal;
 };
 
 @Injectable()
@@ -68,10 +80,10 @@ export class OrderService {
     // Location nằm ở cấp đơn (theo Sapo), không còn theo từng dòng hàng.
     if (query.location_id) {
       const locationId = BigInt(query.location_id);
-      assertLocationAccess(user, locationId);
+      assertLocationPermission(user, 'order:view', locationId);
       where.locationId = locationId;
     } else {
-      where.locationId = { in: user.locationIds };
+      where.locationId = locationScopeFilter(user, 'order:view');
     }
 
     const stockFilter =
@@ -148,9 +160,16 @@ export class OrderService {
     async function computeStockReady(
       repo: OrderRepository,
       // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
-      orders: { id: bigint; locationId: bigint; items: { variantId: bigint; quantity: number }[] }[],
+      orders: {
+        id: bigint;
+        locationId: bigint;
+        items: { variantId: bigint; quantity: number }[];
+      }[],
     ) {
-      const pairs = new Map<string, { variantId: bigint; locationId: bigint }>();
+      const pairs = new Map<
+        string,
+        { variantId: bigint; locationId: bigint }
+      >();
       for (const row of orders) {
         for (const item of row.items) {
           pairs.set(`${item.variantId}:${row.locationId}`, {
@@ -172,7 +191,9 @@ export class OrderService {
         orders.map((row) => [
           row.id,
           row.items.every(
-            (i) => (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >= i.quantity,
+            (i) =>
+              (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
+              i.quantity,
           ),
         ]),
       );
@@ -190,7 +211,9 @@ export class OrderService {
       });
       const stockReadyMap = await computeStockReady(this.repo, all);
       const wantReady = stockFilter === 'du_hang';
-      const filtered = all.filter((row) => (stockReadyMap.get(row.id) ?? true) === wantReady);
+      const filtered = all.filter(
+        (row) => (stockReadyMap.get(row.id) ?? true) === wantReady,
+      );
       const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
       return {
@@ -226,11 +249,24 @@ export class OrderService {
     };
   }
 
+  /**
+   * Chốt quyền theo kho của đơn cho các endpoint không cần nạp cả đơn
+   * (vd: lịch sử thao tác).
+   */
+  async assertOrderPermission(id: bigint, user: AuthUser, permission: string) {
+    const order = await this.repo.client.order.findUnique({
+      where: { id },
+      select: { locationId: true },
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    assertLocationPermission(user, permission, order.locationId);
+  }
+
   async findOne(id: bigint, user?: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (user) {
-      assertAnyLocationAccess(user, [order.locationId]);
+      assertLocationPermission(user, 'order:view', order.locationId);
     }
 
     const detail = serializeOrderDetail(order);
@@ -262,10 +298,7 @@ export class OrderService {
         : Promise.resolve(null),
     ]);
     const availMap = new Map(
-      levels.map((l) => [
-        `${l.variantId}:${l.locationId}`,
-        l.available,
-      ]),
+      levels.map((l) => [`${l.variantId}:${l.locationId}`, l.available]),
     );
     const onHandMap = new Map(
       levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
@@ -287,9 +320,10 @@ export class OrderService {
           ...i,
           available: availMap.get(`${i.variant_id}:${order.locationId}`) ?? 0,
         })),
-        customer: detail.customer && customerStats
-          ? { ...detail.customer, ...customerStats }
-          : detail.customer,
+        customer:
+          detail.customer && customerStats
+            ? { ...detail.customer, ...customerStats }
+            : detail.customer,
       },
     };
   }
@@ -297,7 +331,7 @@ export class OrderService {
   async update(id: bigint, dto: UpdateOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyLocationAccess(user, [order.locationId]);
+    assertLocationPermission(user, 'order:update', order.locationId);
     if (order.status !== OrderStatus.open || order.confirmedOn !== null) {
       throw new BusinessException(
         'INVALID_TRANSITION',
@@ -414,7 +448,7 @@ export class OrderService {
   async pay(id: bigint, dto: PayOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyLocationAccess(user, [order.locationId]);
+    assertLocationPermission(user, 'order:update', order.locationId);
 
     if (order.status === OrderStatus.cancelled) {
       throw new BusinessException(
@@ -534,16 +568,15 @@ export class OrderService {
     }
 
     const locationId = BigInt(dto.location_id);
-    await this.repo.client.location.findUniqueOrThrow({ where: { id: locationId } });
+    assertLocationPermission(user, 'order:create', locationId);
+    await this.repo.client.location.findUniqueOrThrow({
+      where: { id: locationId },
+    });
 
     if (dto.name) {
       const dup = await this.repo.findByCode(dto.name.trim());
       if (dup) {
-        throw new BusinessException(
-          'DUPLICATE_CODE',
-          'Mã đơn đã tồn tại',
-          409,
-        );
+        throw new BusinessException('DUPLICATE_CODE', 'Mã đơn đã tồn tại', 409);
       }
     }
 
@@ -579,7 +612,8 @@ export class OrderService {
         const name =
           dto.name?.trim() || (await generateOrderCode(tx, locationId));
 
-        const initialPaidReachesFull = initialPaid >= totals.totalPrice && totals.totalPrice > 0;
+        const initialPaidReachesFull =
+          initialPaid >= totals.totalPrice && totals.totalPrice > 0;
         const record = await tx.order.create({
           data: {
             name,
@@ -621,12 +655,15 @@ export class OrderService {
             shippingWard: dto.shipping_address?.ward?.trim() || null,
             shippingWardCode: dto.shipping_address?.ward_code?.trim() || null,
             shippingDistrict: dto.shipping_address?.district?.trim() || null,
-            shippingDistrictCode: dto.shipping_address?.district_code?.trim() || null,
+            shippingDistrictCode:
+              dto.shipping_address?.district_code?.trim() || null,
             shippingProvince: dto.shipping_address?.province?.trim() || null,
-            shippingProvinceCode: dto.shipping_address?.province_code?.trim() || null,
+            shippingProvinceCode:
+              dto.shipping_address?.province_code?.trim() || null,
             shippingCity: dto.shipping_address?.city?.trim() || null,
             shippingCountry: dto.shipping_address?.country?.trim() || null,
-            shippingCountryCode: dto.shipping_address?.country_code?.trim() || null,
+            shippingCountryCode:
+              dto.shipping_address?.country_code?.trim() || null,
             shippingZip: dto.shipping_address?.zip?.trim() || null,
             shippingCompany: dto.shipping_address?.company?.trim() || null,
             deliveryCodAmount: dto.delivery_cod_amount ?? null,
@@ -657,13 +694,14 @@ export class OrderService {
                 totalDiscount: i.discount,
                 discountedTotal: i.total,
                 originalTotal: i.quantity * i.price,
+                costPrice: i.costPrice,
               })),
             },
           },
         });
 
         for (const item of sortForLocking(resolvedItems)) {
-          this.inventory.assertLocationAccess(user, item.locationId);
+          assertLocationPermission(user, 'order:create', item.locationId);
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -737,7 +775,11 @@ export class OrderService {
         return record;
       });
 
-      return { id: order.id.toString(), code: order.name, status: order.status };
+      return {
+        id: order.id.toString(),
+        code: order.name,
+        status: order.status,
+      };
     } catch (e) {
       if (e instanceof InsufficientStockException) throw e;
       throw e;
@@ -795,15 +837,28 @@ export class OrderService {
   async transition(id: bigint, dto: OrderTransitionDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyLocationAccess(user, [order.locationId]);
-
     const action = dto.action;
+    // Mỗi hành động chuyển trạng thái đòi một quyền riêng — controller chỉ kiểm
+    // "có MỘT trong ba", nên phải chốt lại đúng quyền tại kho của đơn.
+    const permissionByAction = {
+      cancel: 'order:cancel',
+      ship: 'order:pack',
+      processing: 'order:update',
+      complete: 'order:update',
+    } as const;
+    assertLocationPermission(
+      user,
+      permissionByAction[action] ?? 'order:update',
+      order.locationId,
+    );
 
     // "ordered" cũ = status open & chưa xác nhận; "processing" cũ = status
     // open & đã xác nhận (confirmedOn khác null). Theo Sapo, status tự nó chỉ
     // có open/closed/cancelled — mức độ chi tiết hơn nằm ở các mốc thời gian.
-    const isOrderedEquivalent = order.status === OrderStatus.open && order.confirmedOn === null;
-    const isProcessingEquivalent = order.status === OrderStatus.open && order.confirmedOn !== null;
+    const isOrderedEquivalent =
+      order.status === OrderStatus.open && order.confirmedOn === null;
+    const isProcessingEquivalent =
+      order.status === OrderStatus.open && order.confirmedOn !== null;
 
     if (action === 'processing') {
       if (!isOrderedEquivalent) {
@@ -962,14 +1017,21 @@ export class OrderService {
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
       if (order.deliveredOn) {
-        throw new BusinessException('INVALID_TRANSITION', 'Đơn đã xuất hàng', 409);
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Đơn đã xuất hàng',
+          409,
+        );
       }
       const deliveredOn = await this.repo.client.$transaction(async (tx) => {
         await this.shipOrderItems(order, user, tx);
         const now = new Date();
         await tx.order.update({
           where: { id },
-          data: { deliveredOn: now, fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+          data: {
+            deliveredOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+          },
         });
         await tx.activityLog.create({
           data: {
@@ -1105,6 +1167,7 @@ export class OrderService {
         price,
         discount,
         total: calcLineTotal({ quantity: item.quantity, price, discount }),
+        costPrice: variant.cost,
       });
     }
     return result;

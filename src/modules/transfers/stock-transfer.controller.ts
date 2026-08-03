@@ -51,8 +51,8 @@ export class StockTransferController {
 
   @Get(':id')
   @RequirePermission('inventory:transfer', 'inventory:view')
-  findOne(@Param('id') id: string) {
-    return this.transfers.findOne(BigInt(id));
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.transfers.findOne(BigInt(id), user);
   }
 
   @Put(':id')
@@ -89,7 +89,8 @@ export class StockTransferController {
 
   @Get(':id/history')
   @RequirePermission('inventory:transfer', 'inventory:view')
-  getHistory(@Param('id') id: string) {
+  async getHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.transfers.assertTransferReadable(BigInt(id), user);
     return this.activityLog.getHistory('stock_transfer', BigInt(id));
   }
 }

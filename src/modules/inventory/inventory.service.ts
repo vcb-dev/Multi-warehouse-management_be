@@ -2,8 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
-import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { assertLocationAccess as assertUserLocationAccess } from '../../common/auth/access';
 import { InventoryRepository } from './inventory.repository';
 import {
   ApplyMovementInput,
@@ -43,10 +41,6 @@ export class InventoryService {
     private prisma: PrismaService,
     private repo: InventoryRepository,
   ) {}
-
-  assertLocationAccess(user: AuthUser, locationId: bigint): void {
-    assertUserLocationAccess(user, locationId);
-  }
 
   /** Một điểm vào duy nhất thay đổi tồn (Nguyên tắc III) */
   applyMovement(input: ApplyMovementInput, tx?: Prisma.TransactionClient) {
@@ -114,7 +108,14 @@ export class InventoryService {
   private async applyMovementsInternal(
     tx: Prisma.TransactionClient,
     inputs: ApplyMovementInput[],
-  ): Promise<{ movementIds: bigint[]; level: Awaited<ReturnType<Prisma.TransactionClient['inventoryLevel']['findUniqueOrThrow']>> }> {
+  ): Promise<{
+    movementIds: bigint[];
+    level: Awaited<
+      ReturnType<
+        Prisma.TransactionClient['inventoryLevel']['findUniqueOrThrow']
+      >
+    >;
+  }> {
     if (!inputs.length) {
       throw new Error('applyMovementsInternal requires at least one input');
     }
@@ -125,11 +126,10 @@ export class InventoryService {
     const movementIds: bigint[] = [];
 
     for (const input of inputs) {
-      if (
-        input.variantId !== variantId ||
-        input.locationId !== locationId
-      ) {
-        throw new Error('Batch movements must share variant_id and location_id');
+      if (input.variantId !== variantId || input.locationId !== locationId) {
+        throw new Error(
+          'Batch movements must share variant_id and location_id',
+        );
       }
 
       const level = await this.getLevelState(tx, variantId, locationId);
@@ -161,7 +161,9 @@ export class InventoryService {
       // Bucket on_hand kéo available lên khi tăng; các bucket còn lại (giữ
       // chỗ) kéo available xuống khi tăng — dùng để biết đúng chiều tác động.
       const worsensAvailable =
-        input.bucket === InventoryBucket.on_hand ? input.change < 0 : input.change > 0;
+        input.bucket === InventoryBucket.on_hand
+          ? input.change < 0
+          : input.change > 0;
 
       if (
         available < 0 &&
@@ -244,8 +246,10 @@ export class InventoryService {
       incoming: 'incoming',
     };
 
-    const result: Record<string, { expected: number; ledger: number; ok: boolean }> =
-      {};
+    const result: Record<
+      string,
+      { expected: number; ledger: number; ok: boolean }
+    > = {};
 
     for (const bucket of buckets) {
       const agg = await this.prisma.inventoryMovement.aggregate({

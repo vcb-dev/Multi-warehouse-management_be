@@ -1,22 +1,33 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { PermissionScope, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import { isAdminUser } from '../../common/auth/access';
+import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   ListUsersQueryDto,
   PutWarehouseRolesDto,
   UpdateUserPermissionsDto,
 } from './rbac.dto';
 import { PROTECTED_PERMISSION_KEYS } from './role.service';
+import { AuthCacheService } from './auth-cache.service';
+
+/** Điều kiện nhận diện role admin hệ thống — chỉ role này bypass toàn cục. */
+const isSystemAdminRole = (role: { isSystem: boolean; code: string }) =>
+  role.isSystem && role.code === 'admin';
 
 @Injectable()
 export class UserAdminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private authCache: AuthCacheService,
+  ) {}
 
   async listAssignable(search?: string) {
     const where: Prisma.UserWhereInput = {
@@ -121,11 +132,59 @@ export class UserAdminService {
     };
   }
 
+  /**
+   * true nếu user đang có role admin (bất kỳ kho nào), tức có `staff:manage`
+   * toàn cục. Dùng để biết một thao tác có đang đụng vào quyền admin không.
+   */
+  private async isCurrentlyAdmin(userId: bigint): Promise<boolean> {
+    const count = await this.prisma.userLocationRole.count({
+      where: {
+        userId,
+        role: { isSystem: true, code: 'admin', isActive: true },
+      },
+    });
+    return count > 0;
+  }
+
+  /**
+   * true nếu tồn tại admin ACTIVE khác ngoài `excludeUserId` — "active" nghĩa
+   * là còn đăng nhập được (không thì họ không cứu được hệ thống khi cần).
+   */
+  private async hasOtherActiveAdmin(excludeUserId: bigint): Promise<boolean> {
+    const count = await this.prisma.userLocationRole.count({
+      where: {
+        userId: { not: excludeUserId },
+        role: { isSystem: true, code: 'admin', isActive: true },
+        user: { active: true, status: { not: 'inactive' } },
+      },
+    });
+    return count > 0;
+  }
+
+  /**
+   * Chặn thao tác khiến hệ thống còn 0 admin — mất luôn `staff:manage` nên
+   * không ai tự cứu lại được nếu không sửa DB trực tiếp.
+   */
+  private async assertKeepsAtLeastOneAdmin(
+    userId: bigint,
+    willRemainAdmin: boolean,
+  ) {
+    if (willRemainAdmin) return;
+    if (!(await this.isCurrentlyAdmin(userId))) return;
+    if (await this.hasOtherActiveAdmin(userId)) return;
+    throw new ConflictException(
+      'LAST_ADMIN: Không thể thực hiện — đây là quản trị viên cuối cùng của hệ thống.',
+    );
+  }
+
   async setStatus(id: string, isActive: boolean) {
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(id) },
     });
     if (!user) throw new NotFoundException('USER_NOT_FOUND');
+    if (!isActive) {
+      await this.assertKeepsAtLeastOneAdmin(user.id, false);
+    }
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -137,10 +196,16 @@ export class UserAdminService {
           : 'inactive',
       },
     });
+    // Khoá tài khoản phải chặn được request kế tiếp ngay, không đợi hết TTL.
+    this.authCache.invalidate(user.id);
     return this.findOne(id);
   }
 
-  async putWarehouseRoles(id: string, dto: PutWarehouseRolesDto) {
+  async putWarehouseRoles(
+    id: string,
+    dto: PutWarehouseRolesDto,
+    caller: AuthUser,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(id) },
     });
@@ -154,6 +219,32 @@ export class UserAdminService {
       seen.add(a.location_id);
     }
 
+    const roleIds = [...new Set(dto.assignments.map((a) => a.role_id))].map(
+      (roleId) => BigInt(roleId),
+    );
+    const roles = await this.prisma.role.findMany({
+      where: { id: { in: roleIds } },
+      select: { id: true, code: true, isSystem: true },
+    });
+    const roleById = new Map(roles.map((r) => [r.id.toString(), r]));
+    const unknownRoles = dto.assignments.filter(
+      (a) => !roleById.has(a.role_id),
+    );
+    if (unknownRoles.length) {
+      throw new BadRequestException('ROLE_NOT_FOUND');
+    }
+
+    const willRemainAdmin = dto.assignments.some((a) =>
+      isSystemAdminRole(roleById.get(a.role_id)!),
+    );
+
+    // Chỉ admin mới được cấp thêm admin — dù hiện chỉ admin (staff:manage) mới
+    // gọi được endpoint này, kiểm lại ở đây để không phụ thuộc riêng vào guard.
+    if (willRemainAdmin && !isAdminUser(caller)) {
+      throw new ForbiddenException('ADMIN_ROLE_REQUIRES_ADMIN');
+    }
+    await this.assertKeepsAtLeastOneAdmin(user.id, willRemainAdmin);
+
     await this.prisma.$transaction(async (tx) => {
       await tx.userLocationRole.deleteMany({ where: { userId: user.id } });
       if (dto.assignments.length) {
@@ -166,13 +257,30 @@ export class UserAdminService {
         });
       }
     });
+    this.authCache.invalidate(user.id);
     return this.findOne(id);
   }
 
   async removeWarehouseRole(id: string, locationId: string) {
-    await this.prisma.userLocationRole.deleteMany({
-      where: { userId: BigInt(id), locationId: BigInt(locationId) },
+    const userId = BigInt(id);
+    const removing = await this.prisma.userLocationRole.findUnique({
+      where: { userId_locationId: { userId, locationId: BigInt(locationId) } },
+      include: { role: { select: { code: true, isSystem: true } } },
     });
+    if (removing && isSystemAdminRole(removing.role)) {
+      const staysAdminElsewhere = await this.prisma.userLocationRole.count({
+        where: {
+          userId,
+          locationId: { not: BigInt(locationId) },
+          role: { isSystem: true, code: 'admin', isActive: true },
+        },
+      });
+      await this.assertKeepsAtLeastOneAdmin(userId, staysAdminElsewhere > 0);
+    }
+    await this.prisma.userLocationRole.deleteMany({
+      where: { userId, locationId: BigInt(locationId) },
+    });
+    this.authCache.invalidate(userId);
   }
 
   private async getWarehouseRoleAssignment(id: string, locationId: string) {
@@ -229,9 +337,14 @@ export class UserAdminService {
     if (assignment.role.isSystem) throw new ForbiddenException('ROLE_SYSTEM');
 
     const allPermissions = await this.prisma.permission.findMany({
-      select: { id: true, key: true },
+      select: { id: true, key: true, scope: true },
     });
     const idByKey = new Map(allPermissions.map((p) => [p.key, p.id]));
+    const systemScopedKeys = new Set(
+      allPermissions
+        .filter((p) => p.scope === PermissionScope.system)
+        .map((p) => p.key),
+    );
     const unknown = dto.permission_keys.filter((k) => !idByKey.has(k));
     if (unknown.length) {
       throw new BadRequestException(
@@ -248,6 +361,17 @@ export class UserAdminService {
 
     if (toGrant.some((k) => PROTECTED_PERMISSION_KEYS.has(k))) {
       throw new ForbiddenException('PROTECTED_PERMISSION');
+    }
+
+    // Quyền scope=system hiệu lực toàn hệ thống nên không thể lệch theo từng kho.
+    // Chặn ở đây thay vì để lưu xong rồi bị bỏ qua lúc resolve (im lặng khó hiểu).
+    const systemScopedChanges = [...toGrant, ...toRevoke].filter((k) =>
+      systemScopedKeys.has(k),
+    );
+    if (systemScopedChanges.length) {
+      throw new BadRequestException(
+        `SYSTEM_SCOPED_PERMISSION: ${systemScopedChanges.join(', ')} là quyền toàn hệ thống, không lệch được theo kho`,
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -279,6 +403,7 @@ export class UserAdminService {
       }
     });
 
+    this.authCache.invalidate(assignment.userId);
     return this.getWarehousePermissions(id, locationId);
   }
 }

@@ -24,10 +24,14 @@ describe('assertAnyLocationAccess', () => {
     );
   });
 
-  it('admin flag không bypass nếu không admin tại kho đích', () => {
-    const admin: AuthUser = { ...user, isAdmin: true, adminWarehouseIds: [10n] };
-    expect(() => assertAnyLocationAccess(admin, [999n])).toThrow(
-      ForbiddenException,
-    );
+  // Role admin là toàn hệ thống nên thấy mọi kho.
+  // Xem permission-model.spec.ts §1 và docs/00-tong-quan/vai-tro-phan-quyen.md §1.
+  it('admin truy cập được kho chưa gán', () => {
+    const admin: AuthUser = {
+      ...user,
+      isAdmin: true,
+      adminWarehouseIds: [10n],
+    };
+    expect(() => assertAnyLocationAccess(admin, [999n])).not.toThrow();
   });
 });

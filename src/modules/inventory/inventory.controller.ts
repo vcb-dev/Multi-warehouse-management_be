@@ -16,10 +16,8 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import {
-  ListInventoryQueryDto,
-  ListMovementsQueryDto,
-} from './inventory.dto';
+import { sendXlsx } from '../../common/utils/send-xlsx';
+import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import {
   InventoryExportService,
   InventoryImportService,
@@ -58,12 +56,7 @@ export class InventoryController {
     @Res() res: Response,
   ) {
     const buffer = await this.exporter.exportExcel(query, user);
-    res.setHeader('Content-Disposition', 'attachment; filename="ton-kho.xlsx"');
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.send(buffer);
+    sendXlsx(res, buffer, 'ton-kho.xlsx');
   }
 
   @Post('import')

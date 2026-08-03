@@ -1,16 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { PermissionScope } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export type ResolvedPermissions = {
-  /** Kho mà user được gán role admin — quyền admin chỉ hiệu lực tại từng kho này. */
+  /** Kho được gán role admin — chỉ để hiển thị/audit, không quyết định quyền. */
   adminWarehouseIds: bigint[];
+  /** Quyền `scope=location`, hiệu lực riêng tại từng kho. */
   warehousePermissions: Record<string, string[]>;
   locationIds: bigint[];
-  /** @deprecated Quyền gom theo kho; field giữ cho tương thích login cũ. */
+  /** Quyền `scope=system` — hiệu lực toàn hệ thống, không gắn kho. */
   systemPermissions: string[];
-  /** @deprecated Dùng adminWarehouseIds + warehousePermissions. */
+  /** @deprecated Dùng systemPermissions. */
   permissions: string[];
-  /** @deprecated true nếu có admin ở ít nhất một kho — không dùng bypass toàn cục. */
+  /** Mang role admin ở bất kỳ kho nào → toàn quyền toàn hệ thống. */
   isAdmin: boolean;
 };
 
@@ -19,7 +21,9 @@ export class RbacService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Quyền hiệu lực tại kho K = mọi permission (system + warehouse) của role tại K.
+   * Hai tầng quyền tách bạch (specs/009-cau-hinh/research.md §5):
+   * - `scope=system`: union từ MỌI role của user, hiệu lực toàn hệ thống.
+   * - `scope=location`: chỉ hiệu lực tại kho mà role đó được gán.
    */
   async resolvePermissions(userId: bigint): Promise<ResolvedPermissions> {
     const [assignments, overrides] = await Promise.all([
@@ -40,6 +44,7 @@ export class RbacService {
     ]);
 
     const byWarehouse: Record<string, Set<string>> = {};
+    const systemPermissions = new Set<string>();
     const locationIds: bigint[] = [];
     const adminWarehouseIds: bigint[] = [];
 
@@ -53,15 +58,20 @@ export class RbacService {
       }
 
       for (const rp of a.role.permissions) {
-        byWarehouse[whKey].add(rp.permission.key);
+        if (rp.permission.scope === PermissionScope.system) {
+          systemPermissions.add(rp.permission.key);
+        } else {
+          byWarehouse[whKey].add(rp.permission.key);
+        }
       }
     }
 
-    // Lệch quyền riêng (nhân viên) chồng lên quyền mặc định của role tại kho —
-    // bỏ qua với kho user đang là admin (admin luôn full quyền, không override).
+    // Lệch quyền riêng (nhân viên) chồng lên quyền mặc định của role tại kho.
+    // Quyền `scope=system` không gắn kho nên override theo kho là vô nghĩa —
+    // bỏ qua ở đây, đường ghi đã chặn từ trước (UserAdminService).
     for (const o of overrides) {
+      if (o.permission.scope === PermissionScope.system) continue;
       const whKey = o.locationId.toString();
-      if (adminWarehouseIds.some((id) => id === o.locationId)) continue;
       const set = (byWarehouse[whKey] ??= new Set<string>());
       if (o.granted) set.add(o.permission.key);
       else set.delete(o.permission.key);
@@ -75,7 +85,7 @@ export class RbacService {
       adminWarehouseIds,
       warehousePermissions,
       locationIds,
-      systemPermissions: [],
+      systemPermissions: [...systemPermissions],
       permissions: [],
       isAdmin: adminWarehouseIds.length > 0,
     };

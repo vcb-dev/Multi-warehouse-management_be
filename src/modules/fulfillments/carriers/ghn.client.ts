@@ -1,23 +1,23 @@
+import { Logger } from '@nestjs/common';
 import { BusinessException } from '../../../common/exceptions/business.exception';
-import {
-  GhnApiResponse,
-  GhnCreateOrderData,
-  GhnCreateOrderInput,
-  GhnCreateOrderResult,
-  GhnCredentials,
-} from './ghn.types';
 
-const SANDBOX_BASE_URL = 'https://dev-online-gateway.ghn.vn';
-const PRODUCTION_BASE_URL = 'https://online-gateway.ghn.vn';
+const SANDBOX_BASE_URL = 'https://dev-online-gateway.ghn.vn/shiip/public-api';
+const PRODUCTION_BASE_URL = 'https://online-gateway.ghn.vn/shiip/public-api';
 
 /**
  * GHN_ENV=sandbox|test → sandbox gateway
  * GHN_ENV=production (mặc định) → production
- * GHN_BASE_URL nếu set sẽ ghi đè GHN_ENV
+ * GHN_BASE_URL / GHN_API_BASE_URL nếu set sẽ ghi đè GHN_ENV
  */
 export function resolveGhnBaseUrl(): string {
-  const explicit = process.env.GHN_BASE_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, '');
+  const explicit =
+    process.env.GHN_API_BASE_URL?.trim() || process.env.GHN_BASE_URL?.trim();
+  if (explicit) {
+    const url = explicit.replace(/\/$/, '');
+    return url.includes('/shiip/public-api')
+      ? url
+      : `${url}/shiip/public-api`;
+  }
 
   const env = (process.env.GHN_ENV ?? 'production').trim().toLowerCase();
   if (env === 'sandbox' || env === 'test' || env === 'dev') {
@@ -30,140 +30,307 @@ export function isGhnSandbox(): boolean {
   return resolveGhnBaseUrl().includes('dev-online-gateway');
 }
 
+const DEFAULT_BASE_URL = PRODUCTION_BASE_URL;
+
+/** Trang tra cứu vận đơn công khai của GHN — lưu vào Sapo `fulfillments.tracking_url`. */
+export const GHN_TRACKING_URL = 'https://donhang.ghn.vn/?order_code=';
+
+export type GhnProvince = {
+  ProvinceID: number;
+  ProvinceName: string;
+  NameExtension?: string[];
+};
+export type GhnDistrict = {
+  DistrictID: number;
+  DistrictName: string;
+  NameExtension?: string[];
+};
+export type GhnWard = {
+  WardCode: string;
+  WardName: string;
+  NameExtension?: string[];
+};
+
+export type GhnShop = {
+  _id: number;
+  name: string;
+  phone: string;
+  address: string;
+  ward_code: string;
+  district_id: number;
+  client_id: number;
+};
+
+export type GhnService = {
+  service_id: number;
+  short_name: string;
+  service_type_id: number;
+};
+
+export type GhnCreateOrderPayload = {
+  client_order_code?: string;
+  to_name: string;
+  to_phone: string;
+  to_address: string;
+  to_ward_code: string;
+  to_district_id: number;
+  from_name?: string;
+  from_phone?: string;
+  from_address?: string;
+  from_ward_name?: string;
+  from_district_name?: string;
+  from_province_name?: string;
+  cod_amount?: number;
+  insurance_value?: number;
+  weight: number;
+  length: number;
+  width: number;
+  height: number;
+  service_id?: number;
+  service_type_id: number;
+  payment_type_id: number;
+  required_note: string;
+  note?: string;
+  items: {
+    name: string;
+    code?: string;
+    quantity: number;
+    price?: number;
+    weight?: number;
+  }[];
+};
+
+export type GhnCreateOrderResult = {
+  order_code: string;
+  sort_code?: string;
+  trans_type?: string;
+  total_fee?: number | string;
+  expected_delivery_time?: string;
+};
+
+export type GhnCancelResult = {
+  order_code: string;
+  result: boolean;
+  message: string;
+};
+
+export type GhnTicket = {
+  id: number | string;
+  order_code: string;
+  type?: string;
+  status?: string;
+  status_id?: number;
+  description?: string;
+  attachments?: unknown;
+  c_email?: string;
+  c_name?: string;
+  c_phone?: string | number;
+  client_id?: string | number;
+  created_by?: number;
+  created_at?: string;
+  updated_at?: string;
+  conversations?: GhnTicketConversation[];
+};
+
+export type GhnTicketConversation = {
+  body?: string;
+  from_email?: string;
+  created_at?: string;
+  updated_at?: string;
+  attachments?: unknown;
+};
+
+type GhnEnvelope<T> = {
+  code?: number;
+  message?: string;
+  code_message?: string;
+  data?: T;
+};
+
+type Credentials = { token: string; shopId?: string | number | null };
+
 /**
- * Thin HTTP client for GHN public API.
- * Token/ShopId come from shipping_providers.connection_config per shop.
+ * Client HTTP cho GHN. Dùng `fetch` có sẵn của Node, không thêm dependency —
+ * cùng cách các script đồng bộ Sapo trong `scripts/` đang gọi API ngoài.
  */
 export class GhnClient {
-  constructor(
-    private readonly credentials: GhnCredentials,
-    private readonly baseUrl: string = resolveGhnBaseUrl(),
-  ) {}
+  private readonly logger = new Logger(GhnClient.name);
 
-  async createOrder(input: GhnCreateOrderInput): Promise<GhnCreateOrderResult> {
-    const data = await this.post<GhnCreateOrderData>(
-      '/shiip/public-api/v2/shipping-order/create',
-      {
-        payment_type_id: input.paymentTypeId,
-        note: input.note ?? '',
-        required_note: input.requiredNote,
-        client_order_code: input.clientOrderCode,
-        from_name: input.fromName,
-        from_phone: input.fromPhone,
-        from_address: input.fromAddress,
-        from_ward_name: input.fromWardName ?? '',
-        from_district_name: input.fromDistrictName ?? '',
-        from_province_name: input.fromProvinceName ?? '',
-        to_name: input.toName,
-        to_phone: input.toPhone,
-        to_address: input.toAddress,
-        to_ward_name: input.toWardName ?? '',
-        to_district_name: input.toDistrictName ?? '',
-        to_province_name: input.toProvinceName ?? '',
-        cod_amount: Math.max(0, Math.round(input.codAmount)),
-        content: input.content ?? '',
-        weight: input.weightGrams,
-        length: input.lengthCm,
-        width: input.widthCm,
-        height: input.heightCm,
-        insurance_value: Math.min(
-          5_000_000,
-          Math.max(0, Math.round(input.insuranceValue ?? 0)),
-        ),
-        service_type_id: input.serviceTypeId ?? 2,
-      },
-    );
-
-    const totalFee = Number(data.total_fee ?? data.fee?.main_service ?? 0);
-    return {
-      orderCode: data.order_code,
-      totalFee: Number.isFinite(totalFee) ? totalFee : 0,
-      expectedDeliveryTime: data.expected_delivery_time ?? null,
-      sortCode: data.sort_code ?? null,
-    };
+  private get baseUrl() {
+    return resolveGhnBaseUrl().replace(/\/+$/, '');
   }
 
-  async cancelOrder(orderCodes: string[]): Promise<void> {
-    if (!orderCodes.length) return;
-    await this.post('/shiip/public-api/v2/switch-status/cancel', {
-      order_codes: orderCodes,
+  private post<T>(path: string, body: unknown, creds: Credentials): Promise<T> {
+    return this.request<T>(path, JSON.stringify(body ?? {}), creds, {
+      'Content-Type': 'application/json',
     });
   }
 
-  /** Smoke-check credentials (list provinces — chỉ cần Token hợp lệ). */
-  async ping(): Promise<void> {
-    await this.post('/shiip/public-api/master-data/province', {});
-  }
-
-  private async post<T>(
+  /** `ticket/reply` là endpoint duy nhất GHN yêu cầu multipart. */
+  private postForm<T>(
     path: string,
-    body: Record<string, unknown>,
+    fields: Record<string, string>,
+    creds: Credentials,
   ): Promise<T> {
-    return this.request<T>(path, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
+    // Không set Content-Type — fetch tự thêm kèm boundary
+    return this.request<T>(path, form, creds, {});
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const url = `${this.baseUrl.replace(/\/$/, '')}${path}`;
-    let response: Response;
+  private async request<T>(
+    path: string,
+    body: BodyInit,
+    creds: Credentials,
+    extraHeaders: Record<string, string>,
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      ...extraHeaders,
+      Token: creds.token,
+    };
+    if (creds.shopId) headers.ShopId = String(creds.shopId);
+
+    let res: Response;
     try {
-      response = await fetch(url, {
-        ...init,
-        headers: {
-          'Content-Type': 'application/json',
-          Token: this.credentials.token,
-          ShopId: String(this.credentials.shopId),
-          ...(init.headers ?? {}),
-        },
+      res = await fetch(`${this.baseUrl}/${path}`, {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(20_000),
       });
-    } catch {
+    } catch (e) {
+      // Timeout / DNS / mất mạng — GHN chưa nhận được gì nên an toàn để báo lỗi ra UI
+      this.logger.error(`GHN ${path} không gọi được: ${String(e)}`);
       throw new BusinessException(
-        'GHN_UNAVAILABLE',
-        'Không kết nối được tới GHN. Thử lại sau.',
+        'CARRIER_UNAVAILABLE',
+        'Không kết nối được tới GHN, vui lòng thử lại',
         502,
       );
     }
 
-    let payload: GhnApiResponse<T>;
-    try {
-      payload = (await response.json()) as GhnApiResponse<T>;
-    } catch {
-      throw new BusinessException(
-        'GHN_ERROR',
-        `GHN trả về phản hồi không hợp lệ (HTTP ${response.status})`,
-        502,
-      );
-    }
-
-    if (!response.ok || payload.code !== 200) {
-      const detail =
-        payload.message_display || payload.message || 'GHN từ chối yêu cầu';
+    const raw = (await res.json().catch(() => null)) as GhnEnvelope<T> | null;
+    if (!res.ok || !raw || (raw.code !== undefined && raw.code !== 200)) {
+      const message =
+        raw?.code_message ?? raw?.message ?? `GHN trả về HTTP ${res.status}`;
+      this.logger.warn(`GHN ${path} lỗi: ${message}`);
       const hint = isGhnSandbox()
         ? ' (đang dùng sandbox — Token production cần GHN_ENV=production)'
         : ' (đang dùng production — Token test cần GHN_ENV=sandbox)';
-      throw new BusinessException('GHN_ERROR', `${detail}${hint}`, 422);
+      throw new BusinessException('CARRIER_ERROR', `GHN: ${message}${hint}`, 422);
     }
-    return payload.data;
+    return raw.data as T;
   }
-}
 
-export function trackingUrlFor(orderCode: string): string {
-  return `https://donhang.ghn.vn/?order_code=${encodeURIComponent(orderCode)}`;
-}
+  // --- Master data địa chỉ (dùng để map tên tỉnh/huyện/xã sang ID của GHN) ---
 
-export function parseGhnCredentials(config: unknown): GhnCredentials | null {
-  if (!config || typeof config !== 'object') return null;
-  const raw = config as { token?: unknown; shop_id?: unknown };
-  const token = typeof raw.token === 'string' ? raw.token.trim() : '';
-  const shopRaw = raw.shop_id;
-  const shopId =
-    typeof shopRaw === 'number'
-      ? shopRaw
-      : typeof shopRaw === 'string'
-        ? Number(shopRaw.trim())
-        : NaN;
-  if (!token || !Number.isFinite(shopId) || shopId <= 0) return null;
-  return { token, shopId };
+  getProvinces(creds: Credentials) {
+    return this.post<GhnProvince[]>('master-data/province', {}, creds);
+  }
+
+  getDistricts(provinceId: number, creds: Credentials) {
+    return this.post<GhnDistrict[]>(
+      'master-data/district',
+      { province_id: provinceId },
+      creds,
+    );
+  }
+
+  getWards(districtId: number, creds: Credentials) {
+    return this.post<GhnWard[]>(
+      'master-data/ward',
+      { district_id: districtId },
+      creds,
+    );
+  }
+
+  // --- Cửa hàng ---
+
+  /** `v2/shop/all` — xác thực token và lấy địa chỉ lấy hàng đã đăng ký với GHN. */
+  async getShops(creds: Credentials) {
+    const data = await this.post<{ shops?: GhnShop[] }>(
+      'v2/shop/all',
+      { offset: 0, limit: 200 },
+      { token: creds.token },
+    );
+    return data?.shops ?? [];
+  }
+
+  // --- Vận đơn ---
+
+  /**
+   * `v2/shipping-order/available-services` — dịch vụ khả dụng cho tuyến. Phải gọi để lấy
+   * `service_id` thật thay vì đoán `service_type_id`, vì GHN mở dịch vụ khác nhau theo tuyến.
+   */
+  getAvailableServices(
+    input: { shopId: number; fromDistrict: number; toDistrict: number },
+    creds: Credentials,
+  ) {
+    return this.post<GhnService[]>(
+      'v2/shipping-order/available-services',
+      {
+        shop_id: input.shopId,
+        from_district: input.fromDistrict,
+        to_district: input.toDistrict,
+      },
+      creds,
+    );
+  }
+
+  createOrder(payload: GhnCreateOrderPayload, creds: Credentials) {
+    return this.post<GhnCreateOrderResult>(
+      'v2/shipping-order/create',
+      payload,
+      creds,
+    );
+  }
+
+  cancelOrders(orderCodes: string[], creds: Credentials) {
+    return this.post<GhnCancelResult[]>(
+      'v2/switch-status/cancel',
+      { order_codes: orderCodes },
+      creds,
+    );
+  }
+
+  getOrderDetail(orderCode: string, creds: Credentials) {
+    return this.post<Record<string, unknown>>(
+      'v2/shipping-order/detail',
+      { order_code: orderCode },
+      creds,
+    );
+  }
+
+  // --- Ticket (phiếu hỗ trợ với GHN) ---
+
+  createTicket(
+    payload: {
+      order_code: string;
+      category: string;
+      description: string;
+      c_email?: string;
+    },
+    creds: Credentials,
+  ) {
+    return this.post<GhnTicket>('ticket/create', payload, {
+      token: creds.token,
+    });
+  }
+
+  replyTicket(
+    payload: { ticket_id: number | string; description: string },
+    creds: Credentials,
+  ) {
+    return this.postForm<GhnTicketConversation>(
+      'ticket/reply',
+      {
+        ticket_id: String(payload.ticket_id),
+        description: payload.description,
+      },
+      { token: creds.token },
+    );
+  }
+
+  getTickets(creds: Credentials) {
+    return this.post<GhnTicket[]>('ticket/index', {}, creds);
+  }
 }

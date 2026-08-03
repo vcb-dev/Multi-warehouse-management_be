@@ -1,17 +1,13 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
   type AuthUser,
 } from '../../common/decorators/current-user.decorator';
-import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../../common/decorators/permissions.decorator';
 import { ConversationService } from './conversation.service';
 import {
   CreateConversationDto,
@@ -39,12 +35,14 @@ export class ConversationController {
 
   @Post()
   @RequirePermission('order:create')
+  @LocationOptional()
   create(@Body() dto: CreateConversationDto) {
     return this.conversations.create(dto);
   }
 
   @Post(':id/messages')
   @RequirePermission('order:create')
+  @LocationOptional()
   addMessage(
     @Param('id') id: string,
     @Body() dto: CreateMessageDto,

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   InventoryBucket,
   MovementType,
@@ -9,21 +9,25 @@ import {
   ShipmentStatus,
   ShippingFeePayer,
   ShippingProviderType,
+  UserRole,
 } from '@prisma/client';
-import { assertAnyLocationAccess } from '../../common/auth/access';
+import { assertLocationPermission } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { PrismaService } from '../../prisma/prisma.service';
-import { GHN_PROVIDER_CODE } from './carriers/carrier-adapter';
-import { trackingUrlFor } from './carriers/ghn.client';
+import {
+  CarrierConnectionConfig,
+  CarrierShipmentResult,
+} from './carriers/carrier-adapter';
 import { generateFulfillmentCode } from './fulfillment-code';
 import {
   CancelFulfillmentDto,
   CarrierWebhookDto,
   CreatePackingDto,
+  GhnWebhookDto,
   PushShipmentDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
@@ -32,10 +36,12 @@ import {
   fulfillmentInclude,
   serializeFulfillment,
 } from './fulfillment.serializer';
-import { ShippingProviderService } from './shipping-provider.service';
+import {
+  GHN_PROVIDER_CODE,
+  ShippingProviderService,
+} from './shipping-provider.service';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
-const DEFAULT_DIM_CM = 10;
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
@@ -45,6 +51,8 @@ type FulfillmentWithOrder = Prisma.FulfillmentGetPayload<{
 
 @Injectable()
 export class FulfillmentService {
+  private readonly logger = new Logger(FulfillmentService.name);
+
   constructor(
     private prisma: PrismaService,
     private inventory: InventoryService,
@@ -60,7 +68,7 @@ export class FulfillmentService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyLocationAccess(user, [order.locationId]);
+    assertLocationPermission(user, 'order:pack', order.locationId);
     return order;
   }
 
@@ -73,7 +81,7 @@ export class FulfillmentService {
       include: { order: { include: { items: true } } },
     });
     if (!f) throw new NotFoundException('Không tìm thấy phiếu xử lý đơn hàng');
-    assertAnyLocationAccess(user, [f.order.locationId]);
+    assertLocationPermission(user, 'order:pack', f.order.locationId);
     return f;
   }
 
@@ -323,16 +331,8 @@ export class FulfillmentService {
     }
 
     const weight = dto.weight_grams ?? DEFAULT_WEIGHT_GRAMS;
-    const lengthCm = dto.length_cm ?? DEFAULT_DIM_CM;
-    const widthCm = dto.width_cm ?? DEFAULT_DIM_CM;
-    const heightCm = dto.height_cm ?? DEFAULT_DIM_CM;
     let shippingFee = dto.shipping_fee ?? 0;
     let serviceName: string | null = null;
-    let trackingNumber = dto.tracking_number ?? null;
-    let trackingUrl: string | null = null;
-    let carrier: string | null = null;
-    let carrierName: string | null = null;
-    let expectedDeliveryDate: Date | null = null;
 
     if (dto.shipping_type === ShippingProviderType.tich_hop) {
       if (!provider.isConnected) {
@@ -349,18 +349,17 @@ export class FulfillmentService {
           422,
         );
       }
-      // Phí ước tính từ services_config; GHN sẽ ghi đè bằng total_fee thật sau create
-      const quoted = this.providers.quoteService(
+      // Phí tính lại server-side từ cấu hình dịch vụ, bỏ qua phí client gửi lên
+      const quoted = await this.providers.quoteService(
+        provider.code,
         provider.servicesConfig,
         dto.service_code,
         weight,
-        provider.code,
       );
       shippingFee = quoted.fee;
       serviceName = quoted.name;
     }
 
-    const feePayer = dto.fee_payer ?? ShippingFeePayer.shop_tra;
     const codAmount =
       dto.cod_amount ?? Number(order.totalPrice) - Number(order.totalReceived);
 
@@ -394,69 +393,32 @@ export class FulfillmentService {
       location?.district,
       location?.province,
     ].filter(Boolean);
-    const originName = dto.origin_name ?? location?.name ?? null;
-    const originPhone = dto.origin_phone ?? location?.phone ?? null;
     const originAddress1 =
       dto.origin_address1 ??
       (fromAddressParts.length ? fromAddressParts.join(', ') : null);
 
-    // Đẩy đơn GHN trước khi ghi DB — tránh vận đơn local không có mã tracking
-    if (
-      dto.shipping_type === ShippingProviderType.tich_hop &&
-      provider.code === GHN_PROVIDER_CODE
-    ) {
-      if (!originName || !originPhone || !originAddress1) {
-        throw new BusinessException(
-          'VALIDATION_ERROR',
-          'Thiếu thông tin kho gửi (tên/SĐT/địa chỉ) để tạo đơn GHN',
-          422,
-        );
-      }
-      if (!dto.to_ward || !dto.to_district || !dto.to_province) {
-        throw new BusinessException(
-          'VALIDATION_ERROR',
-          'Địa chỉ nhận cần đủ phường/quận/tỉnh để tạo đơn GHN',
-          422,
-        );
-      }
-      const ghn = this.providers.ghnClientFor(provider.connectionConfig);
-      const createdGhn = await ghn.createOrder({
-        clientOrderCode: order.name.slice(0, 50),
-        fromName: originName,
-        fromPhone: originPhone,
-        fromAddress: location?.address ?? originAddress1,
-        fromWardName: location?.ward ?? undefined,
-        fromDistrictName: location?.district ?? undefined,
-        fromProvinceName: location?.province ?? undefined,
-        toName: dto.to_name,
-        toPhone: dto.to_phone,
-        toAddress: dto.to_address,
-        toWardName: dto.to_ward,
-        toDistrictName: dto.to_district,
-        toProvinceName: dto.to_province,
-        codAmount,
-        weightGrams: weight,
-        lengthCm,
-        widthCm,
-        heightCm,
-        paymentTypeId: this.providers.ghnAdapter.mapPaymentTypeId(feePayer),
-        requiredNote: this.providers.ghnAdapter.mapRequiredNote(
-          dto.delivery_requirement,
-        ),
-        note: dto.note,
-        content: order.name,
-        insuranceValue: Number(order.totalPrice),
-        serviceTypeId: 2,
-      });
-      trackingNumber = createdGhn.orderCode;
-      shippingFee = createdGhn.totalFee;
-      trackingUrl = trackingUrlFor(createdGhn.orderCode);
-      carrier = 'GHN';
-      carrierName = provider.name;
-      if (createdGhn.expectedDeliveryTime) {
-        const d = new Date(createdGhn.expectedDeliveryTime);
-        if (!Number.isNaN(d.getTime())) expectedDeliveryDate = d;
-      }
+    // Gọi API hãng TRƯỚC transaction: nếu hãng lỗi thì không tạo phiếu nào, tránh vận đơn
+    // "mồ côi" ở app mà bên hãng không có. Ngược lại (tạo DB trước) thì rollback không xoá
+    // được đơn đã sang hãng.
+    const carrier = await this.createCarrierShipment({
+      provider,
+      order,
+      dto,
+      weight,
+      codAmount,
+      serviceName,
+      origin: {
+        name: dto.origin_name ?? location?.name ?? null,
+        phone: dto.origin_phone ?? location?.phone ?? null,
+        address: originAddress1,
+        ward: location?.ward ?? null,
+        district: location?.district ?? null,
+        province: location?.province ?? null,
+      },
+    });
+    if (carrier) {
+      // Phí và ETA THẬT của hãng ghi đè con số ước tính từ services_config
+      shippingFee = carrier.shippingFee;
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -474,18 +436,14 @@ export class FulfillmentService {
         providerId: provider.id,
         serviceCode: dto.service_code ?? null,
         serviceName,
-        trackingNumber,
-        trackingUrl,
-        trackingCompany: carrierName,
-        carrier,
-        carrierName,
+        trackingNumber: carrier?.trackingNumber ?? dto.tracking_number ?? null,
         shippingFee,
-        feePayer,
+        feePayer: dto.fee_payer,
         codAmount,
         weightGrams: weight,
-        lengthCm,
-        widthCm,
-        heightCm,
+        lengthCm: dto.length_cm,
+        widthCm: dto.width_cm,
+        heightCm: dto.height_cm,
         deliveryRequirement: dto.delivery_requirement,
         note: dto.note,
         toName: dto.to_name,
@@ -495,14 +453,25 @@ export class FulfillmentService {
         toDistrict: dto.to_district,
         toProvince: dto.to_province,
         locationId,
-        originName,
-        originPhone,
-        originAddress1,
+        originName: dto.origin_name ?? location?.name ?? null,
+        originPhone: dto.origin_phone ?? location?.phone ?? null,
+        originAddress1: originAddress1,
         originWard: location?.ward ?? null,
         originDistrict: location?.district ?? null,
         originProvince: location?.province ?? null,
-        expectedDeliveryDate,
         shipmentCreatedOn: new Date(),
+        // Cụm trường Sapo về hãng vận chuyển — chỉ có dữ liệu khi hãng tích hợp API thật
+        ...(carrier
+          ? {
+              trackingUrl: carrier.trackingUrl,
+              trackingCompany: carrier.carrierName,
+              carrier: carrier.carrier,
+              carrierName: carrier.carrierName,
+              trackingNumbers: [carrier.trackingNumber],
+              trackingUrls: carrier.trackingUrl ? [carrier.trackingUrl] : [],
+              expectedDeliveryDate: carrier.expectedDeliveryDate,
+            }
+          : {}),
       };
 
       const record = open
@@ -539,13 +508,75 @@ export class FulfillmentService {
             code: order.name,
             fulfillment_code: record.name,
             provider_name: provider.name,
-            tracking_number: trackingNumber,
+            tracking_number: shipmentData.trackingNumber,
           },
         },
       });
       return record;
     });
     return this.serializeById(created.id);
+  }
+
+  /**
+   * Tạo vận đơn ở hệ thống hãng. Trả `null` khi hãng chưa tích hợp API (ManualAdapter) —
+   * lúc đó mã vận đơn do người dùng tự nhập như trước.
+   */
+  private async createCarrierShipment(ctx: {
+    provider: { code: string; connectionConfig: Prisma.JsonValue };
+    order: OrderWithItems;
+    dto: PushShipmentDto;
+    weight: number;
+    codAmount: number;
+    serviceName: string | null;
+    origin: {
+      name: string | null;
+      phone: string | null;
+      address: string | null;
+      ward: string | null;
+      district: string | null;
+      province: string | null;
+    };
+  }): Promise<CarrierShipmentResult | null> {
+    const { provider, order, dto } = ctx;
+    const adapter = this.providers.adapterFor(provider.code);
+    if (!adapter.createShipment) return null;
+
+    return adapter.createShipment(
+      {
+        clientOrderCode: order.name,
+        serviceCode: dto.service_code ?? null,
+        toName: dto.to_name ?? '',
+        toPhone: dto.to_phone ?? '',
+        toAddress: dto.to_address ?? '',
+        toWard: dto.to_ward ?? null,
+        toDistrict: dto.to_district ?? null,
+        toProvince: dto.to_province ?? null,
+        originName: ctx.origin.name,
+        originPhone: ctx.origin.phone,
+        originAddress: ctx.origin.address,
+        originWard: ctx.origin.ward,
+        originDistrict: ctx.origin.district,
+        originProvince: ctx.origin.province,
+        codAmount: ctx.codAmount,
+        // Khai giá trị hàng để hãng bồi thường khi mất/hỏng
+        insuranceValue: Number(order.totalPrice),
+        // Cột DB mặc định shop_tra khi DTO bỏ trống — giữ nguyên mặc định đó khi gửi sang hãng
+        feePayer: dto.fee_payer ?? ShippingFeePayer.shop_tra,
+        weightGrams: ctx.weight,
+        lengthCm: dto.length_cm ?? null,
+        widthCm: dto.width_cm ?? null,
+        heightCm: dto.height_cm ?? null,
+        deliveryRequirement: dto.delivery_requirement ?? null,
+        note: dto.note ?? null,
+        items: order.items.map((i) => ({
+          name: i.name,
+          code: i.sku ?? null,
+          quantity: i.quantity,
+          price: Number(i.price),
+        })),
+      },
+      (provider.connectionConfig ?? {}) as CarrierConnectionConfig,
+    );
   }
 
   async updateShipmentStatus(
@@ -757,16 +788,9 @@ export class FulfillmentService {
       );
     }
 
-    // Hủy bên GHN trước (nếu đã đẩy); lỗi GHN chặn hủy local để tránh lệch trạng thái
-    if (f.trackingNumber && f.providerId) {
-      const provider = await this.prisma.shippingProvider.findUnique({
-        where: { id: f.providerId },
-      });
-      if (provider?.code === GHN_PROVIDER_CODE && provider.isConnected) {
-        const ghn = this.providers.ghnClientFor(provider.connectionConfig);
-        await ghn.cancelOrder([f.trackingNumber]);
-      }
-    }
+    // Hủy ở phía hãng TRƯỚC, để không còn cảnh app báo đã hủy mà shipper vẫn đến lấy hàng.
+    // Hãng từ chối (đã lấy hàng bên họ) thì dừng luôn, giữ trạng thái nội bộ như cũ.
+    await this.cancelCarrierShipment(f);
 
     await this.prisma.$transaction(async (tx) => {
       if (f.packedOn) {
@@ -828,86 +852,138 @@ export class FulfillmentService {
     return this.serializeById(id);
   }
 
-  /**
-   * Webhook ĐTVC. GHN gửi PascalCase (OrderCode/Status); stub cũ dùng snake_case.
-   * Luôn cố trả 200 với payload có nghĩa để GHN không retry vô ích khi không tìm thấy đơn.
-   */
-  async webhook(providerCode: string, dto: CarrierWebhookDto) {
+  /** Hủy vận đơn bên hãng nếu hãng có API hủy và vận đơn đã có mã thật. */
+  private async cancelCarrierShipment(f: FulfillmentWithOrder) {
+    if (!f.providerId || !f.trackingNumber) return;
+    const provider = await this.prisma.shippingProvider.findUnique({
+      where: { id: f.providerId },
+    });
+    if (!provider) return;
+
+    const adapter = this.providers.adapterFor(provider.code);
+    if (!adapter.cancelShipment) return;
+
+    await adapter.cancelShipment(
+      f.trackingNumber,
+      (provider.connectionConfig ?? {}) as CarrierConnectionConfig,
+    );
+  }
+
+  /** Webhook mô phỏng — dùng cho hãng chưa tích hợp API thật. */
+  async webhook(providerCode: string, dto: CarrierWebhookDto, user: AuthUser) {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { code: providerCode },
     });
-    if (!provider) {
-      return { ok: false, reason: 'provider_not_found' };
+    if (!provider)
+      throw new NotFoundException('Không tìm thấy hãng vận chuyển');
+
+    const status = this.providers
+      .adapterFor(provider.code)
+      .mapWebhookStatus(dto.status ?? '');
+    if (!status) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `Trạng thái không được hỗ trợ: ${dto.status}`,
+        422,
+      );
     }
 
-    const trackingNumber = (dto.OrderCode ?? dto.tracking_number ?? '').trim();
-    const externalStatus = (dto.Status ?? dto.status ?? '').trim();
-    if (!trackingNumber || !externalStatus) {
-      return { ok: false, reason: 'missing_fields' };
-    }
-
-    // Chỉ xử lý tạo mới / đổi trạng thái; bỏ qua update fee/weight/cod
-    const eventType = (dto.Type ?? '').toLowerCase();
-    if (eventType && eventType !== 'create' && eventType !== 'switch_status') {
-      return { ok: true, skipped: true, reason: 'ignored_type' };
-    }
-
-    const adapter = this.providers.adapterFor(provider.code);
     const f = await this.prisma.fulfillment.findFirst({
       where: {
         providerId: provider.id,
-        trackingNumber,
+        trackingNumber: dto.tracking_number,
         closedAt: null,
       },
       include: { order: { include: { items: true } } },
     });
     if (!f) {
-      return { ok: false, reason: 'not_found' };
+      throw new NotFoundException('Không tìm thấy vận đơn theo mã tracking');
+    }
+    return this.applyShipmentStatus(f, status, user);
+  }
+
+  /**
+   * Webhook thật của GHN. GHN không ký request nên xác thực bằng cách đối chiếu `ShopID`
+   * với cấu hình kết nối đã lưu.
+   *
+   * Luôn trả 200 cho mọi tình huống "không có gì để làm" (mã lạ, trạng thái đã đúng, trạng
+   * thái GHN không map được): GHN retry 10 lần mỗi 5 giây khi nhận khác 200, sẽ thành bão
+   * request cho những ca vô hại.
+   */
+  async webhookGhn(dto: GhnWebhookDto) {
+    const provider = await this.prisma.shippingProvider.findUnique({
+      where: { code: GHN_PROVIDER_CODE },
+    });
+    if (!provider) {
+      this.logger.warn('Webhook GHN: chưa có shipping_provider code=ghn');
+      return { received: true };
     }
 
-    const actor: AuthUser = {
-      userId: f.createdById,
-      email: 'webhook@carrier',
-      roles: [],
-      locationIds: [f.order.locationId],
-    };
-
-    // Hủy từ GHN khi còn chờ lấy
+    const config = (provider.connectionConfig ?? {}) as CarrierConnectionConfig;
     if (
-      provider.code === GHN_PROVIDER_CODE &&
-      this.providers.ghnAdapter.isCancelStatus(externalStatus)
+      dto.ShopID != null &&
+      config.shop_id &&
+      String(dto.ShopID) !== String(config.shop_id)
     ) {
-      if (f.shipmentStatus === ShipmentStatus.pending) {
-        await this.cancel(f.id, { reason: 'GHN cancel' }, actor);
-        return { ok: true, status: ShipmentStatus.cancelled };
+      this.logger.warn(
+        `Webhook GHN: ShopID ${dto.ShopID} không khớp cấu hình kết nối, bỏ qua`,
+      );
+      return { received: true };
+    }
+
+    const orderCode = dto.OrderCode?.trim();
+    if (!orderCode) return { received: true };
+
+    const f = await this.prisma.fulfillment.findFirst({
+      where: { providerId: provider.id, trackingNumber: orderCode },
+      include: { order: { include: { items: true } } },
+      orderBy: { id: 'desc' },
+    });
+    if (!f) {
+      this.logger.warn(`Webhook GHN: không tìm thấy vận đơn ${orderCode}`);
+      return { received: true };
+    }
+
+    // GHN cân/tính lại kiện hàng — cập nhật số thật để đối soát COD khớp hoá đơn của hãng
+    await this.applyGhnMeasurements(f.id, dto);
+
+    if (dto.Type && dto.Type !== 'Switch_status') return { received: true };
+
+    const externalStatus = dto.Status ?? '';
+    const ghnAdapter = this.providers.ghnAdapter;
+
+    if (ghnAdapter.isCancelStatus(externalStatus)) {
+      if (f.shipmentStatus === ShipmentStatus.pending && !f.closedAt) {
+        const user = await this.systemUser();
+        await this.cancel(f.id, { reason: 'GHN cancel' }, user);
       }
-      return { ok: true, skipped: true, reason: 'cancel_after_pickup' };
+      return { received: true };
     }
 
-    const target = adapter.mapWebhookStatus(externalStatus);
-    if (!target) {
-      // ready_to_pick / picking… — chưa cần đổi trạng thái nội bộ
-      return { ok: true, skipped: true, reason: 'no_status_change' };
+    const status = ghnAdapter.mapWebhookStatus(externalStatus);
+    if (!status) {
+      this.logger.log(
+        `Webhook GHN ${orderCode}: trạng thái "${externalStatus}" chưa map, bỏ qua`,
+      );
+      return { received: true };
     }
-    if (!f.shipmentStatus) {
-      return { ok: false, reason: 'no_shipment' };
-    }
-    if (f.shipmentStatus === target) {
-      return { ok: true, skipped: true, reason: 'already_at_status' };
+    if (status === f.shipmentStatus || !f.shipmentStatus) {
+      return { received: true };
     }
 
-    const path =
-      provider.code === GHN_PROVIDER_CODE
-        ? this.providers.ghnAdapter.pathTo(f.shipmentStatus, target)
-        : [target];
+    const path = ghnAdapter.pathTo(f.shipmentStatus, status);
     if (!path) {
-      return { ok: true, skipped: true, reason: 'unreachable_status' };
+      this.logger.warn(
+        `Webhook GHN ${orderCode}: không tìm được đường ${f.shipmentStatus} -> ${status}`,
+      );
+      return { received: true };
     }
 
+    const user = await this.systemUser();
     let current = f;
     try {
       for (const step of path) {
-        await this.applyShipmentStatus(current, step, actor);
+        await this.applyShipmentStatus(current, step, user);
         const refreshed = await this.prisma.fulfillment.findUnique({
           where: { id: f.id },
           include: { order: { include: { items: true } } },
@@ -916,21 +992,62 @@ export class FulfillmentService {
         current = refreshed;
         if (refreshed.closedAt) break;
       }
-    } catch (err) {
-      if (err instanceof BusinessException) {
-        return {
-          ok: false,
-          reason: err.code,
-          message: err.message,
-        };
+    } catch (e) {
+      // Vòng đời nội bộ chặt hơn GHN (vd nhảy thẳng picked -> delivered). Ghi log để xử lý
+      // tay thay vì để GHN retry mãi.
+      if (e instanceof BusinessException) {
+        this.logger.warn(
+          `Webhook GHN ${orderCode}: ${f.shipmentStatus} -> ${status} bị chặn (${e.message})`,
+        );
+        return { received: true };
       }
-      throw err;
+      throw e;
     }
+    return { received: true };
+  }
 
+  /** `Update_weight`/`Update_cod`/`Update_fee` của GHN → cột tương ứng trên fulfillment. */
+  private async applyGhnMeasurements(id: bigint, dto: GhnWebhookDto) {
+    const data: Prisma.FulfillmentUpdateInput = {};
+    if (dto.ConvertedWeight != null && dto.ConvertedWeight > 0) {
+      data.weightGrams = Math.round(dto.ConvertedWeight);
+    }
+    if (dto.CODAmount != null) data.codAmount = dto.CODAmount;
+    if (dto.TotalFee != null) data.shippingFee = dto.TotalFee;
+    if (dto.Reason || dto.ReasonCode || dto.Warehouse) {
+      // Sapo `abnormal` — nơi dành cho ghi chú bất thường của vận đơn
+      data.abnormal = {
+        reason: dto.Reason ?? null,
+        reason_code: dto.ReasonCode ?? null,
+        warehouse: dto.Warehouse ?? null,
+        at: dto.Time ?? new Date().toISOString(),
+      };
+    }
+    if (Object.keys(data).length === 0) return;
+    await this.prisma.fulfillment.update({ where: { id }, data });
+  }
+
+  /**
+   * Webhook không mang danh tính người dùng nào, nhưng `applyShipmentStatus` cần một
+   * `AuthUser` để ghi inventory_movements/activity_logs — dùng admin hệ thống, cùng cách
+   * `channel-sync.scheduler.ts` làm cho cron đồng bộ sàn.
+   */
+  private async systemUser(): Promise<AuthUser> {
+    const admin = await this.prisma.user.findFirst({
+      where: { email: 'admin@local.dev', active: true },
+    });
+    if (!admin) {
+      throw new BusinessException(
+        'CONFIG_ERROR',
+        'Không tìm thấy tài khoản hệ thống admin@local.dev để ghi nhận webhook',
+        500,
+      );
+    }
     return {
-      ok: true,
-      status: current.shipmentStatus,
-      tracking_number: trackingNumber,
+      userId: admin.id,
+      email: admin.email,
+      roles: [UserRole.admin],
+      locationIds: [],
     };
   }
 }

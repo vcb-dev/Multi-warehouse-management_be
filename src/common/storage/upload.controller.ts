@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { RequirePermission } from '../decorators/permissions.decorator';
+import {
+  LocationOptional,
+  RequirePermission,
+} from '../decorators/permissions.decorator';
 import { StorageService } from './storage.service';
 
 @ApiTags('uploads')
@@ -17,6 +20,7 @@ export class UploadController {
 
   @Post('image')
   @RequirePermission('product:manage')
+  @LocationOptional()
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,

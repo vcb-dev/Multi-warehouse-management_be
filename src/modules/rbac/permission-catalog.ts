@@ -14,7 +14,6 @@ export type PermissionDef = {
 export const PERMISSION_CATALOG: PermissionDef[] = [
   // Hệ thống
   { key: 'dashboard:view', group: 'Hệ thống', label: 'Xem trang chủ', scope: PermissionScope.system },
-  { key: 'config:access', group: 'Hệ thống', label: 'Truy cập cấu hình', scope: PermissionScope.system },
   { key: 'staff:manage', group: 'Hệ thống', label: 'Quản lý nhân viên', scope: PermissionScope.system },
   { key: 'role:manage', group: 'Hệ thống', label: 'Quản lý vai trò & phân quyền', scope: PermissionScope.system },
   { key: 'report:view', group: 'Hệ thống', label: 'Xem báo cáo', scope: PermissionScope.system },

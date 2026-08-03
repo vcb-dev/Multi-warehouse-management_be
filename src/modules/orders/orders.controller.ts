@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import {
@@ -41,7 +44,8 @@ export class OrdersController {
 
   @Get(':id/history')
   @RequirePermission('order:view')
-  history(@Param('id') id: string) {
+  async history(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.orders.assertOrderPermission(BigInt(id), user, 'order:view');
     return this.activityLog.getHistory('order', BigInt(id));
   }
 

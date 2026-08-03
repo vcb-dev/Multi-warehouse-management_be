@@ -44,8 +44,11 @@ export class PurchasingController {
 
   @Get('purchase-orders')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  listPo(@Query() query: ListPurchaseOrdersQueryDto) {
-    return this.po.list(query);
+  listPo(
+    @Query() query: ListPurchaseOrdersQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.po.list(query, user);
   }
 
   @Post('purchase-orders')
@@ -57,8 +60,8 @@ export class PurchasingController {
 
   @Get('purchase-orders/:id')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  getPo(@Param('id') id: string) {
-    return this.po.findOne(BigInt(id));
+  getPo(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.po.findOne(BigInt(id), user);
   }
 
   @Put('purchase-orders/:id')
@@ -83,14 +86,18 @@ export class PurchasingController {
 
   @Get('purchase-orders/:id/history')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  getPoHistory(@Param('id') id: string) {
+  async getPoHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.po.assertPoReadable(BigInt(id), user);
     return this.activityLog.getHistory('purchase_order', BigInt(id));
   }
 
   @Get('goods-receipts')
   @RequirePermission('purchasing:manage', 'inventory:view', 'inventory:receive')
-  listRei(@Query() query: ListGoodsReceiptsQueryDto) {
-    return this.rei.list(query);
+  listRei(
+    @Query() query: ListGoodsReceiptsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.rei.list(query, user);
   }
 
   @Post('goods-receipts')
@@ -102,8 +109,8 @@ export class PurchasingController {
 
   @Get('goods-receipts/:id')
   @RequirePermission('purchasing:manage', 'inventory:view', 'inventory:receive')
-  getRei(@Param('id') id: string) {
-    return this.rei.findOne(BigInt(id));
+  getRei(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.rei.findOne(BigInt(id), user);
   }
 
   @Post('goods-receipts/:id/confirm')
@@ -130,14 +137,18 @@ export class PurchasingController {
 
   @Get('goods-receipts/:id/history')
   @RequirePermission('purchasing:manage', 'inventory:view', 'inventory:receive')
-  getReiHistory(@Param('id') id: string) {
+  async getReiHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.rei.assertReceiptReadable(BigInt(id), user);
     return this.activityLog.getHistory('goods_receipt', BigInt(id));
   }
 
   @Get('purchase-returns')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  listPvn(@Query() query: ListPurchaseReturnsQueryDto) {
-    return this.pvn.list(query);
+  listPvn(
+    @Query() query: ListPurchaseReturnsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.pvn.list(query, user);
   }
 
   @Post('purchase-returns')
@@ -152,8 +163,8 @@ export class PurchasingController {
 
   @Get('purchase-returns/:id')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  getPvn(@Param('id') id: string) {
-    return this.pvn.findOne(BigInt(id));
+  getPvn(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.pvn.findOne(BigInt(id), user);
   }
 
   @Post('purchase-returns/:id/confirm-refund')
@@ -164,7 +175,8 @@ export class PurchasingController {
 
   @Get('purchase-returns/:id/history')
   @RequirePermission('purchasing:manage', 'inventory:view')
-  getPvnHistory(@Param('id') id: string) {
+  async getPvnHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    await this.pvn.assertReturnReadable(BigInt(id), user);
     return this.activityLog.getHistory('purchase_return', BigInt(id));
   }
 }

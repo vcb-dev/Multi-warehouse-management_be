@@ -5,11 +5,7 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
-import {
-  BranchScopeGuard,
-  JwtAuthGuard,
-  PermissionGuard,
-} from './common/guards/auth.guards';
+import { JwtAuthGuard, PermissionGuard } from './common/guards/auth.guards';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConfigModule } from './modules/config/config.module';
@@ -27,6 +23,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { FulfillmentsModule } from './modules/fulfillments/fulfillments.module';
 import { ConversationModule } from './modules/conversations/conversation.module';
 import { RbacModule } from './modules/rbac/rbac.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage/storage.module';
 
@@ -52,6 +49,7 @@ import { StorageModule } from './common/storage/storage.module';
     ChannelsModule,
     ConversationModule,
     RbacModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -59,7 +57,6 @@ import { StorageModule } from './common/storage/storage.module';
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: APP_GUARD, useClass: BranchScopeGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })
