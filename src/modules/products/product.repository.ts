@@ -38,8 +38,8 @@ export class ProductRepository {
     });
   }
 
-  findBySlug(slug: string) {
-    return this.prisma.product.findUnique({ where: { slug } });
+  findByAlias(alias: string) {
+    return this.prisma.product.findUnique({ where: { alias } });
   }
 
   findVariantBySku(sku: string) {
@@ -115,7 +115,7 @@ export class ProductRepository {
         select: { variantId: true },
         distinct: ['variantId'],
       }),
-      db.orderReturnItem.findMany({
+      db.orderRefundLineItem.findMany({
         where: { variantId: { in: variantIds } },
         select: { variantId: true },
         distinct: ['variantId'],

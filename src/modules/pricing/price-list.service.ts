@@ -3,14 +3,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 
 export type ResolveContext = {
-  branch_id?: bigint;
+  location_id?: bigint;
   customer_group_id?: bigint;
 };
 
 export type CreatePriceListDto = {
   code: string;
   name: string;
-  branch_id?: string;
+  location_id?: string;
   customer_group_id?: string;
   items?: {
     variant_id: string;
@@ -34,7 +34,7 @@ export class PriceListService {
         id: r.id.toString(),
         code: r.code,
         name: r.name,
-        branch_id: r.branchId?.toString() ?? null,
+        location_id: r.locationId?.toString() ?? null,
         customer_group_id: r.customerGroupId?.toString() ?? null,
         item_count: r._count.items,
       })),
@@ -57,7 +57,7 @@ export class PriceListService {
       data: {
         code: dto.code.trim(),
         name: dto.name.trim(),
-        branchId: dto.branch_id ? BigInt(dto.branch_id) : null,
+        locationId: dto.location_id ? BigInt(dto.location_id) : null,
         customerGroupId: dto.customer_group_id
           ? BigInt(dto.customer_group_id)
           : null,
@@ -97,10 +97,10 @@ export class PriceListService {
       }
     }
 
-    if (ctx.branch_id) {
+    if (ctx.location_id) {
       const item = await this.findEnabledItem({
         variantId,
-        branchId: ctx.branch_id,
+        locationId: ctx.location_id,
       });
       if (item) {
         return { price: Number(item.fixedPrice), source: 'branch' as const };
@@ -115,11 +115,11 @@ export class PriceListService {
 
   async resolveQuery(
     variantId: string,
-    branchId?: string,
+    locationId?: string,
     customerGroupId?: string,
   ) {
     return this.resolvePrice(BigInt(variantId), {
-      branch_id: branchId ? BigInt(branchId) : undefined,
+      location_id: locationId ? BigInt(locationId) : undefined,
       customer_group_id: customerGroupId
         ? BigInt(customerGroupId)
         : undefined,
@@ -142,7 +142,7 @@ export class PriceListService {
         id: row.id.toString(),
         code: row.code,
         name: row.name,
-        branch_id: row.branchId?.toString() ?? null,
+        location_id: row.locationId?.toString() ?? null,
         customer_group_id: row.customerGroupId?.toString() ?? null,
         items: row.items.map((i) => ({
           id: i.id.toString(),
@@ -196,12 +196,12 @@ export class PriceListService {
 
   private async findEnabledItem(filters: {
     variantId: bigint;
-    branchId?: bigint;
+    locationId?: bigint;
     customerGroupId?: bigint;
   }) {
     const lists = await this.prisma.priceList.findMany({
       where: {
-        ...(filters.branchId ? { branchId: filters.branchId } : {}),
+        ...(filters.locationId ? { locationId: filters.locationId } : {}),
         ...(filters.customerGroupId
           ? { customerGroupId: filters.customerGroupId }
           : {}),

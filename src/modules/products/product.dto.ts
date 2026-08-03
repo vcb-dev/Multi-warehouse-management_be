@@ -67,6 +67,27 @@ export class ProductVariantDto {
   @IsOptional()
   @IsString()
   weight_unit?: string;
+
+  /** Ghi đè riêng cho variant — nếu bỏ trống sẽ dùng giá trị chung của sản phẩm (dto cấp trên) */
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  taxable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_shipping?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  track_inventory?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_backorder?: boolean;
 }
 
 export class CreateProductDto {
@@ -76,15 +97,16 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
-  slug?: string;
+  alias?: string;
 
+  /** Áp cho mọi variant trừ khi variant tự ghi đè `unit` riêng */
   @IsOptional()
   @IsString()
   unit?: string;
 
   @IsOptional()
   @IsString()
-  brand?: string;
+  vendor?: string;
 
   @IsOptional()
   @IsString()
@@ -124,11 +146,11 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
-  description?: string;
+  content?: string;
 
   @IsOptional()
   @IsString()
-  short_description?: string;
+  summary?: string;
 
   @IsOptional()
   @IsArray()
@@ -137,19 +159,20 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
-  seo_title?: string;
+  meta_title?: string;
 
   @IsOptional()
   @IsString()
-  seo_description?: string;
+  meta_description?: string;
 
+  /** Áp cho mọi variant trừ khi variant tự ghi đè riêng */
   @IsOptional()
   @IsBoolean()
   taxable?: boolean;
 
   @IsOptional()
   @IsString()
-  tax_industry_group?: string;
+  vat_pit_category_code?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -210,5 +233,5 @@ export class ListProductsQueryDto {
 export class ProductInventoryQueryDto {
   @IsOptional()
   @IsString()
-  warehouse_id?: string;
+  location_id?: string;
 }

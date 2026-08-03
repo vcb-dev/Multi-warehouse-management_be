@@ -43,7 +43,7 @@ describeIfDb('invitation flow (integration)', () => {
   afterAll(async () => {
     if (userId) {
       await prisma.userInvitation.deleteMany({ where: { userId: BigInt(userId) } });
-      await prisma.userWarehouseRole.deleteMany({ where: { userId: BigInt(userId) } });
+      await prisma.userLocationRole.deleteMany({ where: { userId: BigInt(userId) } });
       await prisma.user.deleteMany({ where: { id: BigInt(userId) } });
     }
     await prisma.$disconnect();

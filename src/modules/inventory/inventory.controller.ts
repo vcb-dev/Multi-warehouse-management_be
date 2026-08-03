@@ -16,10 +16,8 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import {
-  ListInventoryQueryDto,
-  ListMovementsQueryDto,
-} from './inventory.dto';
+import { sendXlsx } from '../../common/utils/send-xlsx';
+import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import {
   InventoryExportService,
   InventoryImportService,
@@ -58,12 +56,7 @@ export class InventoryController {
     @Res() res: Response,
   ) {
     const buffer = await this.exporter.exportExcel(query, user);
-    res.setHeader('Content-Disposition', 'attachment; filename="ton-kho.xlsx"');
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.send(buffer);
+    sendXlsx(res, buffer, 'ton-kho.xlsx');
   }
 
   @Post('import')
@@ -71,16 +64,16 @@ export class InventoryController {
   @UseInterceptors(FileInterceptor('file'))
   async import(
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
-    @Query('warehouse_id') warehouseId: string | undefined,
+    @Query('location_id') locationId: string | undefined,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file?.buffer) {
       return { updated: 0, errors: [{ row: 0, message: 'Thiếu file' }] };
     }
-    if (!warehouseId) {
+    if (!locationId) {
       return { updated: 0, errors: [{ row: 0, message: 'Thiếu kho áp dụng' }] };
     }
-    return this.importer.importExcel(file.buffer, BigInt(warehouseId), user);
+    return this.importer.importExcel(file.buffer, BigInt(locationId), user);
   }
 
   @Get(':variantId/movements')

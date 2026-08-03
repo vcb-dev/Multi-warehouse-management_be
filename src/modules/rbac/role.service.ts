@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoleDto, UpdateRoleDto } from './rbac.dto';
+import { AuthCacheService } from './auth-cache.service';
 
 /** Quyền chỉ được gán cho role hệ thống `admin`. */
 export const PROTECTED_PERMISSION_KEYS = new Set([
@@ -16,13 +17,16 @@ export const PROTECTED_PERMISSION_KEYS = new Set([
 
 @Injectable()
 export class RoleService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private authCache: AuthCacheService,
+  ) {}
 
   async list() {
     const roles = await this.prisma.role.findMany({
       orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
       include: {
-        _count: { select: { permissions: true, warehouseRoles: true } },
+        _count: { select: { permissions: true, locationRoles: true } },
       },
     });
     return {
@@ -34,7 +38,7 @@ export class RoleService {
         is_system: r.isSystem,
         is_active: r.isActive,
         permission_count: r._count.permissions,
-        assigned_count: r._count.warehouseRoles,
+        assigned_count: r._count.locationRoles,
       })),
     };
   }
@@ -145,17 +149,32 @@ export class RoleService {
         }
       }
     });
+
+    // Đổi tập quyền hoặc khoá/mở role ảnh hưởng MỌI user đang mang role này —
+    // không biết cụ thể ai nên invalidate cả loạt thay vì đoán.
+    if (dto.permission_keys !== undefined || dto.is_active !== undefined) {
+      await this.invalidateUsersWithRole(role.id);
+    }
     return this.findOne(id);
+  }
+
+  private async invalidateUsersWithRole(roleId: bigint) {
+    const holders = await this.prisma.userLocationRole.findMany({
+      where: { roleId },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    for (const h of holders) this.authCache.invalidate(h.userId);
   }
 
   async remove(id: string) {
     const role = await this.prisma.role.findUnique({
       where: { id: BigInt(id) },
-      include: { _count: { select: { warehouseRoles: true } } },
+      include: { _count: { select: { locationRoles: true } } },
     });
     if (!role) throw new NotFoundException('ROLE_NOT_FOUND');
     if (role.isSystem) throw new ForbiddenException('ROLE_SYSTEM');
-    if (role._count.warehouseRoles > 0)
+    if (role._count.locationRoles > 0)
       throw new ConflictException('ROLE_IN_USE');
     await this.prisma.role.delete({ where: { id: role.id } });
   }

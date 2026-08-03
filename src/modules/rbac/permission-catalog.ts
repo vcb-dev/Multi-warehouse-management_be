@@ -9,40 +9,36 @@ export type PermissionDef = {
 
 /**
  * Danh mục quyền tĩnh (catalog). Seed vào bảng `permissions`.
- * scope=system: áp dụng toàn hệ thống; scope=warehouse: áp dụng theo kho được gán.
+ * scope=system: áp dụng toàn hệ thống; scope=location: áp dụng theo kho được gán.
  */
 export const PERMISSION_CATALOG: PermissionDef[] = [
   // Hệ thống
   { key: 'dashboard:view', group: 'Hệ thống', label: 'Xem trang chủ', scope: PermissionScope.system },
-  { key: 'config:access', group: 'Hệ thống', label: 'Truy cập cấu hình', scope: PermissionScope.system },
   { key: 'staff:manage', group: 'Hệ thống', label: 'Quản lý nhân viên', scope: PermissionScope.system },
   { key: 'role:manage', group: 'Hệ thống', label: 'Quản lý vai trò & phân quyền', scope: PermissionScope.system },
   { key: 'report:view', group: 'Hệ thống', label: 'Xem báo cáo', scope: PermissionScope.system },
+  { key: 'shipping:manage', group: 'Hệ thống', label: 'Cấu hình vận chuyển', scope: PermissionScope.system },
 
   // Đơn hàng (theo kho)
-  { key: 'order:view', group: 'Đơn hàng', label: 'Xem đơn hàng', scope: PermissionScope.warehouse },
-  { key: 'order:create', group: 'Đơn hàng', label: 'Tạo đơn hàng', scope: PermissionScope.warehouse },
-  { key: 'order:update', group: 'Đơn hàng', label: 'Cập nhật đơn hàng', scope: PermissionScope.warehouse },
-  { key: 'order:cancel', group: 'Đơn hàng', label: 'Hủy đơn hàng', scope: PermissionScope.warehouse },
-  { key: 'order:pack', group: 'Đơn hàng', label: 'Đóng gói & giao hàng', scope: PermissionScope.warehouse },
-
-  // Đơn nháp (theo kho)
-  { key: 'draft_order:view', group: 'Đơn hàng nháp', label: 'Xem đơn nháp', scope: PermissionScope.warehouse },
-  { key: 'draft_order:manage', group: 'Đơn hàng nháp', label: 'Tạo & cập nhật đơn nháp', scope: PermissionScope.warehouse },
+  { key: 'order:view', group: 'Đơn hàng', label: 'Xem đơn hàng', scope: PermissionScope.location },
+  { key: 'order:create', group: 'Đơn hàng', label: 'Tạo đơn hàng', scope: PermissionScope.location },
+  { key: 'order:update', group: 'Đơn hàng', label: 'Cập nhật đơn hàng', scope: PermissionScope.location },
+  { key: 'order:cancel', group: 'Đơn hàng', label: 'Hủy đơn hàng', scope: PermissionScope.location },
+  { key: 'order:pack', group: 'Đơn hàng', label: 'Đóng gói & giao hàng', scope: PermissionScope.location },
 
   // Trả hàng (theo kho)
-  { key: 'order_return:view', group: 'Trả hàng', label: 'Xem trả hàng', scope: PermissionScope.warehouse },
-  { key: 'order_return:manage', group: 'Trả hàng', label: 'Tạo & xử lý trả hàng', scope: PermissionScope.warehouse },
+  { key: 'order_return:view', group: 'Trả hàng', label: 'Xem trả hàng', scope: PermissionScope.location },
+  { key: 'order_return:manage', group: 'Trả hàng', label: 'Tạo & xử lý trả hàng', scope: PermissionScope.location },
 
   // Sản phẩm (theo kho)
-  { key: 'product:view', group: 'Sản phẩm', label: 'Xem sản phẩm', scope: PermissionScope.warehouse },
-  { key: 'product:manage', group: 'Sản phẩm', label: 'Tạo & cập nhật sản phẩm', scope: PermissionScope.warehouse },
+  { key: 'product:view', group: 'Sản phẩm', label: 'Xem sản phẩm', scope: PermissionScope.location },
+  { key: 'product:manage', group: 'Sản phẩm', label: 'Tạo & cập nhật sản phẩm', scope: PermissionScope.location },
 
   // Quản lý kho (theo kho)
-  { key: 'inventory:view', group: 'Quản lý kho', label: 'Xem tồn kho', scope: PermissionScope.warehouse },
-  { key: 'inventory:transfer', group: 'Quản lý kho', label: 'Chuyển kho', scope: PermissionScope.warehouse },
-  { key: 'inventory:receive', group: 'Quản lý kho', label: 'Nhập hàng', scope: PermissionScope.warehouse },
-  { key: 'purchasing:manage', group: 'Quản lý kho', label: 'Đặt hàng nhập & NCC', scope: PermissionScope.warehouse },
+  { key: 'inventory:view', group: 'Quản lý kho', label: 'Xem tồn kho', scope: PermissionScope.location },
+  { key: 'inventory:transfer', group: 'Quản lý kho', label: 'Chuyển kho', scope: PermissionScope.location },
+  { key: 'inventory:receive', group: 'Quản lý kho', label: 'Nhập hàng', scope: PermissionScope.location },
+  { key: 'purchasing:manage', group: 'Quản lý kho', label: 'Đặt hàng nhập & NCC', scope: PermissionScope.location },
 
   // Khách hàng (hệ thống)
   { key: 'customer:view', group: 'Khách hàng', label: 'Xem khách hàng', scope: PermissionScope.system },
@@ -63,9 +59,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
   store_manager: {
     name: 'Quản lý cửa hàng',
     permissions: [
-      'dashboard:view', 'report:view',
+      'dashboard:view', 'report:view', 'shipping:manage',
       'order:view', 'order:create', 'order:update', 'order:cancel', 'order:pack',
-      'draft_order:view', 'draft_order:manage',
       'order_return:view', 'order_return:manage',
       'product:view', 'product:manage',
       'inventory:view', 'inventory:transfer', 'inventory:receive',
@@ -77,7 +72,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     permissions: [
       'dashboard:view',
       'order:view', 'order:create', 'order:update',
-      'draft_order:view', 'draft_order:manage',
       'order_return:view',
       'product:view',
       'inventory:view',

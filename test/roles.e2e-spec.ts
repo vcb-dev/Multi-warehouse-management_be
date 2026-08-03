@@ -9,6 +9,15 @@ import { RoleService } from '../src/modules/rbac/role.service';
 import { UserAdminService } from '../src/modules/rbac/user-admin.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import type { AuthUser } from '../src/common/decorators/current-user.decorator';
+
+/** Không gán role admin trong test này nên không cần quyền admin thật. */
+const caller: AuthUser = {
+  userId: 0n,
+  email: 'system-test@local.dev',
+  roles: [],
+  locationIds: [],
+};
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -21,7 +30,7 @@ describeIfDb('roles RBAC (integration)', () => {
   let prisma: PrismaService;
 
   let targetUserId: string;
-  let warehouseId: string;
+  let locationId: string;
   let salesRoleId: string;
   let customRoleId: string;
 
@@ -33,21 +42,29 @@ describeIfDb('roles RBAC (integration)', () => {
     users = module.get(UserAdminService);
     prisma = module.get(PrismaService);
 
-    const user = await prisma.user.findFirst({ where: { email: 'sales@local.dev' } });
-    const warehouse = await prisma.warehouse.findFirst();
-    const salesRole = await prisma.role.findUnique({ where: { code: 'sales' } });
+    const user = await prisma.user.findFirst({
+      where: { email: 'sales@local.dev' },
+    });
+    const warehouse = await prisma.location.findFirst();
+    const salesRole = await prisma.role.findUnique({
+      where: { code: 'sales' },
+    });
     if (!user || !warehouse || !salesRole) {
       throw new Error('Run prisma db seed before integration tests');
     }
     targetUserId = user.id.toString();
-    warehouseId = warehouse.id.toString();
+    locationId = warehouse.id.toString();
     salesRoleId = salesRole.id.toString();
   });
 
   afterAll(async () => {
     if (customRoleId) {
-      await prisma.userWarehouseRole.deleteMany({ where: { roleId: BigInt(customRoleId) } });
-      await prisma.rolePermission.deleteMany({ where: { roleId: BigInt(customRoleId) } });
+      await prisma.userLocationRole.deleteMany({
+        where: { roleId: BigInt(customRoleId) },
+      });
+      await prisma.rolePermission.deleteMany({
+        where: { roleId: BigInt(customRoleId) },
+      });
       await prisma.role.deleteMany({ where: { id: BigInt(customRoleId) } });
     }
     await prisma.$disconnect();
@@ -71,36 +88,48 @@ describeIfDb('roles RBAC (integration)', () => {
   });
 
   it('ROLE_SYSTEM khi xóa role hệ thống', async () => {
-    const adminRole = await prisma.role.findUniqueOrThrow({ where: { code: 'admin' } });
+    const adminRole = await prisma.role.findUniqueOrThrow({
+      where: { code: 'admin' },
+    });
     await expect(roles.remove(adminRole.id.toString())).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
 
   it('ROLE_IN_USE khi xóa role đang được gán', async () => {
-    await expect(roles.remove(salesRoleId)).rejects.toBeInstanceOf(ConflictException);
+    await expect(roles.remove(salesRoleId)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('PUT warehouse-roles: gán 1 role/kho và chặn trùng warehouse', async () => {
-    const result = await users.putWarehouseRoles(targetUserId, {
-      assignments: [{ warehouse_id: warehouseId, role_id: salesRoleId }],
-    });
+    const result = await users.putWarehouseRoles(
+      targetUserId,
+      { assignments: [{ location_id: locationId, role_id: salesRoleId }] },
+      caller,
+    );
     expect(result.data.warehouse_roles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          warehouse_id: warehouseId,
+          location_id: locationId,
           role_id: salesRoleId,
         }),
       ]),
     );
 
     await expect(
-      users.putWarehouseRoles(targetUserId, {
-        assignments: [
-          { warehouse_id: warehouseId, role_id: salesRoleId },
-          { warehouse_id: warehouseId, role_id: customRoleId },
-        ],
-      }),
-    ).rejects.toMatchObject({ message: expect.stringContaining('DUPLICATE_WAREHOUSE') });
+      users.putWarehouseRoles(
+        targetUserId,
+        {
+          assignments: [
+            { location_id: locationId, role_id: salesRoleId },
+            { location_id: locationId, role_id: customRoleId },
+          ],
+        },
+        caller,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('DUPLICATE_WAREHOUSE'),
+    });
   });
 });

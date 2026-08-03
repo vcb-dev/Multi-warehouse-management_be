@@ -1,27 +1,35 @@
 /**
- * Unit test RbacService.resolvePermissions — quyền theo kho, admin theo kho.
+ * Unit test RbacService.resolvePermissions — hai tầng quyền: `scope=system`
+ * toàn cục, `scope=location` theo từng kho.
  */
 import { PermissionScope } from '@prisma/client';
 import { RbacService } from '../src/modules/rbac/rbac.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 
-function fakePrisma(rows: unknown[]): PrismaService {
+function fakePrisma(rows: unknown[], overrides: unknown[] = []): PrismaService {
   return {
-    userWarehouseRole: {
+    userLocationRole: {
       findMany: jest.fn().mockResolvedValue(rows),
+    },
+    // resolvePermissions truy vấn song song cả lệch quyền riêng của user
+    userPermissionOverride: {
+      findMany: jest.fn().mockResolvedValue(overrides),
     },
   } as unknown as PrismaService;
 }
 
-const perm = (key: string, scope: PermissionScope = PermissionScope.warehouse) => ({
+const perm = (
+  key: string,
+  scope: PermissionScope = PermissionScope.location,
+) => ({
   permission: { key, scope },
 });
 
 describe('RbacService.resolvePermissions', () => {
-  it('gom mọi permission vào warehousePermissions theo từng kho', async () => {
+  it('tách quyền system khỏi quyền theo kho', async () => {
     const prisma = fakePrisma([
       {
-        warehouseId: 1n,
+        locationId: 1n,
         role: {
           isSystem: false,
           code: 'sales',
@@ -33,7 +41,7 @@ describe('RbacService.resolvePermissions', () => {
         },
       },
       {
-        warehouseId: 2n,
+        locationId: 2n,
         role: {
           isSystem: false,
           code: 'sales',
@@ -44,14 +52,15 @@ describe('RbacService.resolvePermissions', () => {
     const svc = new RbacService(prisma);
     const res = await svc.resolvePermissions(1n);
 
-    expect(res.systemPermissions).toEqual([]);
+    // `customer:view` khai scope=system nên tách khỏi bucket theo kho.
+    expect(res.systemPermissions).toEqual(['customer:view']);
     expect(new Set(res.warehousePermissions['1'])).toEqual(
-      new Set(['order:view', 'order:pack', 'customer:view']),
+      new Set(['order:view', 'order:pack']),
     );
     expect(new Set(res.warehousePermissions['2'])).toEqual(
       new Set(['order:view', 'product:view']),
     );
-    expect(res.warehouseIds).toEqual([1n, 2n]);
+    expect(res.locationIds).toEqual([1n, 2n]);
     expect(res.isAdmin).toBe(false);
     expect(res.adminWarehouseIds).toEqual([]);
   });
@@ -59,7 +68,7 @@ describe('RbacService.resolvePermissions', () => {
   it('adminWarehouseIds khi gán role admin tại kho', async () => {
     const prisma = fakePrisma([
       {
-        warehouseId: 1n,
+        locationId: 1n,
         role: {
           isSystem: true,
           code: 'admin',
@@ -70,7 +79,7 @@ describe('RbacService.resolvePermissions', () => {
     const res = await new RbacService(prisma).resolvePermissions(1n);
     expect(res.adminWarehouseIds).toEqual([1n]);
     expect(res.isAdmin).toBe(true);
-    expect(res.warehousePermissions['1']).toContain('role:manage');
+    expect(res.systemPermissions).toContain('role:manage');
   });
 
   it('user không có gán role -> rỗng', async () => {

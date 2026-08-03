@@ -10,17 +10,20 @@ import {
 
 export type { AutoConditions, CreateCategoryDto };
 
+/** Số id mỗi lô khi gán/gỡ danh mục auto hàng loạt. */
+const AUTO_WRITE_CHUNK = 1000;
+
 export type CategoryTreeNode = {
   id: string;
   name: string;
-  slug: string;
+  alias: string;
   parent_id: string | null;
   description: string | null;
   condition_type: CategoryConditionType;
-  auto_conditions: AutoConditions | null;
+  rules: AutoConditions | null;
   sales_channels: string[];
-  image_url: string | null;
-  product_count: number;
+  image_src: string | null;
+  products_count: number;
   children: CategoryTreeNode[];
 };
 
@@ -37,7 +40,7 @@ export class CategoryService {
   }
 
   async create(dto: CreateCategoryDto) {
-    const slug = await this.uniqueSlug(slugify(dto.name));
+    const alias = await this.uniqueSlug(slugify(dto.name));
     if (dto.parent_id) {
       const parentId = BigInt(dto.parent_id);
       const parent = await this.prisma.category.findUnique({
@@ -53,12 +56,12 @@ export class CategoryService {
     const row = await this.prisma.category.create({
       data: {
         name: dto.name.trim(),
-        slug,
+        alias,
         description: dto.description?.trim() || null,
         parentId: dto.parent_id ? BigInt(dto.parent_id) : null,
-        imageUrl: dto.image_url || null,
+        imageSrc: dto.image_url || null,
         conditionType: dto.condition_type as CategoryConditionType,
-        autoConditions: (dto.auto_conditions as AutoConditions | undefined) ?? undefined,
+        rules: (dto.auto_conditions as AutoConditions | undefined) ?? undefined,
         salesChannels: dto.sales_channels ?? [],
       },
     });
@@ -102,7 +105,7 @@ export class CategoryService {
     });
 
     for (const cat of autoCategories) {
-      const matches = this.matchesAuto(product, cat.autoConditions);
+      const matches = this.matchesAuto(product, cat.rules);
       if (matches) {
         await tx.productCategory.upsert({
           where: {
@@ -119,18 +122,62 @@ export class CategoryService {
     }
   }
 
+  /**
+   * Quét lại toàn bộ SP cho mọi danh mục auto.
+   *
+   * Chạy theo lô: bản cũ mở một transaction cho MỖI sản phẩm, với 12k+ sản phẩm
+   * thì một request tạo danh mục auto treo hàng giờ. Vẫn dùng chung
+   * `matchesAuto` nên kết quả gán/gỡ không đổi.
+   */
   async evaluateAutoForAllProducts() {
-    const products = await this.prisma.product.findMany({ select: { id: true } });
-    for (const p of products) {
-      await this.prisma.$transaction((tx) =>
-        this.evaluateAutoForProduct(tx, p.id),
-      );
+    const autoCategories = await this.prisma.category.findMany({
+      where: { conditionType: CategoryConditionType.auto },
+    });
+    if (!autoCategories.length) return;
+
+    const products = await this.prisma.product.findMany({
+      select: { id: true, vendor: true, productType: true, tags: true },
+    });
+
+    for (const cat of autoCategories) {
+      const matched = new Set<bigint>();
+      for (const p of products) {
+        if (this.matchesAuto(p, cat.rules)) matched.add(p.id);
+      }
+
+      const current = await this.prisma.productCategory.findMany({
+        where: { categoryId: cat.id },
+        select: { productId: true },
+      });
+      const currentIds = new Set(current.map((r) => r.productId));
+
+      const toAdd = [...matched].filter((id) => !currentIds.has(id));
+      const toRemove = [...currentIds].filter((id) => !matched.has(id));
+
+      for (const chunk of this.chunk(toAdd)) {
+        await this.prisma.productCategory.createMany({
+          data: chunk.map((productId) => ({ productId, categoryId: cat.id })),
+          skipDuplicates: true,
+        });
+      }
+      for (const chunk of this.chunk(toRemove)) {
+        await this.prisma.productCategory.deleteMany({
+          where: { categoryId: cat.id, productId: { in: chunk } },
+        });
+      }
     }
+  }
+
+  /** Cắt lô để câu lệnh không phình quá số tham số Postgres cho phép. */
+  private chunk(ids: bigint[], size = AUTO_WRITE_CHUNK): bigint[][] {
+    const out: bigint[][] = [];
+    for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+    return out;
   }
 
   matchesAuto(
     product: {
-      brand: string | null;
+      vendor: string | null;
       productType: string | null;
       tags: string[];
     },
@@ -138,13 +185,13 @@ export class CategoryService {
   ): boolean {
     if (!conditions || typeof conditions !== 'object') return false;
     const c = conditions as AutoConditions;
-    if (c.brand && product.brand !== c.brand) return false;
+    if (c.vendor && product.vendor !== c.vendor) return false;
     if (c.product_type && product.productType !== c.product_type) return false;
     if (c.tags?.length) {
       const hasAll = c.tags.every((t) => product.tags.includes(t));
       if (!hasAll) return false;
     }
-    return !!(c.brand || c.product_type || c.tags?.length);
+    return !!(c.vendor || c.product_type || c.tags?.length);
   }
 
   private buildTree(
@@ -153,11 +200,11 @@ export class CategoryService {
       name: string;
       parentId: bigint | null;
       conditionType: CategoryConditionType;
-      autoConditions: unknown;
+      rules: unknown;
       description: string | null;
       salesChannels: string[];
-      imageUrl: string | null;
-      slug: string;
+      imageSrc: string | null;
+      alias: string;
       _count: { products: number };
     }[],
     parentId: bigint | null = null,
@@ -167,14 +214,14 @@ export class CategoryService {
       .map((r) => ({
         id: r.id.toString(),
         name: r.name,
-        slug: r.slug,
+        alias: r.alias,
         parent_id: r.parentId?.toString() ?? null,
         description: r.description,
         condition_type: r.conditionType,
-        auto_conditions: (r.autoConditions as AutoConditions | null) ?? null,
+        rules: (r.rules as AutoConditions | null) ?? null,
         sales_channels: r.salesChannels,
-        image_url: r.imageUrl,
-        product_count: r._count.products,
+        image_src: r.imageSrc,
+        products_count: r._count.products,
         children: this.buildTree(rows, r.id),
       }));
   }
@@ -205,7 +252,7 @@ export class CategoryService {
   private async uniqueSlug(base: string) {
     let slug = base;
     let n = 0;
-    while (await this.prisma.category.findUnique({ where: { slug } })) {
+    while (await this.prisma.category.findUnique({ where: { alias: slug } })) {
       n += 1;
       slug = `${base}-${n}`;
     }

@@ -6,8 +6,8 @@ describe('CategoryService — auto_conditions (P-4)', () => {
   it('match brand', () => {
     expect(
       service.matchesAuto(
-        { brand: 'Nike', productType: null, tags: [] },
-        { brand: 'Nike' },
+        { vendor: 'Nike', productType: null, tags: [] },
+        { vendor: 'Nike' },
       ),
     ).toBe(true);
   });
@@ -15,8 +15,8 @@ describe('CategoryService — auto_conditions (P-4)', () => {
   it('không match brand khác', () => {
     expect(
       service.matchesAuto(
-        { brand: 'Adidas', productType: null, tags: [] },
-        { brand: 'Nike' },
+        { vendor: 'Adidas', productType: null, tags: [] },
+        { vendor: 'Nike' },
       ),
     ).toBe(false);
   });
@@ -24,7 +24,7 @@ describe('CategoryService — auto_conditions (P-4)', () => {
   it('match tags AND', () => {
     expect(
       service.matchesAuto(
-        { brand: null, productType: null, tags: ['sale', 'new'] },
+        { vendor: null, productType: null, tags: ['sale', 'new'] },
         { tags: ['sale'] },
       ),
     ).toBe(true);

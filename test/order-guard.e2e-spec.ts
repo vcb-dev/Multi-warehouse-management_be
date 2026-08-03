@@ -7,6 +7,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -16,8 +17,7 @@ const describeIfDb =
 describeIfDb('order guards', () => {
   let orders: OrderService;
   let prisma: PrismaService;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
   let userId: bigint;
 
@@ -27,8 +27,7 @@ describeIfDb('order guards', () => {
     }).compile();
     orders = module.get(OrderService);
     prisma = module.get(PrismaService);
-    branchId = (await prisma.branch.findFirstOrThrow()).id;
-    warehouseId = (await prisma.warehouse.findFirstOrThrow()).id;
+    locationId = (await prisma.location.findFirstOrThrow()).id;
     variantId = (await prisma.productVariant.findFirstOrThrow()).id;
     userId = (await prisma.user.findFirstOrThrow()).id;
   });
@@ -38,8 +37,8 @@ describeIfDb('order guards', () => {
   it('MISSING_WAREHOUSE', async () => {
     await expect(
       orders.create(
-        { branch_id: branchId.toString(), items: [{ variant_id: variantId.toString(), warehouse_id: '', quantity: 1 }] },
-        { userId, email: 't', roles: ['admin'], warehouseIds: [] },
+        { location_id: locationId.toString(), items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }] },
+        adminAuth({ userId }),
       ),
     ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });
   });

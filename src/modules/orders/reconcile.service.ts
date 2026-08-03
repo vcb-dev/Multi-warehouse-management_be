@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MovementType } from '@prisma/client';
+import { MovementType, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Đối soát movement type order_* vs trạng thái đơn (T031) */
@@ -18,23 +18,23 @@ export class OrderReconcileService {
     ];
 
     const movements = await this.prisma.inventoryMovement.groupBy({
-      by: ['variantId', 'warehouseId', 'type'],
+      by: ['variantId', 'locationId', 'type'],
       where: { type: { in: orderTypes } },
       _sum: { change: true },
     });
 
     const mismatches: unknown[] = [];
     for (const order of await this.prisma.order.findMany({
-      where: { status: { in: ['ordered', 'processing'] } },
+      where: { status: OrderStatus.open },
       include: { items: true },
     })) {
       const expectedCommitted = order.items.reduce((s, i) => s + i.quantity, 0);
       for (const item of order.items) {
         const level = await this.prisma.inventoryLevel.findUnique({
           where: {
-            variantId_warehouseId: {
+            variantId_locationId: {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: order.locationId,
             },
           },
         });

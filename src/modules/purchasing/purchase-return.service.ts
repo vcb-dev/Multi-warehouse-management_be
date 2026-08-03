@@ -9,6 +9,10 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { VoucherService } from '../vouchers/voucher.service';
@@ -25,10 +29,16 @@ const pvnInclude = {
     },
   },
   supplier: { select: { code: true, name: true } },
-  warehouse: { select: { code: true, name: true } },
+  location: { select: { code: true, name: true } },
   goodsReceipt: { select: { code: true } },
-  createdBy: { select: { name: true, email: true } },
+  createdBy: { select: { firstName: true, lastName: true, email: true } },
 } satisfies Prisma.PurchaseReturnInclude;
+
+/** Khớp @RequirePermission trong purchasing.controller. */
+const PVN_READ = ['purchasing:manage', 'inventory:view'];
+const PVN_WRITE = ['purchasing:manage', 'inventory:receive'];
+/** Xác nhận hoàn tiền chặt hơn: chỉ purchasing:manage (khớp controller). */
+const PVN_REFUND = ['purchasing:manage'];
 
 @Injectable()
 export class PurchaseReturnService {
@@ -38,10 +48,12 @@ export class PurchaseReturnService {
     private vouchers: VoucherService,
   ) {}
 
-  async list(query: ListPurchaseReturnsQueryDto) {
+  async list(query: ListPurchaseReturnsQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const where: Prisma.PurchaseReturnWhereInput = {};
+    const where: Prisma.PurchaseReturnWhereInput = {
+      locationId: locationScopeFilter(user, PVN_READ),
+    };
 
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
@@ -81,21 +93,21 @@ export class PurchaseReturnService {
       );
     }
 
-    const warehouseId = BigInt(dto.warehouse_id);
+    const locationId = BigInt(dto.location_id);
     const supplierId = BigInt(dto.supplier_id);
 
     await this.validateSupplier(supplierId);
-    this.inventory.assertWarehouseAccess(user, warehouseId);
+    assertLocationPermission(user, PVN_WRITE, locationId);
 
     const goodsReceiptId = dto.goods_receipt_id
       ? await this.validateGoodsReceiptRef(
           BigInt(dto.goods_receipt_id),
           supplierId,
-          warehouseId,
+          locationId,
         )
       : null;
 
-    await this.validateReturnQuantities(dto.items, warehouseId);
+    await this.validateReturnQuantities(dto.items, locationId);
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
     const totalAmount = dto.items.reduce(
@@ -109,7 +121,7 @@ export class PurchaseReturnService {
         data: {
           code,
           supplierId,
-          warehouseId,
+          locationId,
           goodsReceiptId,
           totalQuantity,
           totalAmount,
@@ -129,7 +141,7 @@ export class PurchaseReturnService {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
-            warehouseId,
+            locationId,
             bucket: InventoryBucket.on_hand,
             change: -item.quantity,
             type: MovementType.return_out,
@@ -172,19 +184,30 @@ export class PurchaseReturnService {
     return { data: serializePurchaseReturn(pvn) };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, user: AuthUser) {
     const pvn = await this.prisma.purchaseReturn.findUnique({
       where: { id },
       include: pvnInclude,
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    assertLocationPermission(user, PVN_READ, pvn.locationId);
     return { data: serializePurchaseReturn(pvn) };
+  }
+
+  /** Chốt quyền theo kho của phiếu cho endpoint không cần nạp cả phiếu. */
+  async assertReturnReadable(id: bigint, user: AuthUser) {
+    const pvn = await this.prisma.purchaseReturn.findUnique({
+      where: { id },
+      select: { locationId: true },
+    });
+    if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
+    assertLocationPermission(user, PVN_READ, pvn.locationId);
   }
 
   async confirmRefund(id: bigint, user: AuthUser) {
     const pvn = await this.prisma.purchaseReturn.findUnique({
       where: { id },
-      include: { supplier: true, warehouse: true },
+      include: { supplier: true, location: true },
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
     if (pvn.refundStatus === RefundStatus.da_hoan_tien) {
@@ -195,12 +218,15 @@ export class PurchaseReturnService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, pvn.warehouseId);
+    assertLocationPermission(user, PVN_REFUND, pvn.locationId);
 
     const voucher = await this.prisma.$transaction(async (tx) => {
       await tx.purchaseReturn.update({
         where: { id },
-        data: { refundStatus: RefundStatus.da_hoan_tien, refundedAt: new Date() },
+        data: {
+          refundStatus: RefundStatus.da_hoan_tien,
+          refundedAt: new Date(),
+        },
       });
 
       // NCC hoàn tiền mặt thay vì trừ công nợ → đảo lại bút toán giảm nợ khi tạo phiếu trả
@@ -228,7 +254,7 @@ export class PurchaseReturnService {
 
       return this.vouchers.createReceipt(
         {
-          branchId: pvn.warehouse.branchId,
+          locationId: pvn.locationId,
           amount: Number(pvn.totalAmount),
           createdById: user.userId,
           sourceDocument: pvn.code,
@@ -251,7 +277,7 @@ export class PurchaseReturnService {
   private async validateGoodsReceiptRef(
     goodsReceiptId: bigint,
     supplierId: bigint,
-    warehouseId: bigint,
+    locationId: bigint,
   ) {
     const rei = await this.prisma.goodsReceipt.findUnique({
       where: { id: goodsReceiptId },
@@ -277,7 +303,7 @@ export class PurchaseReturnService {
         422,
       );
     }
-    if (rei.warehouseId !== warehouseId) {
+    if (rei.locationId !== locationId) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Kho không khớp với đơn nhập hàng',
@@ -290,7 +316,7 @@ export class PurchaseReturnService {
   /** Không còn theo dõi theo lô — chỉ đảm bảo không trả vượt tồn hiện có tại kho */
   private async validateReturnQuantities(
     items: CreatePurchaseReturnDto['items'],
-    warehouseId: bigint,
+    locationId: bigint,
   ) {
     const qtyByVariant = new Map<string, number>();
     for (const item of items) {
@@ -301,9 +327,9 @@ export class PurchaseReturnService {
     for (const [variantId, qty] of qtyByVariant) {
       const level = await this.prisma.inventoryLevel.findUnique({
         where: {
-          variantId_warehouseId: {
+          variantId_locationId: {
             variantId: BigInt(variantId),
-            warehouseId,
+            locationId,
           },
         },
       });

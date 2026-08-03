@@ -18,7 +18,9 @@ const pg = new EmbeddedPostgres({
   persistent: true,
 });
 
-const env = { ...process.env, DATABASE_URL };
+// Ghi đè cả DIRECT_URL — `prisma migrate` đọc `directUrl` trước `url`, bỏ sót
+// nó thì migration chạy lên DB trong .env (production) thay vì DB nhúng.
+const env = { ...process.env, DATABASE_URL, DIRECT_URL: DATABASE_URL };
 
 async function ensureDatabase() {
   try {

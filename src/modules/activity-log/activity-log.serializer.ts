@@ -1,4 +1,5 @@
 import { ActivityLog, User } from '@prisma/client';
+import { userDisplayName } from '../../common/utils/user-display-name';
 
 // Nhãn tiếng Việt cho từng action — key theo convention "entity.verb" đã dùng
 // trong toàn bộ codebase khi ghi activityLog.create(...).
@@ -27,10 +28,21 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   'order.complete': 'Hoàn thành đơn hàng',
   'order.cancel': 'Hủy đơn hàng',
   'order.pay': 'Thanh toán đơn hàng',
+  'order.ship': 'Xuất hàng',
+  'fulfillment.packing_request': 'Tạo yêu cầu đóng gói',
+  'fulfillment.packing_status': 'Chuyển trạng thái đóng gói',
+  'fulfillment.print': 'In phiếu giao hàng',
+  'fulfillment.push': 'Đẩy vận chuyển',
+  'fulfillment.picked_up': 'Đơn vị vận chuyển lấy hàng',
+  'fulfillment.redeliver': 'Giao lại',
+  'fulfillment.delivered': 'Giao hàng thành công',
+  'fulfillment.delivery_failed': 'Giao hàng lỗi',
+  'fulfillment.returned': 'Chuyển hoàn về kho',
+  'fulfillment.cancel': 'Hủy vận đơn',
 };
 
 type LogWithUser = ActivityLog & {
-  user: Pick<User, 'name' | 'email'> | null;
+  user: Pick<User, 'firstName' | 'lastName' | 'email'> | null;
 };
 
 export function serializeActivityLog(entry: LogWithUser) {
@@ -39,7 +51,7 @@ export function serializeActivityLog(entry: LogWithUser) {
     id: entry.id.toString(),
     action: entry.action,
     action_label: ACTIVITY_ACTION_LABELS[entry.action] ?? entry.action,
-    actor_name: entry.user?.name ?? entry.user?.email ?? 'Hệ thống',
+    actor_name: userDisplayName(entry.user) ?? entry.user?.email ?? 'Hệ thống',
     reference_code: typeof metadata.code === 'string' ? metadata.code : null,
     amount: typeof metadata.amount === 'number' ? metadata.amount : null,
     created_at: entry.createdAt.toISOString(),

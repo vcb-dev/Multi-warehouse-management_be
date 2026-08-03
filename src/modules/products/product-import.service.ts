@@ -7,10 +7,10 @@ import { ListProductsQueryDto } from './product.dto';
 
 /** Cột Excel Sapo — `Sản phẩm/Danh_sách_sản_phẩm.xlsx` */
 const SAPO_PRODUCT_HEADERS: Record<string, string> = {
-  'Đường dẫn/Alias': 'slug',
+  'Đường dẫn/Alias': 'alias',
   'Tên sản phẩm*': 'name',
   'Tên sản phẩm': 'name',
-  'Nhãn hiệu': 'brand',
+  'Nhãn hiệu': 'vendor',
   'Loại sản phẩm': 'product_type',
   Tags: 'tags',
   'Đơn vị tính': 'unit',
@@ -24,9 +24,9 @@ const SAPO_PRODUCT_HEADERS: Record<string, string> = {
 };
 
 const EXPORT_COLUMNS = [
-  { header: 'Đường dẫn/Alias', key: 'slug', width: 24 },
+  { header: 'Đường dẫn/Alias', key: 'alias', width: 24 },
   { header: 'Tên sản phẩm*', key: 'name', width: 40 },
-  { header: 'Nhãn hiệu', key: 'brand', width: 20 },
+  { header: 'Nhãn hiệu', key: 'vendor', width: 20 },
   { header: 'Loại sản phẩm', key: 'product_type', width: 16 },
   { header: 'Tags', key: 'tags', width: 24 },
   { header: 'Đơn vị tính', key: 'unit', width: 12 },
@@ -111,7 +111,7 @@ export class ProductImportService {
       const name = cellStr(row, cols.get('name'));
       const sku = cellStr(row, cols.get('sku'));
       const price = cellNum(row, cols.get('price'));
-      const brand = cellStr(row, cols.get('brand')) || undefined;
+      const vendor = cellStr(row, cols.get('vendor')) || undefined;
       const productType = cellStr(row, cols.get('product_type')) || undefined;
       const unit = cellStr(row, cols.get('unit')) || undefined;
       const tags = parseTags(cellStr(row, cols.get('tags')));
@@ -141,7 +141,7 @@ export class ProductImportService {
             existing.productId,
             {
               name,
-              brand,
+              vendor,
               product_type: productType,
               unit,
               tags,
@@ -155,7 +155,7 @@ export class ProductImportService {
           await this.products.create(
             {
               name,
-              brand,
+              vendor,
               product_type: productType,
               unit,
               tags,
@@ -189,7 +189,7 @@ export class ProductExportService {
     const where = await this.products.buildListWhere(query);
     const products = await this.repo.client.product.findMany({
       where,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { modifiedOn: 'desc' },
       include: {
         variants: { where: { enabled: true }, orderBy: { id: 'asc' } },
       },
@@ -203,13 +203,13 @@ export class ProductExportService {
       const variants = p.variants.length ? p.variants : [null];
       for (const v of variants) {
         sheet.addRow({
-          slug: p.slug,
+          alias: p.alias,
           name: p.name,
-          brand: p.brand ?? '',
+          vendor: p.vendor ?? '',
           product_type: p.productType ?? '',
           tags: p.tags.join(', '),
-          unit: p.unit ?? '',
-          is_published: p.isPublished ? 'Có' : 'Không',
+          unit: v?.unit ?? '',
+          is_published: p.status === 'active' ? 'Có' : 'Không',
           sku: v?.sku ?? '',
           price: v ? Number(v.price) : 0,
           compare_at_price: v?.compareAtPrice ? Number(v.compareAtPrice) : '',

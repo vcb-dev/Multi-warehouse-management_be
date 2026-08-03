@@ -6,7 +6,7 @@ describe('INV-1 available formula', () => {
       computeAvailable({
         onHand: 10,
         committed: 3,
-        packing: 2,
+        packed: 2,
         unavailable: 1,
       }),
     ).toBe(4);
@@ -17,7 +17,7 @@ describe('INV-1 available formula', () => {
     const available = computeAvailable({
       onHand,
       committed: 3,
-      packing: 0,
+      packed: 0,
       unavailable: 0,
     });
     expect(onHand).toBe(10);

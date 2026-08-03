@@ -9,6 +9,89 @@ import {
 
 const prisma = new PrismaClient();
 
+async function seedShippingProviders() {
+  const carriers: {
+    code: string;
+    name: string;
+    isConnected: boolean;
+    servicesConfig: {
+      code: string;
+      name: string;
+      eta: string;
+      base_fee: number;
+      extra_fee_per_500g: number;
+    }[];
+  }[] = [
+    {
+      code: 'ghn',
+      name: 'GHN Express',
+      isConnected: true,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 44080, extra_fee_per_500g: 5500 },
+        { code: 'fast', name: 'Nhanh', eta: '1-2 ngày', base_fee: 60500, extra_fee_per_500g: 7000 },
+      ],
+    },
+    {
+      code: 'spx',
+      name: 'SPX Express',
+      isConnected: true,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 39000, extra_fee_per_500g: 5000 },
+      ],
+    },
+    {
+      code: 'ghtk',
+      name: 'GHTK',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 38000, extra_fee_per_500g: 4500 },
+      ],
+    },
+    {
+      code: 'viettel_post',
+      name: 'Viettel Post',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 42000, extra_fee_per_500g: 5000 },
+        { code: 'express_48h', name: 'Chuyển phát hỏa tốc (48 giờ)', eta: '48 giờ', base_fee: 180925, extra_fee_per_500g: 12000 },
+      ],
+    },
+    {
+      code: 'jt',
+      name: 'J&T Express',
+      isConnected: false,
+      servicesConfig: [
+        { code: 'standard', name: 'Chuẩn', eta: '2-4 ngày', base_fee: 58432, extra_fee_per_500g: 6000 },
+      ],
+    },
+  ];
+
+  for (const c of carriers) {
+    await prisma.shippingProvider.upsert({
+      where: { code: c.code },
+      update: { name: c.name, servicesConfig: c.servicesConfig },
+      create: {
+        code: c.code,
+        name: c.name,
+        type: 'tich_hop',
+        isConnected: c.isConnected,
+        servicesConfig: c.servicesConfig,
+      },
+    });
+  }
+
+  await prisma.shippingProvider.upsert({
+    where: { code: 'PARTNER0001' },
+    update: {},
+    create: {
+      code: 'PARTNER0001',
+      name: 'Đối tác giao hàng nội thành',
+      type: 'tu_lien_he',
+      phone: '0901234567',
+    },
+  });
+}
+
 async function seedRbac() {
   for (const p of PERMISSION_CATALOG) {
     await prisma.permission.upsert({
@@ -45,23 +128,38 @@ async function seedRbac() {
 async function main() {
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const branch = await prisma.branch.upsert({
+  // Sapo gộp chi nhánh và kho làm một `Location`, nên seed chỉ tạo location.
+  // Trên DB thật, 16 location đã được migration seed sẵn từ /admin/locations.json;
+  // phần dưới chỉ để DB trống (dev/test) vẫn chạy được.
+  const locationSeed = {
+    phone: '0243 123 4567',
+    province: 'Hà Nội',
+    district: 'Quận Cầu Giấy',
+    ward: 'Phường Dịch Vọng',
+    address1: 'Số 1 Trần Thái Tông',
+    country: 'Vietnam',
+    countryCode: 'VN',
+  };
+  const branch = await prisma.location.upsert({
     where: { code: 'CN-HN' },
-    update: {},
-    create: { code: 'CN-HN', name: 'Chi nhánh Hà Nội' },
+    update: locationSeed,
+    create: {
+      code: 'CN-HN',
+      name: 'Chi nhánh Hà Nội',
+      defaultLocation: true,
+      ...locationSeed,
+    },
   });
 
-  const warehouses = [];
-  for (let i = 1; i <= 16; i++) {
+  await seedShippingProviders();
+
+  const warehouses = [branch];
+  for (let i = 1; i <= 3; i++) {
     const code = `WH${String(i).padStart(2, '0')}`;
-    const wh = await prisma.warehouse.upsert({
+    const wh = await prisma.location.upsert({
       where: { code },
       update: {},
-      create: {
-        code,
-        name: `Kho ${i}`,
-        branchId: branch.id,
-      },
+      create: { code, name: `Kho ${i}`, country: 'Vietnam', countryCode: 'VN' },
     });
     warehouses.push(wh);
   }
@@ -72,7 +170,7 @@ async function main() {
     create: {
       email: 'admin@local.dev',
       passwordHash,
-      name: 'Admin',
+      firstName: 'Admin',
       roles: [UserRole.admin, UserRole.warehouse_staff, UserRole.purchasing, UserRole.store_manager],
     },
   });
@@ -83,7 +181,7 @@ async function main() {
     create: {
       email: 'sales@local.dev',
       passwordHash,
-      name: 'Nhân viên bán hàng',
+      firstName: 'Nhân viên bán hàng',
       roles: [UserRole.sales, UserRole.store_manager],
     },
   });
@@ -94,31 +192,31 @@ async function main() {
     create: {
       email: 'kho@local.dev',
       passwordHash,
-      name: 'Nhân viên kho',
+      firstName: 'Nhân viên kho',
       roles: [UserRole.warehouse_staff],
     },
   });
 
   // Gán staff 4 kho đầu
   for (const wh of warehouses.slice(0, 4)) {
-    await prisma.userWarehouse.upsert({
+    await prisma.userLocation.upsert({
       where: {
-        userId_warehouseId: { userId: staff.id, warehouseId: wh.id },
+        userId_locationId: { userId: staff.id, locationId: wh.id },
       },
       update: {},
-      create: { userId: staff.id, warehouseId: wh.id },
+      create: { userId: staff.id, locationId: wh.id },
     });
   }
 
   // RBAC động: seed permissions + roles, gán role theo kho cho user hiện có
   const roleByCode = await seedRbac();
-  const assignRole = async (userId: bigint, warehouseId: bigint, code: string) => {
+  const assignRole = async (userId: bigint, locationId: bigint, code: string) => {
     const roleId = roleByCode.get(code);
     if (!roleId) return;
-    await prisma.userWarehouseRole.upsert({
-      where: { userId_warehouseId: { userId, warehouseId } },
+    await prisma.userLocationRole.upsert({
+      where: { userId_locationId: { userId, locationId } },
       update: { roleId },
-      create: { userId, warehouseId, roleId },
+      create: { userId, locationId, roleId },
     });
   };
   for (const wh of warehouses) {
@@ -130,9 +228,9 @@ async function main() {
   }
 
   const product = await prisma.product.upsert({
-    where: { slug: 'sp-stub-1' },
+    where: { alias: 'sp-stub-1' },
     update: {},
-    create: { name: 'Sản phẩm stub 1', slug: 'sp-stub-1' },
+    create: { name: 'Sản phẩm stub 1', alias: 'sp-stub-1' },
   });
 
   const variants = [];
@@ -152,8 +250,8 @@ async function main() {
   }
 
   console.log('Seed OK:', {
-    branch: branch.code,
-    warehouses: warehouses.length,
+    location: branch.code,
+    locations: warehouses.length,
     users: [admin.email, staff.email, sales.email],
     variants: variants.map((v) => v.sku),
   });
@@ -212,23 +310,23 @@ async function main() {
     create: {
       code: 'CTL-DEFAULT',
       name: 'Bảng giá mặc định chi nhánh',
-      branchId: branch.id,
+      locationId: branch.id,
     },
   });
 
   const rootCategory = await prisma.category.upsert({
-    where: { slug: 'tat-ca' },
+    where: { alias: 'tat-ca' },
     update: {},
     create: {
       name: 'Tất cả',
-      slug: 'tat-ca',
+      alias: 'tat-ca',
       conditionType: 'manual',
     },
   });
 
   console.log('Seed OK extras:', {
     customerGroups: customerGroups.length,
-    rootCategory: rootCategory.slug,
+    rootCategory: rootCategory.alias,
   });
 
   let customer = await prisma.customer.findFirst({
@@ -250,12 +348,12 @@ async function main() {
   const v1 = variants[0];
   await prisma.inventoryLevel.upsert({
     where: {
-      variantId_warehouseId: { variantId: v1.id, warehouseId: wh1.id },
+      variantId_locationId: { variantId: v1.id, locationId: wh1.id },
     },
     update: { onHand: 10, available: 10 },
     create: {
       variantId: v1.id,
-      warehouseId: wh1.id,
+      locationId: wh1.id,
       onHand: 10,
       available: 10,
       price: v1.price,
@@ -266,7 +364,7 @@ async function main() {
   await prisma.inventoryMovement.create({
     data: {
       variantId: v1.id,
-      warehouseId: wh1.id,
+      locationId: wh1.id,
       bucket: 'on_hand',
       change: 10,
       type: 'receipt',
@@ -336,13 +434,13 @@ async function main() {
         {
           external_id: 'demo-fb-queue-1',
           source: 'facebook',
-          branch_id: branch.id.toString(),
+          location_id: branch.id.toString(),
           customer_phone: '0909999888',
           customer_name: 'Khách Facebook queue',
           items: [
             {
               variant_id: v1.id.toString(),
-              warehouse_id: wh1.id.toString(),
+              location_id: wh1.id.toString(),
               quantity: 1,
               price: Number(v1.price),
             },

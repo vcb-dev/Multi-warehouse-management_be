@@ -13,7 +13,7 @@ import {
 const SALES_CHANNELS = ['shopee', 'tiktok', 'facebook', 'pos', 'website'] as const;
 
 export type AutoConditions = {
-  brand?: string;
+  vendor?: string;
   product_type?: string;
   tags?: string[];
 };
@@ -21,7 +21,7 @@ export type AutoConditions = {
 export class AutoConditionsDto implements AutoConditions {
   @IsOptional()
   @IsString()
-  brand?: string;
+  vendor?: string;
 
   @IsOptional()
   @IsString()

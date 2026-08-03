@@ -9,6 +9,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  hasLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import {
@@ -18,6 +23,9 @@ import {
 } from './stock-transfer.dto';
 import { serializeStockTransfer } from './stock-transfer.serializer';
 
+/** Khớp @RequirePermission của các endpoint đọc trong stock-transfer.controller. */
+const READ_PERMISSIONS = ['inventory:transfer', 'inventory:view'];
+
 const stnInclude = {
   items: {
     include: {
@@ -26,9 +34,9 @@ const stnInclude = {
       },
     },
   },
-  fromWarehouse: { select: { code: true, name: true } },
-  toWarehouse: { select: { code: true, name: true } },
-  createdBy: { select: { name: true, email: true } },
+  fromLocation: { select: { code: true, name: true } },
+  toLocation: { select: { code: true, name: true } },
+  createdBy: { select: { firstName: true, lastName: true, email: true } },
 } satisfies Prisma.StockTransferInclude;
 
 type StnWithItems = Prisma.StockTransferGetPayload<{
@@ -51,10 +59,11 @@ export class StockTransferService {
       where.status = query.status as StockTransferStatus;
     }
 
-    where.OR = [
-      { fromWarehouseId: { in: user.warehouseIds } },
-      { toWarehouseId: { in: user.warehouseIds } },
-    ];
+    // Phiếu chuyển liên quan hai kho — thấy được nếu có quyền ở kho đi HOẶC kho đến.
+    const readable = locationScopeFilter(user, READ_PERMISSIONS);
+    if (readable) {
+      where.OR = [{ fromLocationId: readable }, { toLocationId: readable }];
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.stockTransfer.findMany({
@@ -75,13 +84,43 @@ export class StockTransferService {
     };
   }
 
-  async findOne(id: bigint) {
+  async findOne(id: bigint, user: AuthUser) {
     const stn = await this.prisma.stockTransfer.findUnique({
       where: { id },
       include: stnInclude,
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
+    this.assertReadable(user, stn);
     return { data: serializeStockTransfer(stn) };
+  }
+
+  /** Đọc được phiếu nếu có quyền ở kho đi HOẶC kho đến. */
+  private assertReadable(
+    user: AuthUser,
+    stn: { fromLocationId: bigint; toLocationId: bigint },
+  ) {
+    const readable = READ_PERMISSIONS.some(
+      (perm) =>
+        hasLocationPermission(user, perm, stn.fromLocationId.toString()) ||
+        hasLocationPermission(user, perm, stn.toLocationId.toString()),
+    );
+    if (!readable) {
+      throw new BusinessException(
+        'FORBIDDEN_SCOPE',
+        'Bạn không có quyền xem phiếu chuyển của kho này.',
+        403,
+      );
+    }
+  }
+
+  /** Chốt quyền theo kho của phiếu cho endpoint không cần nạp cả phiếu. */
+  async assertTransferReadable(id: bigint, user: AuthUser) {
+    const stn = await this.prisma.stockTransfer.findUnique({
+      where: { id },
+      select: { fromLocationId: true, toLocationId: true },
+    });
+    if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
+    this.assertReadable(user, stn);
   }
 
   async create(dto: CreateStockTransferDto, user: AuthUser) {
@@ -93,8 +132,8 @@ export class StockTransferService {
       );
     }
 
-    const fromId = BigInt(dto.from_warehouse_id);
-    const toId = BigInt(dto.to_warehouse_id);
+    const fromId = BigInt(dto.from_location_id);
+    const toId = BigInt(dto.to_location_id);
 
     if (fromId === toId) {
       throw new BusinessException(
@@ -104,7 +143,7 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, fromId);
+    assertLocationPermission(user, 'inventory:transfer', fromId);
 
     await this.validateWarehouses(fromId, toId);
 
@@ -115,8 +154,8 @@ export class StockTransferService {
       const transfer = await tx.stockTransfer.create({
         data: {
           code,
-          fromWarehouseId: fromId,
-          toWarehouseId: toId,
+          fromLocationId: fromId,
+          toLocationId: toId,
           status: StockTransferStatus.nhap,
           note: dto.note?.trim() || null,
           totalQuantity,
@@ -168,14 +207,14 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, stn.fromWarehouseId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
-    const fromId = dto.from_warehouse_id
-      ? BigInt(dto.from_warehouse_id)
-      : stn.fromWarehouseId;
-    const toId = dto.to_warehouse_id
-      ? BigInt(dto.to_warehouse_id)
-      : stn.toWarehouseId;
+    const fromId = dto.from_location_id
+      ? BigInt(dto.from_location_id)
+      : stn.fromLocationId;
+    const toId = dto.to_location_id
+      ? BigInt(dto.to_location_id)
+      : stn.toLocationId;
 
     if (fromId === toId) {
       throw new BusinessException(
@@ -184,17 +223,17 @@ export class StockTransferService {
         422,
       );
     }
-    if (dto.from_warehouse_id) {
-      this.inventory.assertWarehouseAccess(user, fromId);
+    if (dto.from_location_id) {
+      assertLocationPermission(user, 'inventory:transfer', fromId);
     }
     await this.validateWarehouses(fromId, toId);
 
     const data: Prisma.StockTransferUpdateInput = {};
-    if (dto.from_warehouse_id) {
-      data.fromWarehouse = { connect: { id: fromId } };
+    if (dto.from_location_id) {
+      data.fromLocation = { connect: { id: fromId } };
     }
-    if (dto.to_warehouse_id) {
-      data.toWarehouse = { connect: { id: toId } };
+    if (dto.to_location_id) {
+      data.toLocation = { connect: { id: toId } };
     }
     if (dto.note !== undefined) {
       data.note = dto.note.trim() || null;
@@ -240,7 +279,7 @@ export class StockTransferService {
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
 
-    this.inventory.assertWarehouseAccess(user, stn.fromWarehouseId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
     switch (action) {
       case 'submit':
@@ -266,14 +305,14 @@ export class StockTransferService {
       );
     }
 
-    await this.validateAvailability(stn.items, stn.fromWarehouseId);
+    await this.validateAvailability(stn.items, stn.fromLocationId);
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of sortForLocking(stn.items)) {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
-            warehouseId: stn.fromWarehouseId,
+            locationId: stn.fromLocationId,
             bucket: InventoryBucket.committed,
             change: item.quantity,
             type: MovementType.transfer_reserve,
@@ -301,7 +340,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(stn.id);
+    return this.findOne(stn.id, user);
   }
 
   /** Chờ chuyển → Đang chuyển: xuất kho thật, giải phóng chỗ giữ */
@@ -320,7 +359,7 @@ export class StockTransferService {
           [
             {
               variantId: item.variantId,
-              warehouseId: stn.fromWarehouseId,
+              locationId: stn.fromLocationId,
               bucket: InventoryBucket.committed,
               change: -item.quantity,
               type: MovementType.transfer_release,
@@ -330,7 +369,7 @@ export class StockTransferService {
             },
             {
               variantId: item.variantId,
-              warehouseId: stn.fromWarehouseId,
+              locationId: stn.fromLocationId,
               bucket: InventoryBucket.on_hand,
               change: -item.quantity,
               type: MovementType.transfer_out,
@@ -346,7 +385,7 @@ export class StockTransferService {
         await this.inventory.applyMovement(
           {
             variantId: item.variantId,
-            warehouseId: stn.toWarehouseId,
+            locationId: stn.toLocationId,
             bucket: InventoryBucket.incoming,
             change: item.quantity,
             type: MovementType.incoming_transfer,
@@ -377,7 +416,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(stn.id);
+    return this.findOne(stn.id, user);
   }
 
   async receive(id: bigint, user: AuthUser) {
@@ -395,7 +434,7 @@ export class StockTransferService {
       );
     }
 
-    this.inventory.assertWarehouseAccess(user, stn.toWarehouseId);
+    assertLocationPermission(user, 'inventory:transfer', stn.toLocationId);
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of sortForLocking(stn.items)) {
@@ -403,7 +442,7 @@ export class StockTransferService {
           [
             {
               variantId: item.variantId,
-              warehouseId: stn.toWarehouseId,
+              locationId: stn.toLocationId,
               bucket: InventoryBucket.incoming,
               change: -item.quantity,
               type: MovementType.incoming_receipt,
@@ -413,7 +452,7 @@ export class StockTransferService {
             },
             {
               variantId: item.variantId,
-              warehouseId: stn.toWarehouseId,
+              locationId: stn.toLocationId,
               bucket: InventoryBucket.on_hand,
               change: item.quantity,
               type: MovementType.transfer_in,
@@ -446,7 +485,7 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
   async cancel(id: bigint, user: AuthUser) {
@@ -467,7 +506,7 @@ export class StockTransferService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã hủy', 409);
     }
 
-    this.inventory.assertWarehouseAccess(user, stn.fromWarehouseId);
+    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
 
     // Phiếu nháp chưa từng đụng tồn kho — hủy = xóa hẳn, giống quy ước hủy
     // PO/REI ở trạng thái nháp (không giữ lại bản ghi "đã hủy" vô nghĩa).
@@ -495,7 +534,7 @@ export class StockTransferService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: stn.fromWarehouseId,
+              locationId: stn.fromLocationId,
               bucket: InventoryBucket.committed,
               change: -item.quantity,
               type: MovementType.transfer_release,
@@ -513,7 +552,7 @@ export class StockTransferService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: stn.fromWarehouseId,
+              locationId: stn.fromLocationId,
               bucket: InventoryBucket.on_hand,
               change: item.quantity,
               type: MovementType.transfer_in,
@@ -527,7 +566,7 @@ export class StockTransferService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: stn.toWarehouseId,
+              locationId: stn.toLocationId,
               bucket: InventoryBucket.incoming,
               change: -item.quantity,
               type: MovementType.incoming_cancel,
@@ -556,15 +595,15 @@ export class StockTransferService {
       });
     });
 
-    return this.findOne(id);
+    return this.findOne(id, user);
   }
 
   private async validateWarehouses(fromId: bigint, toId: bigint) {
     const [from, to] = await Promise.all([
-      this.prisma.warehouse.findUnique({ where: { id: fromId } }),
-      this.prisma.warehouse.findUnique({ where: { id: toId } }),
+      this.prisma.location.findUnique({ where: { id: fromId } }),
+      this.prisma.location.findUnique({ where: { id: toId } }),
     ]);
-    if (!from?.isActive || !to?.isActive) {
+    if (from?.status !== 'active' || to?.status !== 'active') {
       throw new BusinessException('VALIDATION_ERROR', 'Kho không hợp lệ', 422);
     }
   }
@@ -572,7 +611,7 @@ export class StockTransferService {
   /** Chạy ở bước submit (giữ chỗ tồn kho), không phải lúc tạo phiếu nháp */
   private async validateAvailability(
     items: { variantId: bigint; quantity: number }[],
-    fromWarehouseId: bigint,
+    fromLocationId: bigint,
   ) {
     const qtyByVariant = new Map<string, number>();
     for (const item of items) {
@@ -583,9 +622,9 @@ export class StockTransferService {
     for (const [variantId, qty] of qtyByVariant) {
       const level = await this.prisma.inventoryLevel.findUnique({
         where: {
-          variantId_warehouseId: {
+          variantId_locationId: {
             variantId: BigInt(variantId),
-            warehouseId: fromWarehouseId,
+            locationId: fromLocationId,
           },
         },
       });

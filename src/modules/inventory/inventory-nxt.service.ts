@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 export type NxtRowInput = {
   variantId: bigint;
-  warehouseId: bigint;
+  locationId: bigint;
   productId: bigint;
   onHand: number;
   committed: number;
@@ -60,7 +60,7 @@ const EMPTY_EXTRAS: Omit<
 
 type MovementAgg = {
   variant_id: bigint;
-  warehouse_id: bigint;
+  location_id: bigint;
   sl_nhap: number;
   sl_xuat: number;
   ban_15: number;
@@ -143,7 +143,7 @@ export class InventoryNxtService {
     const d90 = new Date(now - 90 * 86400_000);
 
     const pairs = Prisma.join(
-      rows.map((r) => Prisma.sql`(${r.variantId}, ${r.warehouseId})`),
+      rows.map((r) => Prisma.sql`(${r.variantId}, ${r.locationId})`),
     );
     const variantIds = [...new Set(rows.map((r) => r.variantId))];
     const productIds = [...new Set(rows.map((r) => r.productId))];
@@ -152,7 +152,7 @@ export class InventoryNxtService {
       this.prisma.$queryRaw<MovementAgg[]>`
         SELECT
           variant_id,
-          warehouse_id,
+          location_id,
           COALESCE(SUM(change) FILTER (
             WHERE bucket = 'on_hand' AND created_at >= ${periodFrom} AND change > 0
           ), 0)::int AS sl_nhap,
@@ -176,8 +176,8 @@ export class InventoryNxtService {
             WHERE bucket = 'incoming' AND type = 'incoming_transfer'
           ), 0)::int AS ck_dang_ve
         FROM inventory_movements
-        WHERE (variant_id, warehouse_id) IN (${pairs})
-        GROUP BY variant_id, warehouse_id
+        WHERE (variant_id, location_id) IN (${pairs})
+        GROUP BY variant_id, location_id
       `,
       this.prisma.$queryRaw<{ variant_id: bigint; name: string }[]>`
         SELECT DISTINCT gri.variant_id, s.name
@@ -198,7 +198,7 @@ export class InventoryNxtService {
     ]);
 
     const aggByKey = new Map(
-      aggs.map((a) => [`${a.variant_id}:${a.warehouse_id}`, a]),
+      aggs.map((a) => [`${a.variant_id}:${a.location_id}`, a]),
     );
 
     const nccByVariant = new Map<string, string[]>();
@@ -226,7 +226,7 @@ export class InventoryNxtService {
     }
 
     for (const row of rows) {
-      const key = `${row.variantId}:${row.warehouseId}`;
+      const key = `${row.variantId}:${row.locationId}`;
       const agg = aggByKey.get(key);
 
       const slNhap = agg?.sl_nhap ?? 0;

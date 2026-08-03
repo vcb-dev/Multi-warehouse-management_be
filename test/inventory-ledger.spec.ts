@@ -21,7 +21,7 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
   let service: InventoryService;
   let prisma: PrismaService;
   let variantId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -31,14 +31,14 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
     service = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const branch = await prisma.branch.findFirst();
-    const warehouse = await prisma.warehouse.findFirst();
+    const branch = await prisma.location.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const variant = await prisma.productVariant.findFirst();
     if (!branch || !warehouse || !variant) {
       throw new Error('Run prisma db seed before integration tests');
     }
     variantId = variant.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
   });
 
   afterAll(async () => {
@@ -46,7 +46,7 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
   });
 
   it('INV-2a: SUM(on_hand movements) = on_hand after receipt + order_reserve', async () => {
-    const key = { variantId, warehouseId };
+    const key = { variantId, locationId };
 
     await prisma.inventoryMovement.deleteMany({ where: key });
     await prisma.inventoryLevel.deleteMany({ where: key });
@@ -70,7 +70,7 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
     });
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: key },
+      where: { variantId_locationId: key },
     });
 
     const onHandSum = await prisma.inventoryMovement.aggregate({
@@ -86,12 +86,12 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
     expect(committedSum._sum.change).toBe(level.committed);
     expect(level.available).toBe(level.onHand - level.committed);
 
-    const recon = await service.reconcile(variantId, warehouseId);
+    const recon = await service.reconcile(variantId, locationId);
     expect(recon.ok).toBe(true);
   });
 
   it('FR-003c: packing_start + packing_cancel dual-bucket via applyMovements', async () => {
-    const key = { variantId, warehouseId };
+    const key = { variantId, locationId };
 
     await prisma.inventoryMovement.deleteMany({ where: key });
     await prisma.inventoryLevel.deleteMany({ where: key });
@@ -125,7 +125,7 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
       },
       {
         ...key,
-        bucket: InventoryBucket.packing,
+        bucket: InventoryBucket.packed,
         change: 2,
         type: MovementType.packing_start,
         referenceType: 'pack',
@@ -134,16 +134,16 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
     ]);
 
     let level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: key },
+      where: { variantId_locationId: key },
     });
     expect(level.committed).toBe(2);
-    expect(level.packing).toBe(2);
+    expect(level.packed).toBe(2);
     expect(level.available).toBe(6);
 
     await service.applyMovements([
       {
         ...key,
-        bucket: InventoryBucket.packing,
+        bucket: InventoryBucket.packed,
         change: -2,
         type: MovementType.packing_cancel,
         referenceType: 'pack',
@@ -160,10 +160,10 @@ describeIfDb('INV-2 ledger reconciliation (integration)', () => {
     ]);
 
     level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: key },
+      where: { variantId_locationId: key },
     });
     expect(level.committed).toBe(4);
-    expect(level.packing).toBe(0);
+    expect(level.packed).toBe(0);
   });
 });
 
@@ -180,23 +180,23 @@ describe('INV-2 bucket sums (unit)', () => {
   });
 
   it('FR-003c: packing_start moves committed → packing atomically', () => {
-    const buckets = { on_hand: 10, committed: 5, packing: 0, unavailable: 0 };
+    const buckets = { on_hand: 10, committed: 5, packed: 0, unavailable: 0 };
     const qty = 3;
     buckets.committed -= qty;
-    buckets.packing += qty;
+    buckets.packed += qty;
     expect(buckets.committed).toBe(2);
-    expect(buckets.packing).toBe(3);
+    expect(buckets.packed).toBe(3);
     expect(buckets.on_hand).toBe(10);
-    const available = buckets.on_hand - buckets.committed - buckets.packing - buckets.unavailable;
+    const available = buckets.on_hand - buckets.committed - buckets.packed - buckets.unavailable;
     expect(available).toBe(5);
   });
 
   it('FR-003c: packing_cancel reverses packing → committed', () => {
-    const buckets = { on_hand: 10, committed: 2, packing: 3, unavailable: 0 };
+    const buckets = { on_hand: 10, committed: 2, packed: 3, unavailable: 0 };
     const qty = 3;
     buckets.committed += qty;
-    buckets.packing -= qty;
+    buckets.packed -= qty;
     expect(buckets.committed).toBe(5);
-    expect(buckets.packing).toBe(0);
+    expect(buckets.packed).toBe(0);
   });
 });

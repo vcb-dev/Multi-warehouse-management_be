@@ -7,6 +7,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -16,8 +17,7 @@ const describeIfDb =
 describeIfDb('order create reserves stock', () => {
   let orders: OrderService;
   let prisma: PrismaService;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
   let userId: bigint;
 
@@ -27,18 +27,16 @@ describeIfDb('order create reserves stock', () => {
     }).compile();
     orders = module.get(OrderService);
     prisma = module.get(PrismaService);
-    const branch = await prisma.branch.findFirstOrThrow();
-    const warehouse = await prisma.warehouse.findFirstOrThrow();
+    const warehouse = await prisma.location.findFirstOrThrow();
     const variant = await prisma.productVariant.findFirstOrThrow();
     const user = await prisma.user.findFirstOrThrow();
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     variantId = variant.id;
     userId = user.id;
     await prisma.inventoryLevel.upsert({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
       update: { onHand: 10, available: 10, committed: 0 },
-      create: { variantId, warehouseId, onHand: 10, available: 10, price: 0, cost: 0 },
+      create: { variantId, locationId, onHand: 10, available: 10, price: 0, cost: 0 },
     });
   });
 
@@ -47,13 +45,13 @@ describeIfDb('order create reserves stock', () => {
   it('committed tăng khi tạo đơn', async () => {
     await orders.create(
       {
-        branch_id: branchId.toString(),
-        items: [{ variant_id: variantId.toString(), warehouse_id: warehouseId.toString(), quantity: 1, price: 1 }],
+        location_id: locationId.toString(),
+        items: [{ variant_id: variantId.toString(), location_id: locationId.toString(), quantity: 1, price: 1 }],
       },
-      { userId, email: 't', roles: ['admin'], warehouseIds: [warehouseId] },
+      adminAuth({ userId, locationIds: [locationId] }),
     );
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     expect(level.committed).toBeGreaterThanOrEqual(1);
   });

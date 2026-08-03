@@ -7,12 +7,17 @@ import { OrderRepository } from './order.repository';
 import { OrderService } from './order.service';
 import { OrdersController } from './orders.controller';
 import { CustomersController } from './customers.controller';
+import { CustomerGroupsController } from './customer-groups.controller';
+import { CustomerService } from './customer.service';
+import { CustomerGroupService } from './customer-group.service';
 import { OrderReconcileService } from './reconcile.service';
 
 @Module({
   imports: [InventoryModule, PricingModule, ActivityLogModule],
-  controllers: [OrdersController, CustomersController],
+  controllers: [OrdersController, CustomersController, CustomerGroupsController],
   providers: [
+    CustomerService,
+    CustomerGroupService,
     OrderRepository,
     OrderService,
     OrderReconcileService,

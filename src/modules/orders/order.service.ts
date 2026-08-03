@@ -3,12 +3,16 @@ import {
   CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
-  OrderSource,
+  OrderFinancialStatus,
+  OrderFulfillmentStatus,
   OrderStatus,
-  PaymentStatus,
   Prisma,
+  RestockType,
 } from '@prisma/client';
-import { assertAnyWarehouseAccess } from '../../common/auth/access';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
 import {
@@ -21,6 +25,7 @@ import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from './customer-debt.service';
 import { generateOrderCode } from './order-code';
+import { recomputeOrderRefundStatuses } from './order-refund-status';
 import {
   calcLineTotal,
   calcOrderTotals,
@@ -34,18 +39,27 @@ import {
   PayOrderDto,
   UpdateOrderDto,
 } from './order.dto';
-import { OrderRepository, orderInclude, OrderWithRelations } from './order.repository';
-import { serializeOrderDetail, serializeOrderListItem } from './order.serializer';
+import {
+  OrderRepository,
+  orderInclude,
+  OrderWithRelations,
+} from './order.repository';
+import {
+  serializeOrderDetail,
+  serializeOrderListItem,
+} from './order.serializer';
 
 type ResolvedItem = {
   variantId: bigint;
-  warehouseId: bigint;
+  locationId: bigint;
   productName: string;
   sku: string;
   quantity: number;
   price: number;
   discount: number;
   total: number;
+  /// Giá vốn chốt tại thời điểm bán — cho báo cáo lợi nhuận không trôi khi giá vốn đổi
+  costPrice: Prisma.Decimal;
 };
 
 @Injectable()
@@ -63,29 +77,58 @@ export class OrderService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.OrderWhereInput = {};
 
-    where.items = { some: { warehouseId: { in: user.warehouseIds } } };
+    // Location nằm ở cấp đơn (theo Sapo), không còn theo từng dòng hàng.
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'order:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'order:view');
+    }
 
-    if (query.status) where.status = query.status as OrderStatus;
-    if (query.branch_id) where.branchId = BigInt(query.branch_id);
+    const stockFilter =
+      query.stock_status === 'thieu_hang' || query.stock_status === 'du_hang'
+        ? query.stock_status
+        : undefined;
+
+    if (stockFilter) {
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ. Không thể chỉ lọc
+      // status='open': dữ liệu Sapo thật có 75.125 đơn 'open' nhưng 73.402 trong
+      // số đó đã giao xong (Sapo không đóng đơn sau khi giao) — nạp hết sẽ vượt
+      // statement_timeout. Thêm fulfillment_status IS NULL để về đúng ~1.7k đơn
+      // thật sự đang chờ, khôi phục giả định "tập này luôn nhỏ" bên dưới.
+      where.status = OrderStatus.open;
+      where.fulfillmentStatus = null;
+    } else if (query.status === 'closed') {
+      // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
+      // status='closed' — khớp guard ở order-return.service.ts, vì đa số
+      // đơn đã giao thật (dữ liệu Sapo) vẫn ở status='open'.
+      where.OR = [
+        { status: OrderStatus.closed },
+        { fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+      ];
+    } else if (query.status) {
+      where.status = query.status as OrderStatus;
+    }
     if (query.sources) {
       const list = query.sources
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      if (list.length) where.source = { in: list as OrderSource[] };
+      if (list.length) where.sourceName = { in: list };
     } else if (query.source) {
-      where.source = query.source as OrderSource;
+      where.sourceName = query.source;
     }
     if (query.assigned_to) {
       where.assignedToId = BigInt(query.assigned_to);
     }
     if (query.from || query.to) {
-      where.orderedAt = {};
+      where.createdOn = {};
       if (query.from) {
-        where.orderedAt.gte = new Date(query.from);
+        where.createdOn.gte = new Date(query.from);
       }
       if (query.to) {
-        where.orderedAt.lte = new Date(query.to);
+        where.createdOn.lte = new Date(query.to);
       }
     }
     if (query.tags?.trim()) {
@@ -96,48 +139,142 @@ export class OrderService {
       where.id = { in: ids };
     }
 
+    const listInclude = {
+      customer: true,
+      location: true,
+      createdBy: true,
+      items: {
+        select: { sku: true, variantId: true, quantity: true },
+      },
+      fulfillments: {
+        where: { closedAt: null },
+        take: 1,
+        select: {
+          packedStatus: true,
+          shipmentStatus: true,
+          provider: { select: { name: true } },
+        },
+      },
+    } as const;
+
+    async function computeStockReady(
+      repo: OrderRepository,
+      // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
+      orders: {
+        id: bigint;
+        locationId: bigint;
+        items: { variantId: bigint; quantity: number }[];
+      }[],
+    ) {
+      const pairs = new Map<
+        string,
+        { variantId: bigint; locationId: bigint }
+      >();
+      for (const row of orders) {
+        for (const item of row.items) {
+          pairs.set(`${item.variantId}:${row.locationId}`, {
+            variantId: item.variantId,
+            locationId: row.locationId,
+          });
+        }
+      }
+      const levels = pairs.size
+        ? await repo.client.inventoryLevel.findMany({
+            where: { OR: Array.from(pairs.values()) },
+            select: { variantId: true, locationId: true, onHand: true },
+          })
+        : [];
+      const onHandMap = new Map(
+        levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
+      );
+      return new Map<bigint, boolean>(
+        orders.map((row) => [
+          row.id,
+          row.items.every(
+            (i) =>
+              (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
+              i.quantity,
+          ),
+        ]),
+      );
+    }
+
+    if (stockFilter) {
+      // Không có cột lưu sẵn "đủ/thiếu hàng" nên phải lấy hết đơn đang chờ
+      // xử lý khớp các bộ lọc khác, tính stock_ready từng đơn rồi mới lọc +
+      // phân trang bằng JS — chấp nhận được vì tập đơn ordered/processing
+      // luôn nhỏ (đơn đã giao/hủy không nằm trong tập này).
+      const all = await this.repo.client.order.findMany({
+        where,
+        orderBy: { createdOn: 'desc' },
+        include: listInclude,
+      });
+      const stockReadyMap = await computeStockReady(this.repo, all);
+      const wantReady = stockFilter === 'du_hang';
+      const filtered = all.filter(
+        (row) => (stockReadyMap.get(row.id) ?? true) === wantReady,
+      );
+      const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+      return {
+        data: pageRows.map((row) =>
+          serializeOrderListItem(row, stockReadyMap.get(row.id) ?? true),
+        ),
+        total: filtered.length,
+        page,
+        page_size: pageSize,
+      };
+    }
+
     const [rows, total] = await Promise.all([
       this.repo.client.order.findMany({
         where,
-        orderBy: { orderedAt: 'desc' },
+        orderBy: { createdOn: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          customer: true,
-          branch: true,
-          createdBy: true,
-          items: { select: { sku: true }, take: 8 },
-        },
+        include: listInclude,
       }),
       this.repo.count(where),
     ]);
 
+    const stockReadyMap = await computeStockReady(this.repo, rows);
+
     return {
-      data: rows.map(serializeOrderListItem),
+      data: rows.map((row) =>
+        serializeOrderListItem(row, stockReadyMap.get(row.id) ?? true),
+      ),
       total,
       page,
       page_size: pageSize,
     };
   }
 
+  /**
+   * Chốt quyền theo kho của đơn cho các endpoint không cần nạp cả đơn
+   * (vd: lịch sử thao tác).
+   */
+  async assertOrderPermission(id: bigint, user: AuthUser, permission: string) {
+    const order = await this.repo.client.order.findUnique({
+      where: { id },
+      select: { locationId: true },
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    assertLocationPermission(user, permission, order.locationId);
+  }
+
   async findOne(id: bigint, user?: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (user) {
-      assertAnyWarehouseAccess(
-        user,
-        order.items.map((i) => i.warehouseId),
-      );
+      assertLocationPermission(user, 'order:view', order.locationId);
     }
 
     const detail = serializeOrderDetail(order);
     const [levels, customerStats] = await Promise.all([
       this.repo.client.inventoryLevel.findMany({
         where: {
-          OR: order.items.map((i) => ({
-            variantId: i.variantId,
-            warehouseId: i.warehouseId,
-          })),
+          locationId: order.locationId,
+          variantId: { in: order.items.map((i) => i.variantId) },
         },
       }),
       order.customerId
@@ -145,38 +282,48 @@ export class OrderService {
             this.repo.client.order.aggregate({
               where: { customerId: order.customerId },
               _count: { _all: true },
-              _sum: { totalAmount: true },
+              _sum: { totalPrice: true },
             }),
             this.repo.client.order.findFirst({
               where: { customerId: order.customerId },
-              orderBy: { orderedAt: 'desc' },
-              select: { id: true, code: true },
+              orderBy: { createdOn: 'desc' },
+              select: { id: true, name: true },
             }),
           ]).then(([agg, last]) => ({
             total_orders: agg._count._all,
-            total_spent: Number(agg._sum.totalAmount ?? 0),
+            total_spent: Number(agg._sum.totalPrice ?? 0),
             last_order_id: last?.id.toString() ?? null,
-            last_order_code: last?.code ?? null,
+            last_order_code: last?.name ?? null,
           }))
         : Promise.resolve(null),
     ]);
     const availMap = new Map(
-      levels.map((l) => [
-        `${l.variantId}:${l.warehouseId}`,
-        l.available,
-      ]),
+      levels.map((l) => [`${l.variantId}:${l.locationId}`, l.available]),
     );
+    const onHandMap = new Map(
+      levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
+    );
+    const stockShortageItems = detail.items
+      .map((i) => ({
+        sku: i.sku,
+        required: i.quantity,
+        on_hand: onHandMap.get(`${i.variant_id}:${order.locationId}`) ?? 0,
+      }))
+      .filter((i) => i.on_hand < i.required);
 
     return {
       data: {
         ...detail,
+        stock_ready: stockShortageItems.length === 0,
+        stock_shortage_items: stockShortageItems,
         items: detail.items.map((i) => ({
           ...i,
-          available: availMap.get(`${i.variant_id}:${i.warehouse_id}`) ?? 0,
+          available: availMap.get(`${i.variant_id}:${order.locationId}`) ?? 0,
         })),
-        customer: detail.customer && customerStats
-          ? { ...detail.customer, ...customerStats }
-          : detail.customer,
+        customer:
+          detail.customer && customerStats
+            ? { ...detail.customer, ...customerStats }
+            : detail.customer,
       },
     };
   }
@@ -184,46 +331,43 @@ export class OrderService {
   async update(id: bigint, dto: UpdateOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
-    if (order.status !== OrderStatus.ordered) {
+    assertLocationPermission(user, 'order:update', order.locationId);
+    if (order.status !== OrderStatus.open || order.confirmedOn !== null) {
       throw new BusinessException(
         'INVALID_TRANSITION',
-        'Chỉ sửa đơn ở trạng thái ordered',
+        'Chỉ sửa đơn khi chưa xác nhận',
         409,
       );
     }
 
-    const discountTotal =
-      dto.discount_total !== undefined
-        ? dto.discount_total
-        : Number(order.discountTotal);
-    const shippingFee =
-      dto.shipping_fee !== undefined
-        ? dto.shipping_fee
-        : Number(order.shippingFee);
+    const totalDiscounts =
+      dto.total_discounts !== undefined
+        ? dto.total_discounts
+        : Number(order.totalDiscounts);
+    const totalShippingPrice =
+      dto.total_shipping_price !== undefined
+        ? dto.total_shipping_price
+        : Number(order.totalShippingPrice);
 
     const pricedLines: PricedLine[] = order.items.map((i) => ({
       quantity: i.quantity,
       price: Number(i.price),
-      discount: Number(i.discount),
+      discount: Number(i.totalDiscount),
     }));
-    const subtotal = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
+    const subTotalPrice = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
     const taxRate =
       dto.tax_rate !== undefined
         ? dto.tax_rate
-        : deriveTaxRate(subtotal, discountTotal, Number(order.taxTotal));
+        : deriveTaxRate(subTotalPrice, totalDiscounts, Number(order.totalTax));
     const totals = calcOrderTotals(
       pricedLines,
-      discountTotal,
-      shippingFee,
+      totalDiscounts,
+      totalShippingPrice,
       taxRate,
     );
 
-    const paidAmount = Number(order.paidAmount);
-    if (totals.totalAmount < paidAmount) {
+    const totalReceived = Number(order.totalReceived);
+    if (totals.totalPrice < totalReceived) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Giá trị đơn sau sửa nhỏ hơn số tiền khách đã thanh toán',
@@ -232,34 +376,34 @@ export class OrderService {
     }
 
     const data: Prisma.OrderUpdateInput = {
-      discountTotal,
-      shippingFee,
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      totalAmount: totals.totalAmount,
-      totalQuantity: totals.totalQuantity,
-      paymentStatus:
-        paidAmount >= totals.totalAmount
-          ? PaymentStatus.da_thanh_toan
-          : paidAmount > 0
-            ? PaymentStatus.mot_phan
-            : PaymentStatus.chua_thanh_toan,
+      totalDiscounts,
+      totalShippingPrice,
+      subTotalPrice: totals.subTotalPrice,
+      totalTax: totals.totalTax,
+      totalPrice: totals.totalPrice,
+      subtotalLineItemsQuantity: totals.subtotalLineItemsQuantity,
+      financialStatus:
+        totalReceived >= totals.totalPrice
+          ? OrderFinancialStatus.paid
+          : totalReceived > 0
+            ? OrderFinancialStatus.partially_paid
+            : OrderFinancialStatus.pending,
     };
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.tags !== undefined) data.tags = dto.tags;
     if (dto.assigned_to !== undefined) {
       data.assignedTo = { connect: { id: BigInt(dto.assigned_to) } };
     }
-    if (dto.expected_delivery_at !== undefined) {
-      data.expectedDeliveryAt = dto.expected_delivery_at
-        ? new Date(dto.expected_delivery_at)
+    if (dto.expected_delivery_date !== undefined) {
+      data.expectedDeliveryDate = dto.expected_delivery_date
+        ? new Date(dto.expected_delivery_date)
         : null;
     }
     if (dto.shipping_method !== undefined) {
       data.shippingMethod = dto.shipping_method.trim() || null;
     }
 
-    const totalDelta = totals.totalAmount - Number(order.totalAmount);
+    const totalDelta = totals.totalPrice - Number(order.totalPrice);
 
     const updated = await this.repo.client.$transaction(async (tx) => {
       // Sửa đơn làm đổi giá trị → điều chỉnh nợ phải thu theo chênh lệch
@@ -268,9 +412,9 @@ export class OrderService {
           {
             customerId: order.customerId,
             referenceType: CustomerLedgerReferenceType.adjustment,
-            referenceCode: order.code,
+            referenceCode: order.name,
             transactionLabel: 'Sửa đơn hàng',
-            reason: `Cập nhật giá trị đơn ${order.code}`,
+            reason: `Cập nhật giá trị đơn ${order.name}`,
             amount: totalDelta,
             createdById: user.userId,
           },
@@ -290,7 +434,7 @@ export class OrderService {
           action: 'order.update',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.code },
+          metadata: { code: order.name },
         },
       });
 
@@ -304,10 +448,7 @@ export class OrderService {
   async pay(id: bigint, dto: PayOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
-      user,
-      order.items.map((i) => i.warehouseId),
-    );
+    assertLocationPermission(user, 'order:update', order.locationId);
 
     if (order.status === OrderStatus.cancelled) {
       throw new BusinessException(
@@ -316,15 +457,15 @@ export class OrderService {
         409,
       );
     }
-    if (order.paymentStatus === PaymentStatus.da_thanh_toan) {
+    if (order.financialStatus === OrderFinancialStatus.paid) {
       return {
         id: order.id.toString(),
-        payment_status: PaymentStatus.da_thanh_toan,
-        paid_amount: order.paidAmount.toString(),
+        payment_status: OrderFinancialStatus.paid,
+        paid_amount: order.totalReceived.toString(),
       };
     }
 
-    const remaining = Number(order.totalAmount) - Number(order.paidAmount);
+    const remaining = Number(order.totalPrice) - Number(order.totalReceived);
     const payAmount = dto.amount ?? remaining;
 
     if (payAmount <= 0) {
@@ -342,27 +483,31 @@ export class OrderService {
       );
     }
 
-    const newPaidAmount = Number(order.paidAmount) + payAmount;
-    const newStatus =
-      newPaidAmount >= Number(order.totalAmount)
-        ? PaymentStatus.da_thanh_toan
-        : PaymentStatus.mot_phan;
+    const newPaidAmount = Number(order.totalReceived) + payAmount;
+    const reachedPaid = newPaidAmount >= Number(order.totalPrice);
+    const newStatus = reachedPaid
+      ? OrderFinancialStatus.paid
+      : OrderFinancialStatus.partially_paid;
 
     const voucher = await this.repo.client.$transaction(async (tx) => {
       await tx.order.update({
         where: { id },
-        data: { paymentStatus: newStatus, paidAmount: newPaidAmount },
+        data: {
+          financialStatus: newStatus,
+          totalReceived: newPaidAmount,
+          ...(reachedPaid ? { paidOn: new Date() } : {}),
+        },
       });
 
       const result = await this.vouchers.createReceipt(
         {
-          branchId: order.branchId,
+          locationId: order.locationId,
           amount: payAmount,
           createdById: user.userId,
-          sourceDocument: order.code,
+          sourceDocument: order.name,
           referenceType: 'order',
           referenceId: order.id,
-          reason: `Thanh toán đơn ${order.code}`,
+          reason: `Thanh toán đơn ${order.name}`,
         },
         tx,
       );
@@ -372,9 +517,9 @@ export class OrderService {
           {
             customerId: order.customerId,
             referenceType: CustomerLedgerReferenceType.payment,
-            referenceCode: order.code,
+            referenceCode: order.name,
             transactionLabel: 'Thanh toán',
-            reason: `Thanh toán đơn ${order.code}`,
+            reason: `Thanh toán đơn ${order.name}`,
             amount: -payAmount,
             createdById: user.userId,
           },
@@ -388,7 +533,7 @@ export class OrderService {
           action: 'order.pay',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.code, amount: payAmount },
+          metadata: { code: order.name, amount: payAmount },
         },
       });
 
@@ -413,7 +558,7 @@ export class OrderService {
     }
 
     for (const item of dto.items) {
-      if (!item.warehouse_id) {
+      if (!item.location_id) {
         throw new BusinessException(
           'MISSING_WAREHOUSE',
           'Mỗi dòng hàng phải có kho xuất',
@@ -422,21 +567,20 @@ export class OrderService {
       }
     }
 
-    const branchId = BigInt(dto.branch_id);
-    await this.repo.client.branch.findUniqueOrThrow({ where: { id: branchId } });
+    const locationId = BigInt(dto.location_id);
+    assertLocationPermission(user, 'order:create', locationId);
+    await this.repo.client.location.findUniqueOrThrow({
+      where: { id: locationId },
+    });
 
-    if (dto.code) {
-      const dup = await this.repo.findByCode(dto.code.trim());
+    if (dto.name) {
+      const dup = await this.repo.findByCode(dto.name.trim());
       if (dup) {
-        throw new BusinessException(
-          'DUPLICATE_CODE',
-          'Mã đơn đã tồn tại',
-          409,
-        );
+        throw new BusinessException('DUPLICATE_CODE', 'Mã đơn đã tồn tại', 409);
       }
     }
 
-    const resolvedItems = await this.resolveItems(dto, branchId);
+    const resolvedItems = await this.resolveItems(dto);
     const pricedLines: PricedLine[] = resolvedItems.map((i) => ({
       quantity: i.quantity,
       price: i.price,
@@ -444,8 +588,8 @@ export class OrderService {
     }));
     const totals = calcOrderTotals(
       pricedLines,
-      dto.discount_total ?? 0,
-      dto.shipping_fee ?? 0,
+      dto.total_discounts ?? 0,
+      dto.total_shipping_price ?? 0,
       dto.tax_rate ?? 0,
     );
 
@@ -454,8 +598,8 @@ export class OrderService {
       ? BigInt(dto.assigned_to)
       : user.userId;
 
-    const initialPaid = dto.paid_amount ?? 0;
-    if (initialPaid > totals.totalAmount) {
+    const initialPaid = dto.total_received ?? 0;
+    if (initialPaid > totals.totalPrice) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Số tiền thanh toán vượt quá giá trị đơn',
@@ -465,61 +609,103 @@ export class OrderService {
 
     try {
       const order = await this.repo.client.$transaction(async (tx) => {
-        const code =
-          dto.code?.trim() || (await generateOrderCode(tx, branchId));
+        const name =
+          dto.name?.trim() || (await generateOrderCode(tx, locationId));
 
+        const initialPaidReachesFull =
+          initialPaid >= totals.totalPrice && totals.totalPrice > 0;
         const record = await tx.order.create({
           data: {
-            code,
-            branchId,
+            name,
+            locationId,
             customerId,
-            source: dto.source ?? OrderSource.other,
-            status: OrderStatus.ordered,
+            sourceName: dto.source_name?.trim() || null,
+            status: OrderStatus.open,
             assignedToId,
             createdById: user.userId,
             email: dto.email?.trim() || null,
             phone: dto.phone?.trim() || null,
-            subtotal: totals.subtotal,
-            discountTotal: dto.discount_total ?? 0,
-            taxTotal: totals.taxTotal,
-            shippingFee: dto.shipping_fee ?? 0,
+            subTotalPrice: totals.subTotalPrice,
+            totalDiscounts: dto.total_discounts ?? 0,
+            totalTax: totals.totalTax,
+            totalShippingPrice: dto.total_shipping_price ?? 0,
             shippingMethod: dto.shipping_method?.trim() || null,
-            totalAmount: totals.totalAmount,
-            totalQuantity: totals.totalQuantity,
-            paidAmount: initialPaid,
-            paymentStatus:
-              initialPaid >= totals.totalAmount
-                ? PaymentStatus.da_thanh_toan
-                : initialPaid > 0
-                  ? PaymentStatus.mot_phan
-                  : PaymentStatus.chua_thanh_toan,
+            totalPrice: totals.totalPrice,
+            subtotalLineItemsQuantity: totals.subtotalLineItemsQuantity,
+            totalReceived: initialPaid,
+            financialStatus: initialPaidReachesFull
+              ? OrderFinancialStatus.paid
+              : initialPaid > 0
+                ? OrderFinancialStatus.partially_paid
+                : OrderFinancialStatus.pending,
+            ...(initialPaidReachesFull ? { paidOn: new Date() } : {}),
             note: dto.note?.trim() || null,
             tags: dto.tags ?? [],
-            orderedAt: dto.ordered_at ? new Date(dto.ordered_at) : new Date(),
-            expectedDeliveryAt: dto.expected_delivery_at
-              ? new Date(dto.expected_delivery_at)
+            createdOn: dto.created_on ? new Date(dto.created_on) : new Date(),
+            expectedDeliveryDate: dto.expected_delivery_date
+              ? new Date(dto.expected_delivery_date)
               : null,
+            deliveryMode: dto.delivery_mode ?? undefined,
+            shippingName: dto.shipping_address?.name?.trim() || null,
+            shippingFirstName: dto.shipping_address?.first_name?.trim() || null,
+            shippingLastName: dto.shipping_address?.last_name?.trim() || null,
+            shippingPhone: dto.shipping_address?.phone?.trim() || null,
+            shippingAddress1: dto.shipping_address?.address1?.trim() || null,
+            shippingAddress2: dto.shipping_address?.address2?.trim() || null,
+            shippingWard: dto.shipping_address?.ward?.trim() || null,
+            shippingWardCode: dto.shipping_address?.ward_code?.trim() || null,
+            shippingDistrict: dto.shipping_address?.district?.trim() || null,
+            shippingDistrictCode:
+              dto.shipping_address?.district_code?.trim() || null,
+            shippingProvince: dto.shipping_address?.province?.trim() || null,
+            shippingProvinceCode:
+              dto.shipping_address?.province_code?.trim() || null,
+            shippingCity: dto.shipping_address?.city?.trim() || null,
+            shippingCountry: dto.shipping_address?.country?.trim() || null,
+            shippingCountryCode:
+              dto.shipping_address?.country_code?.trim() || null,
+            shippingZip: dto.shipping_address?.zip?.trim() || null,
+            shippingCompany: dto.shipping_address?.company?.trim() || null,
+            deliveryCodAmount: dto.delivery_cod_amount ?? null,
+            deliveryWeightGrams: dto.delivery_weight_grams ?? null,
+            deliveryLengthCm: dto.delivery_length_cm ?? null,
+            deliveryWidthCm: dto.delivery_width_cm ?? null,
+            deliveryHeightCm: dto.delivery_height_cm ?? null,
+            deliveryRequirement: dto.delivery_requirement?.trim() || null,
+            deliveryNote: dto.delivery_note?.trim() || null,
+            invoiceTaxCode: dto.invoice_tax_code?.trim() || null,
+            invoiceCompanyName: dto.invoice_company_name?.trim() || null,
+            invoiceAddress: dto.invoice_address?.trim() || null,
+            invoiceBuyerName: dto.invoice_buyer_name?.trim() || null,
+            invoiceIdCard: dto.invoice_id_card?.trim() || null,
+            invoiceBudgetCode: dto.invoice_budget_code?.trim() || null,
+            invoicePhone: dto.invoice_phone?.trim() || null,
+            invoiceEmail: dto.invoice_email?.trim() || null,
+            invoiceSellToConsumer: dto.invoice_sell_to_consumer ?? false,
+            // location không còn theo từng dòng hàng — order_items không có
+            // cột location_id (bỏ ở Phase 1, Sapo đặt location ở cấp đơn).
             items: {
               create: resolvedItems.map((i) => ({
                 variantId: i.variantId,
-                warehouseId: i.warehouseId,
-                productName: i.productName,
+                name: i.productName,
                 sku: i.sku,
                 quantity: i.quantity,
                 price: i.price,
-                discount: i.discount,
-                total: i.total,
+                totalDiscount: i.discount,
+                discountedTotal: i.total,
+                originalTotal: i.quantity * i.price,
+                costPrice: i.costPrice,
               })),
             },
           },
         });
 
         for (const item of sortForLocking(resolvedItems)) {
-          this.inventory.assertWarehouseAccess(user, item.warehouseId);
+          assertLocationPermission(user, 'order:create', item.locationId);
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId,
               bucket: InventoryBucket.committed,
               change: item.quantity,
               type: MovementType.order_reserve,
@@ -537,10 +723,10 @@ export class OrderService {
             {
               customerId,
               referenceType: CustomerLedgerReferenceType.order,
-              referenceCode: record.code,
+              referenceCode: record.name,
               transactionLabel: 'Bán hàng',
-              reason: `Đơn hàng ${record.code}`,
-              amount: totals.totalAmount,
+              reason: `Đơn hàng ${record.name}`,
+              amount: totals.totalPrice,
               createdById: user.userId,
             },
             tx,
@@ -550,13 +736,13 @@ export class OrderService {
         if (initialPaid > 0) {
           await this.vouchers.createReceipt(
             {
-              branchId,
+              locationId,
               amount: initialPaid,
               createdById: user.userId,
-              sourceDocument: record.code,
+              sourceDocument: record.name,
               referenceType: 'order',
               referenceId: record.id,
-              reason: `Thanh toán đơn ${record.code}`,
+              reason: `Thanh toán đơn ${record.name}`,
             },
             tx,
           );
@@ -565,9 +751,9 @@ export class OrderService {
               {
                 customerId,
                 referenceType: CustomerLedgerReferenceType.payment,
-                referenceCode: record.code,
+                referenceCode: record.name,
                 transactionLabel: 'Thanh toán',
-                reason: `Thanh toán khi tạo đơn ${record.code}`,
+                reason: `Thanh toán khi tạo đơn ${record.name}`,
                 amount: -initialPaid,
                 createdById: user.userId,
               },
@@ -582,17 +768,33 @@ export class OrderService {
             action: 'order.create',
             entityType: 'order',
             entityId: record.id,
-            metadata: { code: record.code, status: record.status },
+            metadata: { code: record.name, status: record.status },
           },
         });
 
         return record;
       });
 
-      return { id: order.id.toString(), code: order.code, status: order.status };
+      return {
+        id: order.id.toString(),
+        code: order.name,
+        status: order.status,
+      };
     } catch (e) {
       if (e instanceof InsufficientStockException) throw e;
       throw e;
+    }
+  }
+
+  /** Đơn có fulfillment đang mở thì trạng thái do vận đơn điều khiển —
+   * chặn các action thủ công ship/complete/cancel. */
+  private async assertNoOpenFulfillment(orderId: bigint, message: string) {
+    const open = await this.repo.client.fulfillment.findFirst({
+      where: { orderId, closedAt: null },
+      select: { id: true },
+    });
+    if (open) {
+      throw new BusinessException('INVALID_TRANSITION', message, 409);
     }
   }
 
@@ -608,7 +810,7 @@ export class OrderService {
         [
           {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: order.locationId,
             bucket: InventoryBucket.on_hand,
             change: -item.quantity,
             type: MovementType.order_ship,
@@ -618,7 +820,7 @@ export class OrderService {
           },
           {
             variantId: item.variantId,
-            warehouseId: item.warehouseId,
+            locationId: order.locationId,
             bucket: InventoryBucket.committed,
             change: -item.quantity,
             type: MovementType.order_ship,
@@ -635,25 +837,41 @@ export class OrderService {
   async transition(id: bigint, dto: OrderTransitionDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertAnyWarehouseAccess(
+    const action = dto.action;
+    // Mỗi hành động chuyển trạng thái đòi một quyền riêng — controller chỉ kiểm
+    // "có MỘT trong ba", nên phải chốt lại đúng quyền tại kho của đơn.
+    const permissionByAction = {
+      cancel: 'order:cancel',
+      ship: 'order:pack',
+      processing: 'order:update',
+      complete: 'order:update',
+    } as const;
+    assertLocationPermission(
       user,
-      order.items.map((i) => i.warehouseId),
+      permissionByAction[action] ?? 'order:update',
+      order.locationId,
     );
 
-    const action = dto.action;
+    // "ordered" cũ = status open & chưa xác nhận; "processing" cũ = status
+    // open & đã xác nhận (confirmedOn khác null). Theo Sapo, status tự nó chỉ
+    // có open/closed/cancelled — mức độ chi tiết hơn nằm ở các mốc thời gian.
+    const isOrderedEquivalent =
+      order.status === OrderStatus.open && order.confirmedOn === null;
+    const isProcessingEquivalent =
+      order.status === OrderStatus.open && order.confirmedOn !== null;
 
     if (action === 'processing') {
-      if (order.status !== OrderStatus.ordered) {
+      if (!isOrderedEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ chuyển processing từ ordered',
+          'Chỉ xác nhận đơn khi đang ở trạng thái chờ xác nhận',
           409,
         );
       }
       await this.repo.client.$transaction(async (tx) => {
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.processing },
+          data: { confirmedOn: new Date() },
         });
         await tx.activityLog.create({
           data: {
@@ -661,25 +879,26 @@ export class OrderService {
             action: 'order.transition_processing',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
-      return { id: id.toString(), status: OrderStatus.processing };
+      return { id: id.toString(), status: OrderStatus.open };
     }
 
     if (action === 'cancel') {
-      if (
-        order.status !== OrderStatus.ordered &&
-        order.status !== OrderStatus.processing
-      ) {
+      if (!isOrderedEquivalent && !isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
           'Không thể hủy đơn ở trạng thái này',
           409,
         );
       }
-      if (order.shippedAt) {
+      await this.assertNoOpenFulfillment(
+        id,
+        'Hủy vận đơn trước khi hủy đơn hàng',
+      );
+      if (order.deliveredOn) {
         throw new BusinessException(
           'INVALID_TRANSITION',
           'Đơn đã xuất hàng, không thể hủy — dùng đổi trả hàng',
@@ -691,7 +910,7 @@ export class OrderService {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
-              warehouseId: item.warehouseId,
+              locationId: order.locationId,
               bucket: InventoryBucket.committed,
               change: -item.quantity,
               type: MovementType.order_release,
@@ -709,26 +928,76 @@ export class OrderService {
             {
               customerId: order.customerId,
               referenceType: CustomerLedgerReferenceType.order,
-              referenceCode: order.code,
+              referenceCode: order.name,
               transactionLabel: 'Hủy đơn',
-              reason: `Hủy đơn hàng ${order.code}`,
-              amount: -Number(order.totalAmount),
+              reason: `Hủy đơn hàng ${order.name}`,
+              amount: -Number(order.totalPrice),
               createdById: user.userId,
             },
             tx,
           );
         }
+
+        // Sapo ghi nhận việc huỷ bằng một bản ghi `refund` không gắn phiếu trả
+        // hàng (`return_id` = null), các dòng mang `restock_type = cancel` —
+        // hàng chưa từng rời kho nên không tính là khách trả về.
+        // `total_refunded` = số khách đã trả: huỷ đơn chưa thu tiền thì bằng 0,
+        // đúng như Sapo (đơn huỷ chưa thu vẫn giữ financial_status cũ).
+        const refundedAmount = Number(order.totalReceived);
+        await tx.orderRefund.create({
+          data: {
+            orderId: id,
+            returnId: null,
+            note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
+            restock: false,
+            totalRefunded: refundedAmount,
+            createdById: user.userId,
+            lineItems: {
+              create: order.items.map((i) => ({
+                orderItemId: i.id,
+                variantId: i.variantId,
+                locationId: order.locationId,
+                productName: i.name,
+                sku: i.sku,
+                variantTitle: i.variantTitle,
+                quantity: i.quantity,
+                price: i.price,
+                subtotal: Number(i.price) * i.quantity,
+                restockType: RestockType.cancel,
+              })),
+            },
+          },
+        });
+
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.cancelled },
+          data: {
+            status: OrderStatus.cancelled,
+            cancelledOn: new Date(),
+            cancelReason: dto.reason?.trim() || null,
+          },
         });
+
+        // Đặt lại financial/refund/restock_status từ toàn bộ refund của đơn
+        await recomputeOrderRefundStatuses(tx, id);
+        if (refundedAmount > 0) {
+          await tx.order.update({
+            where: { id },
+            data: {
+              financialStatus:
+                refundedAmount >= Number(order.totalPrice)
+                  ? OrderFinancialStatus.refunded
+                  : OrderFinancialStatus.partially_refunded,
+            },
+          });
+        }
         await tx.activityLog.create({
           data: {
             userId: user.userId,
             action: 'order.cancel',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
@@ -736,27 +1005,41 @@ export class OrderService {
     }
 
     if (action === 'ship') {
-      if (order.status !== OrderStatus.processing) {
+      if (!isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ xuất hàng từ processing',
+          'Chỉ xuất hàng sau khi đã xác nhận đơn',
           409,
         );
       }
-      if (order.shippedAt) {
-        throw new BusinessException('INVALID_TRANSITION', 'Đơn đã xuất hàng', 409);
+      await this.assertNoOpenFulfillment(
+        id,
+        'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
+      );
+      if (order.deliveredOn) {
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Đơn đã xuất hàng',
+          409,
+        );
       }
-      const shippedAt = await this.repo.client.$transaction(async (tx) => {
+      const deliveredOn = await this.repo.client.$transaction(async (tx) => {
         await this.shipOrderItems(order, user, tx);
         const now = new Date();
-        await tx.order.update({ where: { id }, data: { shippedAt: now } });
+        await tx.order.update({
+          where: { id },
+          data: {
+            deliveredOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+          },
+        });
         await tx.activityLog.create({
           data: {
             userId: user.userId,
             action: 'order.ship',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
         return now;
@@ -764,27 +1047,38 @@ export class OrderService {
       return {
         id: id.toString(),
         status: order.status,
-        shipped_at: shippedAt.toISOString(),
+        shipped_at: deliveredOn.toISOString(),
       };
     }
 
     if (action === 'complete') {
-      if (order.status !== OrderStatus.processing) {
+      if (!isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',
-          'Chỉ hoàn thành từ processing',
+          'Chỉ hoàn thành sau khi đã xác nhận đơn',
           409,
         );
       }
+      await this.assertNoOpenFulfillment(
+        id,
+        'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
+      );
       await this.repo.client.$transaction(async (tx) => {
         // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
         // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
-        if (!order.shippedAt) {
+        if (!order.deliveredOn) {
           await this.shipOrderItems(order, user, tx);
         }
+        const now = new Date();
         await tx.order.update({
           where: { id },
-          data: { status: OrderStatus.completed, shippedAt: order.shippedAt ?? new Date() },
+          data: {
+            status: OrderStatus.closed,
+            closedOn: now,
+            completedOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            deliveredOn: order.deliveredOn ?? now,
+          },
         });
         await tx.activityLog.create({
           data: {
@@ -792,11 +1086,11 @@ export class OrderService {
             action: 'order.complete',
             entityType: 'order',
             entityId: id,
-            metadata: { code: order.code },
+            metadata: { code: order.name },
           },
         });
       });
-      return { id: id.toString(), status: OrderStatus.completed };
+      return { id: id.toString(), status: OrderStatus.closed };
     }
 
     throw new BusinessException('VALIDATION_ERROR', 'Action không hợp lệ', 422);
@@ -805,44 +1099,41 @@ export class OrderService {
   /** Dùng chung cho draft convert & channel webhook */
   async createFromResolvedItems(
     params: {
-      branchId: bigint;
-      source: OrderSource;
+      locationId: bigint;
+      sourceName?: string;
       customerId?: bigint | null;
       items: ResolvedItem[];
-      discountTotal?: number;
-      shippingFee?: number;
+      totalDiscounts?: number;
+      totalShippingPrice?: number;
       note?: string;
       phone?: string;
     },
     user: AuthUser,
   ) {
     const dto: CreateOrderDto = {
-      branch_id: params.branchId.toString(),
-      source: params.source,
+      location_id: params.locationId.toString(),
+      source_name: params.sourceName,
       customer_id: params.customerId?.toString(),
       items: params.items.map((i) => ({
         variant_id: i.variantId.toString(),
-        warehouse_id: i.warehouseId.toString(),
+        location_id: i.locationId.toString(),
         quantity: i.quantity,
         price: i.price,
         discount: i.discount,
       })),
-      discount_total: params.discountTotal,
-      shipping_fee: params.shippingFee,
+      total_discounts: params.totalDiscounts,
+      total_shipping_price: params.totalShippingPrice,
       note: params.note,
       phone: params.phone,
     };
     return this.create(dto, user);
   }
 
-  private async resolveItems(
-    dto: CreateOrderDto,
-    branchId: bigint,
-  ): Promise<ResolvedItem[]> {
+  private async resolveItems(dto: CreateOrderDto): Promise<ResolvedItem[]> {
     const result: ResolvedItem[] = [];
     for (const item of dto.items) {
       const variantId = BigInt(item.variant_id);
-      const warehouseId = BigInt(item.warehouse_id);
+      const locationId = BigInt(item.location_id);
       const variant = await this.repo.client.productVariant.findUnique({
         where: { id: variantId },
         include: { product: true },
@@ -858,7 +1149,7 @@ export class OrderService {
       let price = item.price;
       if (price === undefined) {
         const resolved = await this.pricing.resolvePrice(variantId, {
-          branch_id: branchId,
+          location_id: locationId,
         });
         price = resolved.price;
       }
@@ -866,13 +1157,14 @@ export class OrderService {
       const discount = item.discount ?? 0;
       result.push({
         variantId,
-        warehouseId,
+        locationId,
         productName: variant.product.name,
         sku: variant.sku,
         quantity: item.quantity,
         price,
         discount,
         total: calcLineTotal({ quantity: item.quantity, price, discount }),
+        costPrice: variant.cost,
       });
     }
     return result;

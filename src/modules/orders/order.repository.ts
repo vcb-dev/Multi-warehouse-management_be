@@ -7,9 +7,27 @@ const orderInclude = {
     include: { variant: { select: { productId: true, imageUrl: true, unit: true } } },
   },
   customer: true,
-  branch: { select: { code: true, name: true } },
-  assignedTo: { select: { id: true, name: true, email: true } },
-  createdBy: { select: { id: true, name: true, email: true } },
+  location: {
+    select: {
+      code: true,
+      name: true,
+      phone: true,
+      address1: true,
+      ward: true,
+      district: true,
+      province: true,
+    },
+  },
+  assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
+  createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  fulfillments: {
+    orderBy: { id: 'desc' },
+    include: {
+      packer: { select: { id: true, firstName: true, lastName: true, email: true } },
+      provider: { select: { id: true, code: true, name: true, type: true } },
+      location: { select: { id: true, code: true, name: true } },
+    },
+  },
 } satisfies Prisma.OrderInclude;
 
 export type OrderWithRelations = Prisma.OrderGetPayload<{
@@ -36,7 +54,7 @@ export class OrderRepository {
   }
 
   findByCode(code: string) {
-    return this.prisma.order.findUnique({ where: { code } });
+    return this.prisma.order.findUnique({ where: { name: code } });
   }
 
   get client() {

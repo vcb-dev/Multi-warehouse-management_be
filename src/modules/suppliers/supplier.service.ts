@@ -106,7 +106,7 @@ export class SupplierService {
   async findOne(id: bigint) {
     const row = await this.prisma.supplier.findUnique({
       where: { id },
-      include: { assignedTo: { select: { name: true, email: true } } },
+      include: { assignedTo: { select: { firstName: true, lastName: true, email: true } } },
     });
     if (!row) throw new NotFoundException('Không tìm thấy NCC');
     return { data: serializeSupplier(row) };
@@ -304,7 +304,7 @@ export class SupplierService {
       await Promise.all([
         this.prisma.supplierLedgerEntry.findMany({
           where,
-          include: { createdBy: { select: { name: true, email: true } } },
+          include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip: (page - 1) * pageSize,
           take: pageSize,
@@ -438,7 +438,7 @@ export class SupplierService {
         amount: dto.amount,
         createdById: user.userId,
       },
-      include: { createdBy: { select: { name: true, email: true } } },
+      include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
     });
 
     return { data: serializeLedgerEntry(entry) };
@@ -455,10 +455,10 @@ export class SupplierService {
   ) {
     const supplier = await this.findOneOrThrow(id);
 
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: BigInt(dto.branch_id) },
+    const branch = await this.prisma.location.findUnique({
+      where: { id: BigInt(dto.location_id) },
     });
-    if (!branch || !branch.isActive) {
+    if (!branch || branch.status !== 'active') {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Chi nhánh không hợp lệ',
@@ -521,7 +521,7 @@ export class SupplierService {
 
       const voucher = await this.vouchers.createPayment(
         {
-          branchId: branch.id,
+          locationId: branch.id,
           amount: total,
           createdById: user.userId,
           sourceDocument: supplier.code,
@@ -546,7 +546,7 @@ export class SupplierService {
           amount: total,
           createdById: user.userId,
         },
-        include: { createdBy: { select: { name: true, email: true } } },
+        include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
       });
 
       return { voucher, ledgerEntry };

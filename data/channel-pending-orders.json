@@ -2,13 +2,13 @@
   {
     "external_id": "demo-fb-queue-1",
     "source": "facebook",
-    "branch_id": "1",
+    "location_id": "17",
     "customer_phone": "0909999888",
     "customer_name": "Khách Facebook queue",
     "items": [
       {
         "variant_id": "1",
-        "warehouse_id": "1",
+        "location_id": "17",
         "quantity": 1,
         "price": 100000
       }

@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
@@ -40,11 +44,11 @@ export class InventoryQueryService {
     private nxt: InventoryNxtService,
   ) {}
 
-  /** Gộp extras NXT vào các dòng đã serialize (khóa `${variant_id}:${warehouse_id}`) */
+  /** Gộp extras NXT vào các dòng đã serialize (khóa `${variant_id}:${location_id}`) */
   private async withNxtExtras<
     T extends {
       variant_id: string;
-      warehouse_id: string;
+      location_id: string;
       product_id: string;
       sku: string;
       on_hand: number;
@@ -54,7 +58,7 @@ export class InventoryQueryService {
     const from = query.date_from ? new Date(query.date_from) : undefined;
     const inputs: NxtRowInput[] = rows.map((r) => ({
       variantId: BigInt(r.variant_id),
-      warehouseId: BigInt(r.warehouse_id),
+      locationId: BigInt(r.location_id),
       productId: BigInt(r.product_id),
       onHand: r.on_hand,
       committed: r.committed,
@@ -63,12 +67,12 @@ export class InventoryQueryService {
     return rows.map((r) => ({
       ...r,
       ma_sp: rootProductCode(r.sku),
-      ...extras.get(`${r.variant_id}:${r.warehouse_id}`)!,
+      ...extras.get(`${r.variant_id}:${r.location_id}`)!,
     }));
   }
 
   async listInventory(query: ListInventoryQueryDto, user: AuthUser) {
-    if (query.warehouse_id) {
+    if (query.location_id) {
       return this.listByWarehouse(query, user);
     }
     return this.listExistingLevels(query, user);
@@ -77,7 +81,7 @@ export class InventoryQueryService {
   /** Lấy toàn bộ dòng khớp filter (không phân trang) — dùng cho Xuất file */
   async exportRows(query: ListInventoryQueryDto, user: AuthUser) {
     const unpaginated = { ...query, page: 1, page_size: 100000 };
-    const { data } = query.warehouse_id
+    const { data } = query.location_id
       ? await this.listByWarehouse(unpaginated, user)
       : await this.listExistingLevels(unpaginated, user);
     return data;
@@ -96,11 +100,11 @@ export class InventoryQueryService {
         where,
         include: {
           variant: { include: { product: true } },
-          warehouse: true,
+          location: true,
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        orderBy: [{ warehouse: { code: 'asc' } }, { variant: { sku: 'asc' } }],
+        orderBy: [{ location: { code: 'asc' } }, { variant: { sku: 'asc' } }],
       }),
       this.prisma.inventoryLevel.count({ where }),
     ]);
@@ -117,20 +121,23 @@ export class InventoryQueryService {
   private async listByWarehouse(query: ListInventoryQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.page_size ?? 20;
-    const warehouseId = BigInt(query.warehouse_id!);
+    const locationId = BigInt(query.location_id!);
+    // Nhánh này bỏ qua buildLevelWhere nên không được thừa hưởng bộ lọc kho —
+    // thiếu dòng này thì `?location_id=` xem được tồn của kho bất kỳ.
+    assertLocationPermission(user, 'inventory:view', locationId);
 
-    const warehouse = await this.prisma.warehouse.findUniqueOrThrow({
-      where: { id: warehouseId },
+    const location = await this.prisma.location.findUniqueOrThrow({
+      where: { id: locationId },
     });
 
-    const variantWhere = await this.buildVariantWhere(query, warehouseId);
+    const variantWhere = await this.buildVariantWhere(query, locationId);
 
     const [variants, total] = await Promise.all([
       this.prisma.productVariant.findMany({
         where: variantWhere,
         include: {
           product: true,
-          inventoryLevels: { where: { warehouseId } },
+          inventoryLevels: { where: { locationId } },
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -145,22 +152,22 @@ export class InventoryQueryService {
         return serializeLevel({
           ...level,
           variant: v,
-          warehouse,
+          location,
         });
       }
       return {
         variant_id: v.id.toString(),
-        warehouse_id: warehouseId.toString(),
+        location_id: locationId.toString(),
         product_id: v.productId.toString(),
         sku: v.sku,
         product_name: v.product.name,
         image_url: v.imageUrl ?? v.product.imageUrl ?? null,
-        unit: v.product.unit ?? null,
-        warehouse_code: warehouse.code,
-        warehouse_name: warehouse.name,
+        unit: v.unit ?? null,
+        location_code: location.code,
+        location_name: location.name,
         on_hand: 0,
         committed: 0,
-        packing: 0,
+        packed: 0,
         unavailable: 0,
         incoming: 0,
         available: 0,
@@ -180,7 +187,7 @@ export class InventoryQueryService {
 
   private async buildVariantWhere(
     query: ListInventoryQueryDto,
-    warehouseId: bigint,
+    locationId: bigint,
   ): Promise<Prisma.ProductVariantWhereInput> {
     const where: Prisma.ProductVariantWhereInput = {};
 
@@ -201,10 +208,10 @@ export class InventoryQueryService {
     if (query.low_stock) {
       appendAnd(where, {
         OR: [
-          { inventoryLevels: { none: { warehouseId } } },
+          { inventoryLevels: { none: { locationId } } },
           {
             inventoryLevels: {
-              some: { warehouseId, available: { lte: LOW_STOCK_THRESHOLD } },
+              some: { locationId, available: { lte: LOW_STOCK_THRESHOLD } },
             },
           },
         ],
@@ -213,13 +220,13 @@ export class InventoryQueryService {
 
     if (query.stock_status === 'in_stock') {
       appendAnd(where, {
-        inventoryLevels: { some: { warehouseId, available: { gt: 0 } } },
+        inventoryLevels: { some: { locationId, available: { gt: 0 } } },
       });
     } else if (query.stock_status === 'out_of_stock') {
       appendAnd(where, {
         OR: [
-          { inventoryLevels: { none: { warehouseId } } },
-          { inventoryLevels: { some: { warehouseId, available: { lte: 0 } } } },
+          { inventoryLevels: { none: { locationId } } },
+          { inventoryLevels: { some: { locationId, available: { lte: 0 } } } },
         ],
       });
     }
@@ -236,10 +243,12 @@ export class InventoryQueryService {
     const pageSize = query.page_size ?? 20;
     const where: Prisma.InventoryMovementWhereInput = { variantId };
 
-    if (query.warehouse_id) {
-      where.warehouseId = BigInt(query.warehouse_id);
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'inventory:view', locationId);
+      where.locationId = locationId;
     } else {
-      where.warehouseId = { in: user.warehouseIds };
+      where.locationId = locationScopeFilter(user, 'inventory:view');
     }
 
     if (query.bucket) where.bucket = query.bucket;
@@ -274,7 +283,7 @@ export class InventoryQueryService {
   ): Promise<Prisma.InventoryLevelWhereInput> {
     const where: Prisma.InventoryLevelWhereInput = {};
 
-    where.warehouseId = { in: user.warehouseIds };
+    where.locationId = locationScopeFilter(user, 'inventory:view');
 
     if (query.variant_id) {
       where.variantId = BigInt(query.variant_id);
@@ -302,5 +311,4 @@ export class InventoryQueryService {
 
     return where;
   }
-
 }

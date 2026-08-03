@@ -15,7 +15,7 @@ export class ListVouchersQueryDto {
 
   @IsOptional()
   @IsString()
-  branch_id?: string;
+  location_id?: string;
 
   @IsOptional()
   @IsString()

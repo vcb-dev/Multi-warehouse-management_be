@@ -5,11 +5,7 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
-import {
-  BranchScopeGuard,
-  JwtAuthGuard,
-  PermissionGuard,
-} from './common/guards/auth.guards';
+import { JwtAuthGuard, PermissionGuard } from './common/guards/auth.guards';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConfigModule } from './modules/config/config.module';
@@ -20,13 +16,14 @@ import { TransfersModule } from './modules/transfers/transfers.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { PricingModule } from './modules/pricing/pricing.module';
-import { DraftOrdersModule } from './modules/draft-orders/draft-orders.module';
 import { OrderReturnsModule } from './modules/order-returns/order-returns.module';
 import { ChannelsModule } from './modules/channels/channels.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { FulfillmentsModule } from './modules/fulfillments/fulfillments.module';
 import { ConversationModule } from './modules/conversations/conversation.module';
 import { RbacModule } from './modules/rbac/rbac.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage/storage.module';
 
@@ -47,11 +44,12 @@ import { StorageModule } from './common/storage/storage.module';
     CategoriesModule,
     PricingModule,
     OrdersModule,
-    DraftOrdersModule,
+    FulfillmentsModule,
     OrderReturnsModule,
     ChannelsModule,
     ConversationModule,
     RbacModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -59,7 +57,6 @@ import { StorageModule } from './common/storage/storage.module';
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: APP_GUARD, useClass: BranchScopeGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

@@ -19,7 +19,7 @@ export class ChannelSyncScheduler {
     if (process.env.CHANNEL_SYNC_CRON_ENABLED !== 'true') return;
 
     const admin = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', isActive: true },
+      where: { email: 'admin@local.dev', active: true },
     });
     if (!admin) {
       this.logger.warn('Channel sync cron: admin@local.dev not found');
@@ -30,7 +30,7 @@ export class ChannelSyncScheduler {
       userId: admin.id,
       email: admin.email,
       roles: [UserRole.admin],
-      warehouseIds: [],
+      locationIds: [],
     };
 
     try {

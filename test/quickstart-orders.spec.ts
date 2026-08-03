@@ -3,12 +3,9 @@
  * RUN_INTEGRATION_TESTS=1 npm test -- test/quickstart-orders.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { InventoryBucket, OrderStatus } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
 import { BusinessException } from '../src/common/exceptions/business.exception';
-import { DraftOrdersModule } from '../src/modules/draft-orders/draft-orders.module';
-import { DraftOrderService } from '../src/modules/draft-orders/draft-order.service';
 import { OrderReturnsModule } from '../src/modules/order-returns/order-returns.module';
-import { OrderReturnService } from '../src/modules/order-returns/order-return.service';
 import { ChannelsModule } from '../src/modules/channels/channels.module';
 import { ChannelSyncService } from '../src/modules/channels/channel-sync.service';
 import { OrdersModule } from '../src/modules/orders/orders.module';
@@ -16,6 +13,7 @@ import { OrderService } from '../src/modules/orders/order.service';
 import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -24,22 +22,14 @@ const describeIfDb =
 
 describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   let orders: OrderService;
-  let drafts: DraftOrderService;
-  let returns: OrderReturnService;
   let channels: ChannelSyncService;
   let prisma: PrismaService;
 
   let userId: bigint;
-  let branchId: bigint;
-  let warehouseId: bigint;
+  let locationId: bigint;
   let variantId: bigint;
 
-  const auth = () => ({
-    userId,
-    email: 'admin@local.dev',
-    roles: ['admin'],
-    warehouseIds: [] as bigint[],
-  });
+  const auth = () => adminAuth({ userId });
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -47,35 +37,31 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
         PrismaModule,
         VouchersModule,
         OrdersModule,
-        DraftOrdersModule,
         OrderReturnsModule,
         ChannelsModule,
       ],
     }).compile();
 
     orders = module.get(OrderService);
-    drafts = module.get(DraftOrderService);
-    returns = module.get(OrderReturnService);
     channels = module.get(ChannelSyncService);
     prisma = module.get(PrismaService);
 
     const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
-    const branch = await prisma.branch.findFirst();
-    const warehouse = await prisma.warehouse.findFirst();
+    const branch = await prisma.location.findFirst();
+    const warehouse = await prisma.location.findFirst();
     const variant = await prisma.productVariant.findFirst();
     if (!user || !branch || !warehouse || !variant) throw new Error('Run seed');
 
     userId = user.id;
-    branchId = branch.id;
-    warehouseId = warehouse.id;
+    locationId = warehouse.id;
     variantId = variant.id;
 
     await prisma.inventoryLevel.upsert({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
       update: { onHand: 10, available: 10, committed: 0 },
       create: {
         variantId,
-        warehouseId,
+        locationId,
         onHand: 10,
         available: 10,
         price: 100000,
@@ -91,11 +77,11 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   it('KC1 — tạo đơn giữ committed', async () => {
     const res = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 2,
             price: 100000,
           },
@@ -103,60 +89,48 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
       },
       auth(),
     );
-    expect(res.status).toBe(OrderStatus.ordered);
+    expect(res.status).toBe(OrderStatus.open);
 
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
-      where: { variantId_warehouseId: { variantId, warehouseId } },
+      where: { variantId_locationId: { variantId, locationId } },
     });
     expect(level.committed).toBeGreaterThanOrEqual(2);
     expect(level.available).toBeLessThanOrEqual(8);
   });
 
-  it('KC2 — INSUFFICIENT_STOCK & MISSING_WAREHOUSE', async () => {
-    await expect(
-      orders.create(
-        {
-          branch_id: branchId.toString(),
-          items: [
-            {
-              variant_id: variantId.toString(),
-              warehouse_id: warehouseId.toString(),
-              quantity: 999,
-            },
-          ],
-        },
-        auth(),
-      ),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
-
-    await expect(
-      orders.create(
-        {
-          branch_id: branchId.toString(),
-          items: [{ variant_id: variantId.toString(), warehouse_id: '', quantity: 1 }],
-        },
-        auth(),
-      ),
-    ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });
-  });
-
-  it('KC3 — nháp → convert giữ tồn', async () => {
-    const draft = await drafts.create(
+  it('KC2 — bán âm cho phép & MISSING_WAREHOUSE', async () => {
+    // Đặt vượt tồn KHÔNG còn bị chặn lúc tạo đơn: chốt chặn đã dời sang bước
+    // đóng gói/đẩy vận chuyển (FulfillmentService). Xem oversell-order.e2e-spec
+    // cho phần khẳng định chốt chặn đó.
+    const res = await orders.create(
       {
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
-            quantity: 1,
-            price: 50000,
+            location_id: locationId.toString(),
+            quantity: 999,
           },
         ],
       },
       auth(),
     );
-    const converted = await drafts.convert(BigInt(draft.id), auth());
-    expect(converted.status).toBe('ordered');
+    expect(res.status).toBe(OrderStatus.open);
+
+    const level = await prisma.inventoryLevel.findUniqueOrThrow({
+      where: { variantId_locationId: { variantId, locationId } },
+    });
+    expect(level.available).toBeLessThan(0);
+
+    await expect(
+      orders.create(
+        {
+          location_id: locationId.toString(),
+          items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }],
+        },
+        auth(),
+      ),
+    ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });
   });
 
   it('KC5 — webhook shopee', async () => {
@@ -164,12 +138,12 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     const res = await channels.handleWebhook(
       {
         source: 'shopee',
-        branch_id: branchId.toString(),
+        location_id: locationId.toString(),
         customer_phone: phone,
         items: [
           {
             variant_id: variantId.toString(),
-            warehouse_id: warehouseId.toString(),
+            location_id: locationId.toString(),
             quantity: 1,
           },
         ],
@@ -180,7 +154,7 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: BigInt(res.order_id) },
     });
-    expect(order.source).toBe('shopee');
+    expect(order.sourceName).toBe('shopee');
   });
 });
 

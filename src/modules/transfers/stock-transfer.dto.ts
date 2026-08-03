@@ -24,11 +24,11 @@ export class StnItemDto {
 export class CreateStockTransferDto {
   @IsString()
   @IsNotEmpty()
-  from_warehouse_id!: string;
+  from_location_id!: string;
 
   @IsString()
   @IsNotEmpty()
-  to_warehouse_id!: string;
+  to_location_id!: string;
 
   /** Mã phiếu tự nhập — bỏ trống thì hệ thống tự sinh (STN000001, ...) */
   @IsOptional()
@@ -50,12 +50,12 @@ export class UpdateStockTransferDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  from_warehouse_id?: string;
+  from_location_id?: string;
 
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  to_warehouse_id?: string;
+  to_location_id?: string;
 
   @IsOptional()
   @IsString()

@@ -6,18 +6,17 @@ const dec = (n: number) => n as unknown as Prisma.Decimal;
 describe('serializeProductListItem', () => {
   const base = {
     id: 1n,
-    slug: 'ao-thun',
+    alias: 'ao-thun',
     name: 'Áo thun',
     imageUrl: null,
-    brand: null,
+    vendor: null,
     productType: null,
-    unit: null,
     tags: [] as string[],
-    isPublished: true,
+    status: 'active',
     variants: [
-      { sku: 'SKU-A', price: dec(100) },
-      { sku: 'SKU-B', price: dec(80) },
-      { sku: 'SKU-C', price: dec(120) },
+      { sku: 'SKU-A', price: dec(100), unit: null },
+      { sku: 'SKU-B', price: dec(80), unit: null },
+      { sku: 'SKU-C', price: dec(120), unit: null },
     ],
   };
 

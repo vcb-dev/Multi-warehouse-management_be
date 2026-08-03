@@ -17,7 +17,7 @@ export async function findProductIdsByQuery(
     FROM products p
     LEFT JOIN product_variants v ON v.product_id = p.id
     WHERE unaccent(p.name) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(p.brand, '')) ILIKE unaccent(${pattern})
+       OR unaccent(COALESCE(p.vendor, '')) ILIKE unaccent(${pattern})
        OR unaccent(v.sku) ILIKE unaccent(${pattern})
   `;
   return rows.map((r) => r.id);
@@ -99,7 +99,7 @@ export async function findOrderIdsByQuery(
     SELECT DISTINCT o.id
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
-    WHERE unaccent(o.code) ILIKE unaccent(${pattern})
+    WHERE unaccent(o.name) ILIKE unaccent(${pattern})
        OR unaccent(COALESCE(o.phone, '')) ILIKE unaccent(${pattern})
        OR unaccent(oi.sku) ILIKE unaccent(${pattern})
   `;

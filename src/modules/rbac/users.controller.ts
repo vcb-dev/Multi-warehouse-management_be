@@ -13,6 +13,10 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
+import {
   InviteUserDto,
   ListUsersQueryDto,
   PutWarehouseRolesDto,
@@ -31,8 +35,13 @@ export class UsersController {
     private invitations: InvitationService,
   ) {}
 
-  /** Dropdown gán đơn — chỉ id + tên, user active. */
+  /**
+   * Dropdown gán đơn — chỉ id + tên, user active. Dùng ở nhiều module (đơn
+   * hàng, nhập hàng, NCC) nên gắn `dashboard:view` — quyền mọi role có sẵn —
+   * thay vì `staff:manage`, tránh chặn nhầm nhân viên bình thường.
+   */
   @Get('assignable')
+  @RequirePermission('dashboard:view')
   listAssignable(@Query('search') search?: string) {
     return this.users.listAssignable(search);
   }
@@ -72,36 +81,37 @@ export class UsersController {
   putWarehouseRoles(
     @Param('id') id: string,
     @Body() dto: PutWarehouseRolesDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.users.putWarehouseRoles(id, dto);
+    return this.users.putWarehouseRoles(id, dto, user);
   }
 
-  @Delete(':id/warehouse-roles/:warehouseId')
+  @Delete(':id/warehouse-roles/:locationId')
   @RequirePermission('staff:manage')
   @HttpCode(204)
   removeWarehouseRole(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
   ) {
-    return this.users.removeWarehouseRole(id, warehouseId);
+    return this.users.removeWarehouseRole(id, locationId);
   }
 
-  @Get(':id/warehouses/:warehouseId/permissions')
+  @Get(':id/locations/:locationId/permissions')
   @RequirePermission('staff:manage')
   getWarehousePermissions(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
   ) {
-    return this.users.getWarehousePermissions(id, warehouseId);
+    return this.users.getWarehousePermissions(id, locationId);
   }
 
-  @Put(':id/warehouses/:warehouseId/permissions')
+  @Put(':id/locations/:locationId/permissions')
   @RequirePermission('staff:manage')
   updateWarehousePermissions(
     @Param('id') id: string,
-    @Param('warehouseId') warehouseId: string,
+    @Param('locationId') locationId: string,
     @Body() dto: UpdateUserPermissionsDto,
   ) {
-    return this.users.updateWarehousePermissions(id, warehouseId, dto);
+    return this.users.updateWarehousePermissions(id, locationId, dto);
   }
 }

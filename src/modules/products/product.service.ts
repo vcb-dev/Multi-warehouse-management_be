@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { findProductIdsByQuery } from '../../common/search/unaccent-search';
 import { CategoryService } from '../categories/category.service';
@@ -8,6 +12,7 @@ import {
   CreateProductDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
+  ProductVariantDto,
   UpdateProductDto,
 } from './product.dto';
 import { ProductRepository } from './product.repository';
@@ -39,7 +44,7 @@ export class ProductService {
       where.id = { in: ids };
     }
     if (query.brand?.trim()) {
-      where.brand = { contains: query.brand.trim(), mode: 'insensitive' };
+      where.vendor = { contains: query.brand.trim(), mode: 'insensitive' };
     }
     if (query.product_type?.trim()) {
       where.productType = {
@@ -48,7 +53,7 @@ export class ProductService {
       };
     }
     if (query.is_published !== undefined)
-      where.isPublished = query.is_published;
+      where.status = query.is_published ? 'active' : { not: 'active' };
     if (query.category_id) {
       where.categories = { some: { categoryId: BigInt(query.category_id) } };
     }
@@ -66,14 +71,14 @@ export class ProductService {
     const [rows, total] = await Promise.all([
       this.repo.client.product.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { modifiedOn: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
           variants: {
             where: { enabled: true },
             orderBy: { id: 'asc' },
-            select: { sku: true, price: true },
+            select: { sku: true, price: true, unit: true },
           },
         },
       }),
@@ -99,7 +104,7 @@ export class ProductService {
   async create(dto: CreateProductDto, user: AuthUser) {
     await this.validateSkus(dto.variants?.map((v) => v.sku) ?? []);
 
-    const slug = await this.uniqueSlug(dto.slug?.trim() || slugify(dto.name));
+    const alias = await this.uniqueAlias(dto.alias?.trim() || slugify(dto.name));
     const options = dto.options ?? [];
     if (options.length > 3) {
       throw new BusinessException(
@@ -109,29 +114,24 @@ export class ProductService {
       );
     }
 
-    const variantRows = this.buildVariantRows(slug, options, dto.variants);
+    const variantRows = this.buildVariantRows(alias, options, dto);
 
     const product = await this.repo.client.$transaction(
       async (tx) => {
         const p = await tx.product.create({
           data: {
             name: dto.name.trim(),
-            slug,
-            brand: dto.brand?.trim() || null,
+            alias,
+            vendor: dto.vendor?.trim() || null,
             productType: dto.product_type?.trim() || null,
-            unit: dto.unit?.trim() || null,
             tags: dto.tags ?? [],
-            isPublished: dto.is_published ?? false,
-            description: dto.description?.trim() || null,
-            shortDescription: dto.short_description?.trim() || null,
+            status: dto.is_published === false ? 'draft' : 'active',
+            content: dto.content?.trim() || null,
+            summary: dto.summary?.trim() || null,
             imageUrl: dto.image_urls?.[0] ?? null,
-            seoTitle: dto.seo_title?.trim() || null,
-            seoDescription: dto.seo_description?.trim() || null,
-            taxable: dto.taxable ?? true,
-            taxIndustryGroup: dto.tax_industry_group?.trim() || null,
-            trackInventory: dto.track_inventory ?? true,
-            allowBackorder: dto.allow_backorder ?? false,
-            requiresShipping: dto.requires_shipping ?? true,
+            metaTitle: dto.meta_title?.trim() || null,
+            metaDescription: dto.meta_description?.trim() || null,
+            vatPitCategoryCode: dto.vat_pit_category_code?.trim() || null,
           },
         });
 
@@ -188,6 +188,11 @@ export class ProductService {
               imageUrl: vr.imageUrl,
               weight: vr.weight,
               weightUnit: vr.weightUnit,
+              unit: vr.unit,
+              taxable: vr.taxable,
+              requiresShipping: vr.requiresShipping,
+              inventoryManagement: vr.inventoryManagement,
+              inventoryPolicy: vr.inventoryPolicy,
             },
           });
 
@@ -212,7 +217,7 @@ export class ProductService {
             action: 'product.create',
             entityType: 'product',
             entityId: p.id,
-            metadata: { name: p.name, slug: p.slug },
+            metadata: { name: p.name, alias: p.alias },
           },
         });
 
@@ -227,7 +232,7 @@ export class ProductService {
 
     return {
       id: product.id.toString(),
-      slug: product.slug,
+      alias: product.alias,
       variant_count: count,
     };
   }
@@ -247,46 +252,61 @@ export class ProductService {
           where: { id },
           data: {
             ...(dto.name ? { name: dto.name.trim() } : {}),
-            ...(dto.brand !== undefined
-              ? { brand: dto.brand?.trim() || null }
+            ...(dto.vendor !== undefined
+              ? { vendor: dto.vendor?.trim() || null }
               : {}),
             ...(dto.product_type !== undefined
               ? { productType: dto.product_type?.trim() || null }
               : {}),
-            ...(dto.unit !== undefined
-              ? { unit: dto.unit?.trim() || null }
-              : {}),
             ...(dto.tags ? { tags: dto.tags } : {}),
             ...(dto.is_published !== undefined
-              ? { isPublished: dto.is_published }
+              ? { status: dto.is_published ? 'active' : 'draft' }
               : {}),
-            ...(dto.description !== undefined
-              ? { description: dto.description?.trim() || null }
+            ...(dto.content !== undefined
+              ? { content: dto.content?.trim() || null }
               : {}),
-            ...(dto.short_description !== undefined
-              ? { shortDescription: dto.short_description?.trim() || null }
+            ...(dto.summary !== undefined
+              ? { summary: dto.summary?.trim() || null }
               : {}),
-            ...(dto.seo_title !== undefined
-              ? { seoTitle: dto.seo_title?.trim() || null }
+            ...(dto.meta_title !== undefined
+              ? { metaTitle: dto.meta_title?.trim() || null }
               : {}),
-            ...(dto.seo_description !== undefined
-              ? { seoDescription: dto.seo_description?.trim() || null }
+            ...(dto.meta_description !== undefined
+              ? { metaDescription: dto.meta_description?.trim() || null }
               : {}),
-            ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
-            ...(dto.tax_industry_group !== undefined
-              ? { taxIndustryGroup: dto.tax_industry_group?.trim() || null }
-              : {}),
-            ...(dto.track_inventory !== undefined
-              ? { trackInventory: dto.track_inventory }
-              : {}),
-            ...(dto.allow_backorder !== undefined
-              ? { allowBackorder: dto.allow_backorder }
-              : {}),
-            ...(dto.requires_shipping !== undefined
-              ? { requiresShipping: dto.requires_shipping }
+            ...(dto.vat_pit_category_code !== undefined
+              ? { vatPitCategoryCode: dto.vat_pit_category_code?.trim() || null }
               : {}),
           },
         });
+
+        // unit/taxable/requires_shipping/track_inventory/allow_backorder giờ ở cấp
+        // variant (theo Sapo) — áp giá trị chung này cho mọi variant hiện có trừ
+        // khi request cũng gửi kèm `variants[]` (syncVariants sẽ set giá trị mới hơn).
+        const hasVariantLevelUpdate =
+          dto.unit !== undefined ||
+          dto.taxable !== undefined ||
+          dto.requires_shipping !== undefined ||
+          dto.track_inventory !== undefined ||
+          dto.allow_backorder !== undefined;
+        if (hasVariantLevelUpdate && !dto.variants) {
+          await tx.productVariant.updateMany({
+            where: { productId: id },
+            data: {
+              ...(dto.unit !== undefined ? { unit: dto.unit?.trim() || null } : {}),
+              ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
+              ...(dto.requires_shipping !== undefined
+                ? { requiresShipping: dto.requires_shipping }
+                : {}),
+              ...(dto.track_inventory !== undefined
+                ? { inventoryManagement: dto.track_inventory ? 'bizweb' : '' }
+                : {}),
+              ...(dto.allow_backorder !== undefined
+                ? { inventoryPolicy: dto.allow_backorder ? 'continue' : 'deny' }
+                : {}),
+            },
+          });
+        }
 
         if (dto.image_urls) {
           await tx.productImage.deleteMany({ where: { productId: id } });
@@ -337,13 +357,7 @@ export class ProductService {
         }
 
         if (dto.options && dto.variants) {
-          await this.syncVariants(
-            tx,
-            id,
-            existing.slug,
-            dto.options,
-            dto.variants,
-          );
+          await this.syncVariants(tx, id, existing.alias, dto.options, dto);
         }
 
         await this.categories.evaluateAutoForProduct(tx, id);
@@ -374,41 +388,81 @@ export class ProductService {
     const variantIds = product.variants.map((v) => v.id);
     if (!variantIds.length) return { data: [] };
 
+    const where: Prisma.InventoryLevelWhereInput = {
+      variantId: { in: variantIds },
+    };
+    // Thiếu chốt chặn này thì `?location_id=` xem được tồn của kho bất kỳ.
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'inventory:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'inventory:view');
+    }
+
     const levels = await this.repo.client.inventoryLevel.findMany({
-      where: {
-        variantId: { in: variantIds },
-        ...(query.warehouse_id
-          ? { warehouseId: BigInt(query.warehouse_id) }
-          : {}),
-      },
-      include: { warehouse: true },
+      where,
+      include: { location: true },
     });
 
     return {
       data: levels.map((l) => ({
         variant_id: l.variantId.toString(),
-        warehouse_id: l.warehouseId.toString(),
-        warehouse_name: l.warehouse.name,
+        location_id: l.locationId.toString(),
+        location_name: l.location.name,
         on_hand: l.onHand,
         available: l.available,
         committed: l.committed,
         incoming: l.incoming,
-        packing: l.packing,
+        packed: l.packed,
         unavailable: l.unavailable,
       })),
     };
   }
 
-  private buildVariantRows(
-    slug: string,
-    options: CreateProductDto['options'],
-    variants?: CreateProductDto['variants'],
+  /** Cờ requires_shipping/taxable/inventory_management/inventory_policy/unit sống ở
+   *  ProductVariant theo Sapo — variant tự ghi đè nếu có, không thì dùng giá trị
+   *  chung của sản phẩm (dto cấp trên). */
+  private resolveVariantFlags(
+    dto: { unit?: string; taxable?: boolean; requires_shipping?: boolean; track_inventory?: boolean; allow_backorder?: boolean },
+    v?: ProductVariantDto,
   ) {
+    // Không gửi thì trả `undefined` chứ không tự bịa mặc định: lúc create Prisma
+    // sẽ lấy default của cột (trùng đúng các giá trị cũ ở đây), lúc update thì
+    // giữ nguyên giá trị đang lưu thay vì ghi đè.
+    const unit = v?.unit ?? dto.unit;
+    const trackInventory = v?.track_inventory ?? dto.track_inventory;
+    const allowBackorder = v?.allow_backorder ?? dto.allow_backorder;
+    return {
+      unit: unit === undefined ? undefined : unit.trim() || null,
+      taxable: v?.taxable ?? dto.taxable,
+      requiresShipping: v?.requires_shipping ?? dto.requires_shipping,
+      inventoryManagement:
+        trackInventory === undefined ? undefined : trackInventory ? 'bizweb' : '',
+      inventoryPolicy:
+        allowBackorder === undefined
+          ? undefined
+          : allowBackorder
+            ? 'continue'
+            : 'deny',
+    };
+  }
+
+  private buildVariantRows(
+    alias: string,
+    options: CreateProductDto['options'],
+    dto: Pick<
+      CreateProductDto,
+      'variants' | 'unit' | 'taxable' | 'requires_shipping' | 'track_inventory' | 'allow_backorder'
+    >,
+  ) {
+    const variants = dto.variants;
     if (!options?.length) {
       const v = variants?.[0];
       return [
         {
-          sku: v?.sku ?? this.variants.suggestSku(slug, []),
+          sku: v?.sku?.trim() || this.variants.suggestSku(alias, []),
+          skuExplicit: Boolean(v?.sku?.trim()),
           price: v?.price ?? 0,
           cost: v?.cost,
           compareAtPrice: v?.compare_at_price,
@@ -417,6 +471,7 @@ export class ProductService {
           weight: v?.weight,
           weightUnit: v?.weight_unit,
           optionValues: [] as string[],
+          ...this.resolveVariantFlags(dto, v),
         },
       ];
     }
@@ -433,7 +488,10 @@ export class ProductService {
       const key = this.variants.optionKey(optionValues);
       const input = byKey.get(key);
       return {
-        sku: this.variants.suggestSku(slug, optionValues),
+        // SKU do người dùng nhập là nguồn sự thật; chỉ tự sinh khi bỏ trống.
+        sku:
+          input?.sku?.trim() || this.variants.suggestSku(alias, optionValues),
+        skuExplicit: Boolean(input?.sku?.trim()),
         price: input?.price ?? 0,
         cost: input?.cost,
         compareAtPrice: input?.compare_at_price,
@@ -442,6 +500,7 @@ export class ProductService {
         weight: input?.weight,
         weightUnit: input?.weight_unit,
         optionValues,
+        ...this.resolveVariantFlags(dto, input),
       };
     });
   }
@@ -457,9 +516,12 @@ export class ProductService {
   private async syncVariants(
     tx: Prisma.TransactionClient,
     productId: bigint,
-    slug: string,
+    alias: string,
     options: NonNullable<CreateProductDto['options']>,
-    variants: NonNullable<CreateProductDto['variants']>,
+    dto: Pick<
+      CreateProductDto,
+      'variants' | 'unit' | 'taxable' | 'requires_shipping' | 'track_inventory' | 'allow_backorder'
+    >,
   ) {
     const existingVariants = await tx.productVariant.findMany({
       where: { productId },
@@ -493,7 +555,7 @@ export class ProductService {
       orderBy: { position: 'asc' },
     });
 
-    const desired = this.buildVariantRows(slug, options, variants);
+    const desired = this.buildVariantRows(alias, options, dto);
     const desiredKeys = new Set(
       desired.map((d) => this.variants.optionKey(d.optionValues)),
     );
@@ -509,7 +571,12 @@ export class ProductService {
       const match = existingByKey.get(key);
       let variantId: bigint;
 
-      if (match && match.sku === d.sku) {
+      // Request không gửi SKU thì giữ nguyên SKU đang lưu — nếu lấy SKU tự sinh
+      // làm chuẩn, mọi lần sửa giá/tên đều bị coi là "đổi SKU" rồi xoá-tạo lại
+      // phiên bản (hoặc chặn bằng VARIANT_IN_USE khi đã có tồn kho).
+      const desiredSku = d.skuExplicit ? d.sku : (match?.sku ?? d.sku);
+
+      if (match && match.sku === desiredSku) {
         await tx.productVariant.update({
           where: { id: match.id },
           data: {
@@ -518,6 +585,13 @@ export class ProductService {
             compareAtPrice: d.compareAtPrice,
             barcode: d.barcode,
             imageUrl: d.imageUrl,
+            weight: d.weight,
+            weightUnit: d.weightUnit,
+            unit: d.unit,
+            taxable: d.taxable,
+            requiresShipping: d.requiresShipping,
+            inventoryManagement: d.inventoryManagement,
+            inventoryPolicy: d.inventoryPolicy,
             enabled: true,
           },
         });
@@ -539,12 +613,19 @@ export class ProductService {
         const created = await tx.productVariant.create({
           data: {
             productId,
-            sku: d.sku,
+            sku: desiredSku,
             price: d.price,
             cost: d.cost ?? 0,
             compareAtPrice: d.compareAtPrice,
             barcode: d.barcode,
             imageUrl: d.imageUrl,
+            weight: d.weight,
+            weightUnit: d.weightUnit,
+            unit: d.unit,
+            taxable: d.taxable,
+            requiresShipping: d.requiresShipping,
+            inventoryManagement: d.inventoryManagement,
+            inventoryPolicy: d.inventoryPolicy,
           },
         });
         variantId = created.id;
@@ -591,9 +672,20 @@ export class ProductService {
   }
 
   private async validateSkus(skus: string[], excludeProductId?: bigint) {
+    const seen = new Set<string>();
     for (const sku of skus) {
-      const trimmed = sku.trim();
+      const trimmed = sku?.trim();
       if (!trimmed) continue;
+      // Trùng ngay trong cùng một request: bắt ở đây, nếu không sẽ vỡ ở ràng
+      // buộc unique của DB và trả về lỗi P2002 thô.
+      if (seen.has(trimmed)) {
+        throw new BusinessException(
+          'DUPLICATE_SKU',
+          `SKU "${trimmed}" bị lặp trong danh sách phiên bản`,
+          409,
+        );
+      }
+      seen.add(trimmed);
       const existing = await this.repo.findVariantBySku(trimmed);
       if (
         existing &&
@@ -608,13 +700,13 @@ export class ProductService {
     }
   }
 
-  private async uniqueSlug(base: string): Promise<string> {
-    let slug = base || 'san-pham';
+  private async uniqueAlias(base: string): Promise<string> {
+    let alias = base || 'san-pham';
     let n = 0;
-    while (await this.repo.findBySlug(slug)) {
+    while (await this.repo.findByAlias(alias)) {
       n += 1;
-      slug = `${base}-${n}`;
+      alias = `${base}-${n}`;
     }
-    return slug;
+    return alias;
   }
 }
