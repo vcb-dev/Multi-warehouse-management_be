@@ -10,6 +10,7 @@
 import { GoodsReceiptService } from '../src/modules/purchasing/goods-receipt.service';
 import { PurchaseOrderService } from '../src/modules/purchasing/purchase-order.service';
 import { PurchaseReturnService } from '../src/modules/purchasing/purchase-return.service';
+import { ProductService } from '../src/modules/products/product.service';
 
 const readMethods: [string, (...args: never[]) => unknown][] = [
   ['PurchaseOrderService.list', PurchaseOrderService.prototype.list],
@@ -18,6 +19,7 @@ const readMethods: [string, (...args: never[]) => unknown][] = [
   ['GoodsReceiptService.findOne', GoodsReceiptService.prototype.findOne],
   ['PurchaseReturnService.list', PurchaseReturnService.prototype.list],
   ['PurchaseReturnService.findOne', PurchaseReturnService.prototype.findOne],
+  ['ProductService.getInventory', ProductService.prototype.getInventory],
 ];
 
 describe('Purchasing — phạm vi kho ở đường đọc', () => {

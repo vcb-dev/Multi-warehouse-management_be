@@ -580,7 +580,7 @@ export class OrderService {
       }
     }
 
-    const resolvedItems = await this.resolveItems(dto, locationId);
+    const resolvedItems = await this.resolveItems(dto);
     const pricedLines: PricedLine[] = resolvedItems.map((i) => ({
       quantity: i.quantity,
       price: i.price,
@@ -1129,10 +1129,7 @@ export class OrderService {
     return this.create(dto, user);
   }
 
-  private async resolveItems(
-    dto: CreateOrderDto,
-    locationId: bigint,
-  ): Promise<ResolvedItem[]> {
+  private async resolveItems(dto: CreateOrderDto): Promise<ResolvedItem[]> {
     const result: ResolvedItem[] = [];
     for (const item of dto.items) {
       const variantId = BigInt(item.variant_id);

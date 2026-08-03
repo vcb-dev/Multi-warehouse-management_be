@@ -5,8 +5,6 @@ import {
   MovementType,
   RestockType,
   OrderFulfillmentStatus,
-  OrderRefundStatus,
-  OrderReturnStatus,
   OrderStatus,
   Prisma,
 } from '@prisma/client';

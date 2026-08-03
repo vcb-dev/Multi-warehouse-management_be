@@ -70,7 +70,6 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     fulfillments = module.get(FulfillmentService);
     prisma = module.get(PrismaService);
 
-    const branch = await prisma.location.findFirstOrThrow();
     const warehouse = await prisma.location.findFirstOrThrow();
     const user = await prisma.user.findFirstOrThrow();
     locationId = warehouse.id;

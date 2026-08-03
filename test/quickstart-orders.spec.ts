@@ -3,10 +3,9 @@
  * RUN_INTEGRATION_TESTS=1 npm test -- test/quickstart-orders.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { InventoryBucket, OrderStatus } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
 import { BusinessException } from '../src/common/exceptions/business.exception';
 import { OrderReturnsModule } from '../src/modules/order-returns/order-returns.module';
-import { OrderReturnService } from '../src/modules/order-returns/order-return.service';
 import { ChannelsModule } from '../src/modules/channels/channels.module';
 import { ChannelSyncService } from '../src/modules/channels/channel-sync.service';
 import { OrdersModule } from '../src/modules/orders/orders.module';
@@ -23,7 +22,6 @@ const describeIfDb =
 
 describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   let orders: OrderService;
-  let returns: OrderReturnService;
   let channels: ChannelSyncService;
   let prisma: PrismaService;
 
@@ -45,7 +43,6 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     }).compile();
 
     orders = module.get(OrderService);
-    returns = module.get(OrderReturnService);
     channels = module.get(ChannelSyncService);
     prisma = module.get(PrismaService);
 

@@ -17,7 +17,6 @@ import { StockTransferService } from '../src/modules/transfers/stock-transfer.se
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { BusinessException } from '../src/common/exceptions/business.exception';
 import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
@@ -64,7 +63,6 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     inventory = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const branch = await prisma.location.findFirstOrThrow();
     const warehouses = await prisma.location.findMany({ take: 2 });
     const warehouse = warehouses[0];
     const otherWarehouse = warehouses[1] ?? warehouses[0];

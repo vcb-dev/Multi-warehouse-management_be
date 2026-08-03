@@ -27,7 +27,6 @@ describeIfDb('order create reserves stock', () => {
     }).compile();
     orders = module.get(OrderService);
     prisma = module.get(PrismaService);
-    const branch = await prisma.location.findFirstOrThrow();
     const warehouse = await prisma.location.findFirstOrThrow();
     const variant = await prisma.productVariant.findFirstOrThrow();
     const user = await prisma.user.findFirstOrThrow();

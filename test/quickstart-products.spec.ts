@@ -27,7 +27,6 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
   let productRepo: import('../src/modules/products/product.repository').ProductRepository;
   let userId: bigint;
   let locationId: bigint;
-  let customerGroupId: bigint;
 
   const authUser = () => adminAuth({ userId });
 
@@ -49,7 +48,6 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     if (!user || !branch || !cg) throw new Error('Run seed first');
     userId = user.id;
     locationId = branch.id;
-    customerGroupId = cg.id;
   });
 
   afterAll(async () => {

@@ -139,7 +139,7 @@ export class GoodsReceiptService {
       );
     }
 
-    const supplier = await this.getActiveSupplier(BigInt(dto.supplier_id));
+    await this.getActiveSupplier(BigInt(dto.supplier_id));
     assertLocationPermission(user, REI_WRITE, BigInt(dto.location_id));
 
     // Gom PO tham chiếu: từng dòng có thể gắn PO riêng, dòng không gắn thì

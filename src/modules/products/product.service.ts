@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { findProductIdsByQuery } from '../../common/search/unaccent-search';
 import { CategoryService } from '../categories/category.service';
@@ -384,13 +388,20 @@ export class ProductService {
     const variantIds = product.variants.map((v) => v.id);
     if (!variantIds.length) return { data: [] };
 
+    const where: Prisma.InventoryLevelWhereInput = {
+      variantId: { in: variantIds },
+    };
+    // Thiếu chốt chặn này thì `?location_id=` xem được tồn của kho bất kỳ.
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'inventory:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'inventory:view');
+    }
+
     const levels = await this.repo.client.inventoryLevel.findMany({
-      where: {
-        variantId: { in: variantIds },
-        ...(query.location_id
-          ? { locationId: BigInt(query.location_id) }
-          : {}),
-      },
+      where,
       include: { location: true },
     });
 

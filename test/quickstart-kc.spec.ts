@@ -41,7 +41,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
   let prisma: PrismaService;
 
   let supplierId: bigint;
-  let locationId: bigint;
   let warehouseK1: bigint;
   let warehouseK2: bigint;
   let variantId: bigint;
@@ -85,7 +84,6 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       throw new Error('Run prisma db seed before integration tests');
     }
     supplierId = supplier.id;
-    locationId = branch.id;
     warehouseK1 = warehouses[0].id;
     warehouseK2 = warehouses[1].id;
     variantId = variant.id;
