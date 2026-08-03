@@ -16,9 +16,9 @@ export type CarrierQuote = {
 };
 
 /**
- * Adapter cho từng hãng vận chuyển tích hợp. Đợt này chỉ có ManualAdapter
- * (báo giá từ services_config, trạng thái cập nhật thủ công/webhook mô phỏng).
- * Khi tích hợp API thật (GHN, GHTK...), viết adapter mới implement interface này.
+ * Adapter cho từng hãng vận chuyển tích hợp.
+ * ManualAdapter: phí từ services_config, webhook mô phỏng.
+ * GhnAdapter: status map GHN thật; tạo/hủy đơn qua GhnClient.
  */
 export interface CarrierAdapter {
   /** Báo giá các dịch vụ theo khối lượng (gram). */
@@ -27,3 +27,5 @@ export interface CarrierAdapter {
   /** Map trạng thái từ webhook của hãng → ShipmentStatus nội bộ. */
   mapWebhookStatus(externalStatus: string): ShipmentStatus | null;
 }
+
+export const GHN_PROVIDER_CODE = 'ghn';

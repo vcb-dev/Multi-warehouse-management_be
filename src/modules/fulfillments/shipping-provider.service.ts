@@ -3,7 +3,13 @@ import { Prisma, ShippingProviderType } from '@prisma/client';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CarrierServiceConfig } from './carriers/carrier-adapter';
+import {
+  CarrierAdapter,
+  CarrierServiceConfig,
+  GHN_PROVIDER_CODE,
+} from './carriers/carrier-adapter';
+import { GhnAdapter } from './carriers/ghn.adapter';
+import { GhnClient, parseGhnCredentials } from './carriers/ghn.client';
 import { ManualAdapter } from './carriers/manual.adapter';
 import {
   ConnectProviderDto,
@@ -16,12 +22,35 @@ const DEFAULT_WEIGHT_GRAMS = 500;
 
 @Injectable()
 export class ShippingProviderService {
-  private adapter = new ManualAdapter();
+  private readonly manual = new ManualAdapter();
+  private readonly ghn = new GhnAdapter();
 
   constructor(private prisma: PrismaService) {}
 
-  get carrierAdapter() {
-    return this.adapter;
+  /** Adapter theo mã hãng — GHN có status map riêng; còn lại Manual. */
+  adapterFor(providerCode: string): CarrierAdapter {
+    return providerCode === GHN_PROVIDER_CODE ? this.ghn : this.manual;
+  }
+
+  get ghnAdapter(): GhnAdapter {
+    return this.ghn;
+  }
+
+  /** @deprecated dùng adapterFor(code) — giữ để e2e/webhook cũ không vỡ ngay */
+  get carrierAdapter(): CarrierAdapter {
+    return this.manual;
+  }
+
+  ghnClientFor(connectionConfig: Prisma.JsonValue | null): GhnClient {
+    const creds = parseGhnCredentials(connectionConfig);
+    if (!creds) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'GHN chưa cấu hình Token/ShopId. Vào Cấu hình → kết nối lại.',
+        422,
+      );
+    }
+    return new GhnClient(creds);
   }
 
   async list(type?: ShippingProviderType) {
@@ -46,8 +75,8 @@ export class ShippingProviderService {
         provider_name: p.name,
         is_connected: p.isConnected,
         services: p.isConnected
-          ? this.adapter.quote(
-              ((p.servicesConfig ?? []) as CarrierServiceConfig[]),
+          ? this.adapterFor(p.code).quote(
+              (p.servicesConfig ?? []) as CarrierServiceConfig[],
               weight,
             )
           : [],
@@ -60,9 +89,10 @@ export class ShippingProviderService {
     servicesConfig: Prisma.JsonValue,
     serviceCode: string,
     weightGrams: number,
+    providerCode = '',
   ) {
     const services = (servicesConfig ?? []) as CarrierServiceConfig[];
-    const quoted = this.adapter
+    const quoted = this.adapterFor(providerCode)
       .quote(services, weightGrams)
       .find((q) => q.code === serviceCode);
     if (!quoted) {
@@ -97,7 +127,8 @@ export class ShippingProviderService {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { id },
     });
-    if (!provider) throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
+    if (!provider)
+      throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
     const updated = await this.prisma.shippingProvider.update({
       where: { id },
       data: {
@@ -115,7 +146,8 @@ export class ShippingProviderService {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { id },
     });
-    if (!provider) throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
+    if (!provider)
+      throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
     if (provider.type !== ShippingProviderType.tich_hop) {
       throw new BusinessException(
         'VALIDATION_ERROR',
@@ -123,11 +155,39 @@ export class ShippingProviderService {
         422,
       );
     }
+
+    const token = dto.token?.trim();
+    const shopId = dto.shop_id?.trim();
+    if (!token || !shopId) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Cần Token API và ShopId của GHN',
+        422,
+      );
+    }
+
+    const connectionConfig = { token, shop_id: shopId };
+
+    // GHN: xác thực token trước khi lưu
+    if (provider.code === GHN_PROVIDER_CODE) {
+      const client = this.ghnClientFor(connectionConfig);
+      try {
+        await client.ping();
+      } catch (err) {
+        if (err instanceof BusinessException) throw err;
+        throw new BusinessException(
+          'GHN_ERROR',
+          'Token/ShopId GHN không hợp lệ',
+          422,
+        );
+      }
+    }
+
     const updated = await this.prisma.shippingProvider.update({
       where: { id },
       data: {
         isConnected: true,
-        connectionConfig: { token: dto.token ?? null, shop_id: dto.shop_id ?? null },
+        connectionConfig,
       },
     });
     return serializeShippingProvider(updated);
@@ -137,7 +197,8 @@ export class ShippingProviderService {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { id },
     });
-    if (!provider) throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
+    if (!provider)
+      throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
     const updated = await this.prisma.shippingProvider.update({
       where: { id },
       data: { isConnected: false, connectionConfig: Prisma.DbNull },

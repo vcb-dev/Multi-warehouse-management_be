@@ -7,6 +7,7 @@ import {
   PackingStatus,
   Prisma,
   ShipmentStatus,
+  ShippingFeePayer,
   ShippingProviderType,
 } from '@prisma/client';
 import { assertAnyLocationAccess } from '../../common/auth/access';
@@ -16,6 +17,8 @@ import { userDisplayName } from '../../common/utils/user-display-name';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { GHN_PROVIDER_CODE } from './carriers/carrier-adapter';
+import { trackingUrlFor } from './carriers/ghn.client';
 import { generateFulfillmentCode } from './fulfillment-code';
 import {
   CancelFulfillmentDto,
@@ -32,6 +35,7 @@ import {
 import { ShippingProviderService } from './shipping-provider.service';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
+const DEFAULT_DIM_CM = 10;
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
@@ -47,7 +51,10 @@ export class FulfillmentService {
     private providers: ShippingProviderService,
   ) {}
 
-  private async loadOrder(orderId: bigint, user: AuthUser): Promise<OrderWithItems> {
+  private async loadOrder(
+    orderId: bigint,
+    user: AuthUser,
+  ): Promise<OrderWithItems> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true },
@@ -80,7 +87,10 @@ export class FulfillmentService {
     locationId: bigint,
     items: { variantId: bigint; sku: string; quantity: number }[],
   ) {
-    const required = new Map<string, { variantId: bigint; locationId: bigint; sku: string; quantity: number }>();
+    const required = new Map<
+      string,
+      { variantId: bigint; locationId: bigint; sku: string; quantity: number }
+    >();
     for (const item of items) {
       const key = `${item.variantId}`;
       const existing = required.get(key);
@@ -197,10 +207,7 @@ export class FulfillmentService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
     }
     const allowed: Record<string, PackingStatus[]> = {
-      [PackingStatus.unknown]: [
-        PackingStatus.packing,
-        PackingStatus.packed,
-      ],
+      [PackingStatus.unknown]: [PackingStatus.packing, PackingStatus.packed],
       [PackingStatus.packing]: [PackingStatus.packed],
       [PackingStatus.packed]: [],
     };
@@ -316,8 +323,16 @@ export class FulfillmentService {
     }
 
     const weight = dto.weight_grams ?? DEFAULT_WEIGHT_GRAMS;
+    const lengthCm = dto.length_cm ?? DEFAULT_DIM_CM;
+    const widthCm = dto.width_cm ?? DEFAULT_DIM_CM;
+    const heightCm = dto.height_cm ?? DEFAULT_DIM_CM;
     let shippingFee = dto.shipping_fee ?? 0;
     let serviceName: string | null = null;
+    let trackingNumber = dto.tracking_number ?? null;
+    let trackingUrl: string | null = null;
+    let carrier: string | null = null;
+    let carrierName: string | null = null;
+    let expectedDeliveryDate: Date | null = null;
 
     if (dto.shipping_type === ShippingProviderType.tich_hop) {
       if (!provider.isConnected) {
@@ -334,20 +349,29 @@ export class FulfillmentService {
           422,
         );
       }
-      // Phí tính lại server-side từ cấu hình dịch vụ, bỏ qua phí client gửi lên
+      // Phí ước tính từ services_config; GHN sẽ ghi đè bằng total_fee thật sau create
       const quoted = this.providers.quoteService(
         provider.servicesConfig,
         dto.service_code,
         weight,
+        provider.code,
       );
       shippingFee = quoted.fee;
       serviceName = quoted.name;
     }
 
+    const feePayer = dto.fee_payer ?? ShippingFeePayer.shop_tra;
     const codAmount =
       dto.cod_amount ?? Number(order.totalPrice) - Number(order.totalReceived);
 
-    let location: { name: string; phone: string | null; address: string | null; ward: string | null; district: string | null; province: string | null } | null = null;
+    let location: {
+      name: string;
+      phone: string | null;
+      address: string | null;
+      ward: string | null;
+      district: string | null;
+      province: string | null;
+    } | null = null;
     const locationId = dto.location_id
       ? BigInt(dto.location_id)
       : order.locationId;
@@ -370,6 +394,70 @@ export class FulfillmentService {
       location?.district,
       location?.province,
     ].filter(Boolean);
+    const originName = dto.origin_name ?? location?.name ?? null;
+    const originPhone = dto.origin_phone ?? location?.phone ?? null;
+    const originAddress1 =
+      dto.origin_address1 ??
+      (fromAddressParts.length ? fromAddressParts.join(', ') : null);
+
+    // Đẩy đơn GHN trước khi ghi DB — tránh vận đơn local không có mã tracking
+    if (
+      dto.shipping_type === ShippingProviderType.tich_hop &&
+      provider.code === GHN_PROVIDER_CODE
+    ) {
+      if (!originName || !originPhone || !originAddress1) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Thiếu thông tin kho gửi (tên/SĐT/địa chỉ) để tạo đơn GHN',
+          422,
+        );
+      }
+      if (!dto.to_ward || !dto.to_district || !dto.to_province) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Địa chỉ nhận cần đủ phường/quận/tỉnh để tạo đơn GHN',
+          422,
+        );
+      }
+      const ghn = this.providers.ghnClientFor(provider.connectionConfig);
+      const createdGhn = await ghn.createOrder({
+        clientOrderCode: order.name.slice(0, 50),
+        fromName: originName,
+        fromPhone: originPhone,
+        fromAddress: location?.address ?? originAddress1,
+        fromWardName: location?.ward ?? undefined,
+        fromDistrictName: location?.district ?? undefined,
+        fromProvinceName: location?.province ?? undefined,
+        toName: dto.to_name,
+        toPhone: dto.to_phone,
+        toAddress: dto.to_address,
+        toWardName: dto.to_ward,
+        toDistrictName: dto.to_district,
+        toProvinceName: dto.to_province,
+        codAmount,
+        weightGrams: weight,
+        lengthCm,
+        widthCm,
+        heightCm,
+        paymentTypeId: this.providers.ghnAdapter.mapPaymentTypeId(feePayer),
+        requiredNote: this.providers.ghnAdapter.mapRequiredNote(
+          dto.delivery_requirement,
+        ),
+        note: dto.note,
+        content: order.name,
+        insuranceValue: Number(order.totalPrice),
+        serviceTypeId: 2,
+      });
+      trackingNumber = createdGhn.orderCode;
+      shippingFee = createdGhn.totalFee;
+      trackingUrl = trackingUrlFor(createdGhn.orderCode);
+      carrier = 'GHN';
+      carrierName = provider.name;
+      if (createdGhn.expectedDeliveryTime) {
+        const d = new Date(createdGhn.expectedDeliveryTime);
+        if (!Number.isNaN(d.getTime())) expectedDeliveryDate = d;
+      }
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const open = await this.findOpen(order.id, tx);
@@ -386,14 +474,18 @@ export class FulfillmentService {
         providerId: provider.id,
         serviceCode: dto.service_code ?? null,
         serviceName,
-        trackingNumber: dto.tracking_number ?? null,
+        trackingNumber,
+        trackingUrl,
+        trackingCompany: carrierName,
+        carrier,
+        carrierName,
         shippingFee,
-        feePayer: dto.fee_payer,
+        feePayer,
         codAmount,
         weightGrams: weight,
-        lengthCm: dto.length_cm,
-        widthCm: dto.width_cm,
-        heightCm: dto.height_cm,
+        lengthCm,
+        widthCm,
+        heightCm,
         deliveryRequirement: dto.delivery_requirement,
         note: dto.note,
         toName: dto.to_name,
@@ -403,16 +495,21 @@ export class FulfillmentService {
         toDistrict: dto.to_district,
         toProvince: dto.to_province,
         locationId,
-        originName: dto.origin_name ?? location?.name ?? null,
-        originPhone: dto.origin_phone ?? location?.phone ?? null,
-        originAddress1:
-          dto.origin_address1 ??
-          (fromAddressParts.length ? fromAddressParts.join(', ') : null),
+        originName,
+        originPhone,
+        originAddress1,
+        originWard: location?.ward ?? null,
+        originDistrict: location?.district ?? null,
+        originProvince: location?.province ?? null,
+        expectedDeliveryDate,
         shipmentCreatedOn: new Date(),
       };
 
       const record = open
-        ? await tx.fulfillment.update({ where: { id: open.id }, data: shipmentData })
+        ? await tx.fulfillment.update({
+            where: { id: open.id },
+            data: shipmentData,
+          })
         : await tx.fulfillment.create({
             data: {
               name: await generateFulfillmentCode(tx, order.id, order.name),
@@ -442,7 +539,7 @@ export class FulfillmentService {
             code: order.name,
             fulfillment_code: record.name,
             provider_name: provider.name,
-            tracking_number: dto.tracking_number ?? null,
+            tracking_number: trackingNumber,
           },
         },
       });
@@ -659,6 +756,18 @@ export class FulfillmentService {
         409,
       );
     }
+
+    // Hủy bên GHN trước (nếu đã đẩy); lỗi GHN chặn hủy local để tránh lệch trạng thái
+    if (f.trackingNumber && f.providerId) {
+      const provider = await this.prisma.shippingProvider.findUnique({
+        where: { id: f.providerId },
+      });
+      if (provider?.code === GHN_PROVIDER_CODE && provider.isConnected) {
+        const ghn = this.providers.ghnClientFor(provider.connectionConfig);
+        await ghn.cancelOrder([f.trackingNumber]);
+      }
+    }
+
     await this.prisma.$transaction(async (tx) => {
       if (f.packedOn) {
         // Trả hàng từ khu đóng gói về trạng thái giữ chỗ
@@ -694,7 +803,9 @@ export class FulfillmentService {
       await tx.fulfillment.update({
         where: { id },
         data: {
-          ...(f.shipmentStatus ? { shipmentStatus: ShipmentStatus.cancelled } : {}),
+          ...(f.shipmentStatus
+            ? { shipmentStatus: ShipmentStatus.cancelled }
+            : {}),
           cancelledOn: now,
           closedAt: now,
           cancelReason: dto.reason,
@@ -717,33 +828,109 @@ export class FulfillmentService {
     return this.serializeById(id);
   }
 
-  /** Webhook stub — hãng tích hợp gọi về cập nhật trạng thái theo mã vận đơn. */
-  async webhook(providerCode: string, dto: CarrierWebhookDto, user: AuthUser) {
+  /**
+   * Webhook ĐTVC. GHN gửi PascalCase (OrderCode/Status); stub cũ dùng snake_case.
+   * Luôn cố trả 200 với payload có nghĩa để GHN không retry vô ích khi không tìm thấy đơn.
+   */
+  async webhook(providerCode: string, dto: CarrierWebhookDto) {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { code: providerCode },
     });
-    if (!provider) throw new NotFoundException('Không tìm thấy hãng vận chuyển');
-
-    const status = this.providers.carrierAdapter.mapWebhookStatus(dto.status);
-    if (!status) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `Trạng thái không được hỗ trợ: ${dto.status}`,
-        422,
-      );
+    if (!provider) {
+      return { ok: false, reason: 'provider_not_found' };
     }
 
+    const trackingNumber = (dto.OrderCode ?? dto.tracking_number ?? '').trim();
+    const externalStatus = (dto.Status ?? dto.status ?? '').trim();
+    if (!trackingNumber || !externalStatus) {
+      return { ok: false, reason: 'missing_fields' };
+    }
+
+    // Chỉ xử lý tạo mới / đổi trạng thái; bỏ qua update fee/weight/cod
+    const eventType = (dto.Type ?? '').toLowerCase();
+    if (eventType && eventType !== 'create' && eventType !== 'switch_status') {
+      return { ok: true, skipped: true, reason: 'ignored_type' };
+    }
+
+    const adapter = this.providers.adapterFor(provider.code);
     const f = await this.prisma.fulfillment.findFirst({
       where: {
         providerId: provider.id,
-        trackingNumber: dto.tracking_number,
+        trackingNumber,
         closedAt: null,
       },
       include: { order: { include: { items: true } } },
     });
     if (!f) {
-      throw new NotFoundException('Không tìm thấy vận đơn theo mã tracking');
+      return { ok: false, reason: 'not_found' };
     }
-    return this.applyShipmentStatus(f, status, user);
+
+    const actor: AuthUser = {
+      userId: f.createdById,
+      email: 'webhook@carrier',
+      roles: [],
+      locationIds: [f.order.locationId],
+    };
+
+    // Hủy từ GHN khi còn chờ lấy
+    if (
+      provider.code === GHN_PROVIDER_CODE &&
+      this.providers.ghnAdapter.isCancelStatus(externalStatus)
+    ) {
+      if (f.shipmentStatus === ShipmentStatus.pending) {
+        await this.cancel(f.id, { reason: 'GHN cancel' }, actor);
+        return { ok: true, status: ShipmentStatus.cancelled };
+      }
+      return { ok: true, skipped: true, reason: 'cancel_after_pickup' };
+    }
+
+    const target = adapter.mapWebhookStatus(externalStatus);
+    if (!target) {
+      // ready_to_pick / picking… — chưa cần đổi trạng thái nội bộ
+      return { ok: true, skipped: true, reason: 'no_status_change' };
+    }
+    if (!f.shipmentStatus) {
+      return { ok: false, reason: 'no_shipment' };
+    }
+    if (f.shipmentStatus === target) {
+      return { ok: true, skipped: true, reason: 'already_at_status' };
+    }
+
+    const path =
+      provider.code === GHN_PROVIDER_CODE
+        ? this.providers.ghnAdapter.pathTo(f.shipmentStatus, target)
+        : [target];
+    if (!path) {
+      return { ok: true, skipped: true, reason: 'unreachable_status' };
+    }
+
+    let current = f;
+    try {
+      for (const step of path) {
+        await this.applyShipmentStatus(current, step, actor);
+        const refreshed = await this.prisma.fulfillment.findUnique({
+          where: { id: f.id },
+          include: { order: { include: { items: true } } },
+        });
+        if (!refreshed) break;
+        current = refreshed;
+        if (refreshed.closedAt) break;
+      }
+    } catch (err) {
+      if (err instanceof BusinessException) {
+        return {
+          ok: false,
+          reason: err.code,
+          message: err.message,
+        };
+      }
+      throw err;
+    }
+
+    return {
+      ok: true,
+      status: current.shipmentStatus,
+      tracking_number: trackingNumber,
+    };
   }
 }

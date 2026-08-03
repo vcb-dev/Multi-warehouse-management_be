@@ -1,9 +1,18 @@
-import { Body, Controller, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Headers,
+  Param,
+  Post,
+  Put,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/roles.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import {
   CancelFulfillmentDto,
@@ -69,14 +78,21 @@ export class FulfillmentsController {
     return this.fulfillments.cancel(BigInt(id), dto, user);
   }
 
-  /** Stub webhook ĐTVC — khi tích hợp thật sẽ chuyển sang @Public + verify chữ ký */
+  /**
+   * Webhook ĐTVC (GHN đăng ký URL này).
+   * Public — không JWT. Nếu set GHN_WEBHOOK_SECRET thì bắt buộc header X-GHN-Webhook-Secret.
+   */
+  @Public()
   @Post('webhook/:provider_code')
-  @RequirePermission('order:pack')
   webhook(
     @Param('provider_code') providerCode: string,
     @Body() dto: CarrierWebhookDto,
-    @CurrentUser() user: AuthUser,
+    @Headers('x-ghn-webhook-secret') webhookSecret?: string,
   ) {
-    return this.fulfillments.webhook(providerCode, dto, user);
+    const expected = process.env.GHN_WEBHOOK_SECRET?.trim();
+    if (providerCode === 'ghn' && expected && webhookSecret !== expected) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+    return this.fulfillments.webhook(providerCode, dto);
   }
 }
