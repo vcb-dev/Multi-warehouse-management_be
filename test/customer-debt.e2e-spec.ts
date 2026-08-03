@@ -11,6 +11,7 @@ import { OrderService } from '../src/modules/orders/order.service';
 import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 jest.setTimeout(120000);
 
@@ -65,12 +66,7 @@ describeIfDb('Customer debt (integration)', () => {
     variantId = variant.id;
     customerId = customer.id;
     userId = user.id;
-    authUser = {
-      userId,
-      email: 'test@local.dev',
-      roles: ['admin'],
-      locationIds: [locationId],
-    };
+    authUser = adminAuth({ userId, locationIds: [locationId] });
 
     const level = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId } },

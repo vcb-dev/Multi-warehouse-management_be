@@ -10,6 +10,7 @@ import { PurchaseOrderService } from '../src/modules/purchasing/purchase-order.s
 import { GoodsReceiptService } from '../src/modules/purchasing/goods-receipt.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -24,6 +25,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
   let supplierId: bigint;
   let locationId: bigint;
   let variantId: bigint;
+  let productId: bigint;
   let userId: bigint;
 
   beforeAll(async () => {
@@ -36,30 +38,42 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     prisma = module.get(PrismaService);
 
     const supplier = await prisma.supplier.findFirst({ where: { isActive: true } });
-    const branch = await prisma.location.findFirst();
     const warehouse = await prisma.location.findFirst();
-    const variant = await prisma.productVariant.findFirst();
     const user = await prisma.user.findFirst();
-    if (!supplier || !branch || !warehouse || !variant || !user) {
+    if (!supplier || !warehouse || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
     supplierId = supplier.id;
     locationId = warehouse.id;
-    variantId = variant.id;
     userId = user.id;
+
+    // Variant riêng cho file này: nhiều file e2e cùng findFirst() ra variant đầu
+    // tiên nên tồn kho của nhau chồng lên, số liệu khẳng định thành vô nghĩa.
+    const ts = Date.now();
+    const product = await prisma.product.create({
+      data: {
+        name: `Goods receipt E2E ${ts}`,
+        alias: `goods-receipt-e2e-${ts}`,
+        variants: { create: { sku: `GRE-${ts}`, price: '50000' } },
+      },
+      include: { variants: true },
+    });
+    productId = product.id;
+    variantId = product.variants[0].id;
   });
 
   afterAll(async () => {
+    await prisma.inventoryMovement.deleteMany({ where: { variantId } });
+    await prisma.inventoryLevel.deleteMany({ where: { variantId } });
+    await prisma.purchaseOrderItem.deleteMany({ where: { variantId } });
+    await prisma.goodsReceiptItem.deleteMany({ where: { variantId } });
+    await prisma.productVariant.deleteMany({ where: { productId } });
+    await prisma.product.deleteMany({ where: { id: productId } });
     await prisma.$disconnect();
   });
 
   it('submit PO tăng incoming; REI confirm tăng on_hand và giảm incoming', async () => {
-    const authUser = {
-      userId,
-      email: 'test@local.dev',
-      roles: ['admin'],
-      locationIds: [locationId],
-    };
+    const authUser = adminAuth({ userId, locationIds: [locationId] });
 
     const { data: po } = await poService.create(
       {
@@ -83,6 +97,7 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
         supplier_id: supplierId.toString(),
         location_id: locationId.toString(),
         purchase_order_id: po.id,
+        invoice_symbol: 'AA/26E',
         items: [
           {
             variant_id: variantId.toString(),

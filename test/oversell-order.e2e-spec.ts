@@ -18,6 +18,7 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BusinessException } from '../src/common/exceptions/business.exception';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -71,12 +72,10 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     locationId = warehouse.id;
     otherWarehouseId = otherWarehouse.id;
     userId = user.id;
-    authUser = {
+    authUser = adminAuth({
       userId,
-      email: 't',
-      roles: ['admin'],
       locationIds: [locationId, otherWarehouseId],
-    };
+    });
 
     const product = await prisma.product.create({
       data: { name: `Oversell E2E ${SKU}`, alias: SKU.toLowerCase() },

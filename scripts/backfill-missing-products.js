@@ -59,14 +59,52 @@ async function filterVariants(variants) {
   return { keep, dropped: variants.length - keep.length };
 }
 
+/**
+ * Tự dò sản phẩm có trên Sapo mà chưa có trong DB (đối chiếu theo `sapo_id`).
+ * Vẫn đọc được danh sách dựng sẵn qua --file=<đường dẫn> nếu cần chạy có chọn lọc.
+ */
+async function findMissing() {
+  const fileArg = process.argv.find((a) => a.startsWith('--file='));
+  if (fileArg) {
+    const path = fileArg.slice('--file='.length);
+    return JSON.parse(require('fs').readFileSync(path, 'utf8'));
+  }
+
+  const local = new Set(
+    (
+      await prisma.product.findMany({
+        where: { sapoId: { not: null } },
+        select: { sapoId: true },
+      })
+    ).map((p) => p.sapoId.toString()),
+  );
+
+  const missing = [];
+  let scanned = 0;
+  for (let page = 1; ; page++) {
+    const j = await api(`/admin/products.json?page=${page}&limit=250`);
+    const ps = j.products ?? [];
+    if (!ps.length) break;
+    for (const p of ps) {
+      scanned += 1;
+      if (!local.has(String(p.id))) missing.push(p.id);
+    }
+    process.stdout.write(`\r  quét Sapo: ${scanned} sản phẩm`);
+    if (ps.length < 250) break;
+  }
+  console.log(`\n  Sapo có ${scanned}, DB có ${local.size} (theo sapo_id).`);
+  return missing;
+}
+
 (async () => {
-  const missing = JSON.parse(require('fs').readFileSync('/tmp/missing_products.json', 'utf8'));
+  const missing = await findMissing();
   console.log(`Sản phẩm cần kéo: ${missing.length}`);
 
   const usedAlias = new Set();
   let created = 0;
   let variantCount = 0;
   let droppedVariants = 0;
+  let skippedNoVariant = 0;
   let failed = 0;
 
   for (const sapoId of missing) {
@@ -79,6 +117,13 @@ async function filterVariants(variants) {
 
     const { keep, dropped } = await filterVariants(s.variants ?? []);
     droppedVariants += dropped;
+
+    // Không tạo sản phẩm rỗng phiên bản — đó đúng là lỗi mà audit đang bắt
+    // ("sản phẩm nào cũng có ít nhất 1 phiên bản").
+    if (!keep.length) {
+      skippedNoVariant += 1;
+      continue;
+    }
 
     const alias = await uniqueAlias(s.alias, s.id, usedAlias);
     const data = {
@@ -140,6 +185,7 @@ async function filterVariants(variants) {
   console.log('\n=== KẾT QUẢ ===');
   console.log(`sản phẩm tạo: ${created} | phiên bản: ${variantCount}`);
   console.log(`bỏ phiên bản trùng SKU: ${droppedVariants} | lỗi: ${failed}`);
+  console.log(`bỏ sản phẩm không còn phiên bản nào hợp lệ: ${skippedNoVariant}`);
   if (!APPLY) console.log('\n(chạy lại với --apply để ghi)');
 
   await prisma.$disconnect();

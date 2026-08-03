@@ -12,6 +12,8 @@ describeIfDb('resolvePrice priority (integration)', () => {
   let pricing: PriceListService;
   let prisma: PrismaService;
   let variantId: bigint;
+  let productId: bigint;
+  let priceListId: bigint;
   let locationId: bigint;
   let customerGroupId: bigint;
 
@@ -23,32 +25,48 @@ describeIfDb('resolvePrice priority (integration)', () => {
     pricing = module.get(PriceListService);
     prisma = module.get(PrismaService);
 
-    const variant = await prisma.productVariant.findFirst();
     const branch = await prisma.location.findFirst();
     const cg = await prisma.customerGroup.findFirst();
-    if (!variant || !branch || !cg) throw new Error('Run seed first');
-    variantId = variant.id;
+    if (!branch || !cg) throw new Error('Run seed first');
     locationId = branch.id;
     customerGroupId = cg.id;
 
-    const plBranch = await prisma.priceList.create({
+    // Tạo variant riêng thay vì findFirst(): file test khác cũng tạo bảng giá
+    // cho cặp (variant đầu tiên, kho đầu tiên), file nào chạy sau sẽ đọc phải
+    // bảng giá của file kia vì findEnabledItem lấy bản ghi id nhỏ nhất.
+    const ts = Date.now();
+    const product = await prisma.product.create({
       data: {
-        code: `CTL-TEST-${Date.now()}`,
-        name: 'Test branch',
-        locationId,
-        items: {
-          create: {
-            variantId,
-            fixedPrice: 150_000,
-            enabled: true,
-          },
+        name: `Resolve price ${ts}`,
+        alias: `resolve-price-${ts}`,
+        variants: {
+          create: { sku: `RP-${ts}`, price: '999000' },
         },
       },
+      include: { variants: true },
     });
-    void plBranch;
+    productId = product.id;
+    variantId = product.variants[0].id;
+
+    priceListId = (
+      await prisma.priceList.create({
+        data: {
+          code: `CTL-TEST-${ts}`,
+          name: 'Test branch',
+          locationId,
+          items: {
+            create: { variantId, fixedPrice: 150_000, enabled: true },
+          },
+        },
+      })
+    ).id;
   });
 
   afterAll(async () => {
+    await prisma.priceListItem.deleteMany({ where: { priceListId } });
+    await prisma.priceList.delete({ where: { id: priceListId } });
+    await prisma.productVariant.deleteMany({ where: { productId } });
+    await prisma.product.delete({ where: { id: productId } });
     await prisma.$disconnect();
   });
 

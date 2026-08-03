@@ -184,6 +184,11 @@ export class ProductService {
               imageUrl: vr.imageUrl,
               weight: vr.weight,
               weightUnit: vr.weightUnit,
+              unit: vr.unit,
+              taxable: vr.taxable,
+              requiresShipping: vr.requiresShipping,
+              inventoryManagement: vr.inventoryManagement,
+              inventoryPolicy: vr.inventoryPolicy,
             },
           });
 
@@ -411,14 +416,24 @@ export class ProductService {
     dto: { unit?: string; taxable?: boolean; requires_shipping?: boolean; track_inventory?: boolean; allow_backorder?: boolean },
     v?: ProductVariantDto,
   ) {
+    // Không gửi thì trả `undefined` chứ không tự bịa mặc định: lúc create Prisma
+    // sẽ lấy default của cột (trùng đúng các giá trị cũ ở đây), lúc update thì
+    // giữ nguyên giá trị đang lưu thay vì ghi đè.
+    const unit = v?.unit ?? dto.unit;
+    const trackInventory = v?.track_inventory ?? dto.track_inventory;
+    const allowBackorder = v?.allow_backorder ?? dto.allow_backorder;
     return {
-      unit: (v?.unit ?? dto.unit)?.trim() || null,
-      taxable: v?.taxable ?? dto.taxable ?? true,
-      requiresShipping: v?.requires_shipping ?? dto.requires_shipping ?? true,
+      unit: unit === undefined ? undefined : unit.trim() || null,
+      taxable: v?.taxable ?? dto.taxable,
+      requiresShipping: v?.requires_shipping ?? dto.requires_shipping,
       inventoryManagement:
-        (v?.track_inventory ?? dto.track_inventory ?? true) ? 'bizweb' : '',
+        trackInventory === undefined ? undefined : trackInventory ? 'bizweb' : '',
       inventoryPolicy:
-        (v?.allow_backorder ?? dto.allow_backorder ?? false) ? 'continue' : 'deny',
+        allowBackorder === undefined
+          ? undefined
+          : allowBackorder
+            ? 'continue'
+            : 'deny',
     };
   }
 
@@ -435,7 +450,8 @@ export class ProductService {
       const v = variants?.[0];
       return [
         {
-          sku: v?.sku ?? this.variants.suggestSku(alias, []),
+          sku: v?.sku?.trim() || this.variants.suggestSku(alias, []),
+          skuExplicit: Boolean(v?.sku?.trim()),
           price: v?.price ?? 0,
           cost: v?.cost,
           compareAtPrice: v?.compare_at_price,
@@ -461,7 +477,10 @@ export class ProductService {
       const key = this.variants.optionKey(optionValues);
       const input = byKey.get(key);
       return {
-        sku: this.variants.suggestSku(alias, optionValues),
+        // SKU do người dùng nhập là nguồn sự thật; chỉ tự sinh khi bỏ trống.
+        sku:
+          input?.sku?.trim() || this.variants.suggestSku(alias, optionValues),
+        skuExplicit: Boolean(input?.sku?.trim()),
         price: input?.price ?? 0,
         cost: input?.cost,
         compareAtPrice: input?.compare_at_price,
@@ -541,7 +560,12 @@ export class ProductService {
       const match = existingByKey.get(key);
       let variantId: bigint;
 
-      if (match && match.sku === d.sku) {
+      // Request không gửi SKU thì giữ nguyên SKU đang lưu — nếu lấy SKU tự sinh
+      // làm chuẩn, mọi lần sửa giá/tên đều bị coi là "đổi SKU" rồi xoá-tạo lại
+      // phiên bản (hoặc chặn bằng VARIANT_IN_USE khi đã có tồn kho).
+      const desiredSku = d.skuExplicit ? d.sku : (match?.sku ?? d.sku);
+
+      if (match && match.sku === desiredSku) {
         await tx.productVariant.update({
           where: { id: match.id },
           data: {
@@ -550,6 +574,13 @@ export class ProductService {
             compareAtPrice: d.compareAtPrice,
             barcode: d.barcode,
             imageUrl: d.imageUrl,
+            weight: d.weight,
+            weightUnit: d.weightUnit,
+            unit: d.unit,
+            taxable: d.taxable,
+            requiresShipping: d.requiresShipping,
+            inventoryManagement: d.inventoryManagement,
+            inventoryPolicy: d.inventoryPolicy,
             enabled: true,
           },
         });
@@ -571,12 +602,19 @@ export class ProductService {
         const created = await tx.productVariant.create({
           data: {
             productId,
-            sku: d.sku,
+            sku: desiredSku,
             price: d.price,
             cost: d.cost ?? 0,
             compareAtPrice: d.compareAtPrice,
             barcode: d.barcode,
             imageUrl: d.imageUrl,
+            weight: d.weight,
+            weightUnit: d.weightUnit,
+            unit: d.unit,
+            taxable: d.taxable,
+            requiresShipping: d.requiresShipping,
+            inventoryManagement: d.inventoryManagement,
+            inventoryPolicy: d.inventoryPolicy,
           },
         });
         variantId = created.id;
@@ -623,9 +661,20 @@ export class ProductService {
   }
 
   private async validateSkus(skus: string[], excludeProductId?: bigint) {
+    const seen = new Set<string>();
     for (const sku of skus) {
-      const trimmed = sku.trim();
+      const trimmed = sku?.trim();
       if (!trimmed) continue;
+      // Trùng ngay trong cùng một request: bắt ở đây, nếu không sẽ vỡ ở ràng
+      // buộc unique của DB và trả về lỗi P2002 thô.
+      if (seen.has(trimmed)) {
+        throw new BusinessException(
+          'DUPLICATE_SKU',
+          `SKU "${trimmed}" bị lặp trong danh sách phiên bản`,
+          409,
+        );
+      }
+      seen.add(trimmed);
       const existing = await this.repo.findVariantBySku(trimmed);
       if (
         existing &&

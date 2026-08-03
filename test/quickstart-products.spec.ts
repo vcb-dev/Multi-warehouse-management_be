@@ -12,6 +12,7 @@ import { ProductService } from '../src/modules/products/product.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BusinessException } from '../src/common/exceptions/business.exception';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -28,12 +29,7 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
   let locationId: bigint;
   let customerGroupId: bigint;
 
-  const authUser = () => ({
-    userId,
-    email: 'admin@local.dev',
-    roles: ['admin'],
-    locationIds: [] as bigint[],
-  });
+  const authUser = () => adminAuth({ userId });
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({

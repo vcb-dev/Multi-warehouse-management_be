@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
+import { CustomerGroupService } from './customer-group.service';
 import {
   CreateCustomerDto,
   CustomerAddressDto,
@@ -38,7 +39,10 @@ function serializeAddress(a: CustomerWithRelations['addresses'][number]) {
 
 @Injectable()
 export class CustomerService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private groups: CustomerGroupService,
+  ) {}
 
   private addressData(a: CustomerAddressDto) {
     return {
@@ -108,6 +112,50 @@ export class CustomerService {
         type: m.group.type,
       })),
     };
+  }
+
+  /**
+   * Chỉ ghi đè thành viên của các nhóm **thủ công**: nhóm tự động do điều kiện
+   * quyết định, xoá ở đây rồi `syncCustomerAutoGroups` lại thêm vào ngay.
+   */
+  private async replaceManualGroups(
+    tx: Prisma.TransactionClient,
+    customerId: bigint,
+    groupIds: string[],
+  ) {
+    const manual = await tx.customerGroup.findMany({
+      where: { type: 'manual' },
+      select: { id: true },
+    });
+    const manualIds = new Set(manual.map((g) => g.id));
+
+    await tx.customerGroupMember.deleteMany({
+      where: { customerId, customerGroupId: { in: [...manualIds] } },
+    });
+
+    const wanted = groupIds
+      .map((gid) => BigInt(gid))
+      .filter((gid) => manualIds.has(gid));
+    if (wanted.length) {
+      await tx.customerGroupMember.createMany({
+        data: wanted.map((gid) => ({ customerId, customerGroupId: gid })),
+        skipDuplicates: true,
+      });
+    }
+    return [...manualIds];
+  }
+
+  /** Ghi lại `customers_count` cho các nhóm vừa bị đổi thành viên */
+  private async syncGroupCounts(groupIds: bigint[]) {
+    for (const gid of groupIds) {
+      const total = await this.prisma.customerGroupMember.count({
+        where: { customerGroupId: gid },
+      });
+      await this.prisma.customerGroup.update({
+        where: { id: gid },
+        data: { customersCount: total },
+      });
+    }
   }
 
   async list(query: ListCustomersQueryDto) {
@@ -193,15 +241,17 @@ export class CustomerService {
         addresses: dto.addresses?.length
           ? { create: this.normalizeDefault(dto.addresses) }
           : undefined,
-        groups: dto.customer_group_ids?.length
-          ? {
-              create: dto.customer_group_ids.map((gid) => ({
-                customerGroupId: BigInt(gid),
-              })),
-            }
-          : undefined,
       },
     });
+
+    if (dto.customer_group_ids?.length) {
+      await this.replaceManualGroups(this.prisma, created.id, dto.customer_group_ids);
+    }
+    await this.groups.syncCustomerAutoGroups(created.id);
+    await this.syncGroupCounts(
+      (dto.customer_group_ids ?? []).map((gid) => BigInt(gid)),
+    );
+
     return this.findOne(created.id);
   }
 
@@ -209,6 +259,8 @@ export class CustomerService {
     const existing = await this.prisma.customer.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Không tìm thấy khách hàng');
     await this.assertPhoneFree(dto.phone, id);
+
+    let touchedGroups: bigint[] = [];
 
     await this.prisma.$transaction(async (tx) => {
       await tx.customer.update({
@@ -243,18 +295,17 @@ export class CustomerService {
         }
       }
       if (dto.customer_group_ids) {
-        await tx.customerGroupMember.deleteMany({ where: { customerId: id } });
-        if (dto.customer_group_ids.length) {
-          await tx.customerGroupMember.createMany({
-            data: dto.customer_group_ids.map((gid) => ({
-              customerId: id,
-              customerGroupId: BigInt(gid),
-            })),
-            skipDuplicates: true,
-          });
-        }
+        touchedGroups = await this.replaceManualGroups(
+          tx,
+          id,
+          dto.customer_group_ids,
+        );
       }
     });
+
+    // Địa chỉ hoặc thông tin vừa đổi có thể làm khách rơi vào/ra nhóm tự động.
+    await this.groups.syncCustomerAutoGroups(id);
+    await this.syncGroupCounts(touchedGroups);
 
     return this.findOne(id);
   }

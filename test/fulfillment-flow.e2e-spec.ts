@@ -14,6 +14,7 @@ import { FulfillmentService } from '../src/modules/fulfillments/fulfillment.serv
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BusinessException } from '../src/common/exceptions/business.exception';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -74,7 +75,7 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     const user = await prisma.user.findFirstOrThrow();
     locationId = warehouse.id;
     userId = user.id;
-    authUser = { userId, email: 't', roles: ['admin'], locationIds: [locationId] };
+    authUser = adminAuth({ userId, locationIds: [locationId] });
 
     const product = await prisma.product.create({
       data: { name: `Fulfillment E2E ${SKU}`, alias: SKU.toLowerCase() },

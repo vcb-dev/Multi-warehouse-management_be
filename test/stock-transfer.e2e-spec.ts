@@ -10,6 +10,7 @@ import { TransfersModule } from '../src/modules/transfers/transfers.module';
 import { StockTransferService } from '../src/modules/transfers/stock-transfer.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -25,6 +26,7 @@ describeIfDb('US3 stock transfer (integration)', () => {
   let toLocationId: bigint;
   let variantId: bigint;
   let userId: bigint;
+  let productId: bigint;
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -36,15 +38,27 @@ describeIfDb('US3 stock transfer (integration)', () => {
     prisma = module.get(PrismaService);
 
     const warehouses = await prisma.location.findMany({ take: 2, orderBy: { id: 'asc' } });
-    const variant = await prisma.productVariant.findFirst();
     const user = await prisma.user.findFirst();
-    if (warehouses.length < 2 || !variant || !user) {
+    if (warehouses.length < 2 || !user) {
       throw new Error('Run prisma db seed before integration tests');
     }
     fromLocationId = warehouses[0].id;
     toLocationId = warehouses[1].id;
-    variantId = variant.id;
     userId = user.id;
+
+    // Variant riêng: nhiều file e2e cùng findFirst() ra variant đầu tiên nên tồn
+    // kho của nhau chồng lên nhau.
+    const ts = Date.now();
+    const product = await prisma.product.create({
+      data: {
+        name: `Stock transfer E2E ${ts}`,
+        alias: `stock-transfer-e2e-${ts}`,
+        variants: { create: { sku: `STE-${ts}`, price: '50000' } },
+      },
+      include: { variants: true },
+    });
+    productId = product.id;
+    variantId = product.variants[0].id;
 
     const levelBeforeSeed = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId: fromLocationId } },
@@ -61,6 +75,11 @@ describeIfDb('US3 stock transfer (integration)', () => {
   });
 
   afterAll(async () => {
+    await prisma.stockTransferItem.deleteMany({ where: { variantId } });
+    await prisma.inventoryMovement.deleteMany({ where: { variantId } });
+    await prisma.inventoryLevel.deleteMany({ where: { variantId } });
+    await prisma.productVariant.deleteMany({ where: { productId } });
+    await prisma.product.deleteMany({ where: { id: productId } });
     await prisma.$disconnect();
   });
 
@@ -72,12 +91,10 @@ describeIfDb('US3 stock transfer (integration)', () => {
   }
 
   it('INV-3: create → receive giữ nguyên tổng on_hand 2 kho', async () => {
-    const authUser = {
+    const authUser = adminAuth({
       userId,
-      email: 'test@local.dev',
-      roles: ['admin'],
       locationIds: [fromLocationId, toLocationId],
-    };
+    });
 
     const totalBefore = await sumOnHand([fromLocationId, toLocationId]);
     const toBefore = await prisma.inventoryLevel.findUnique({
@@ -100,7 +117,16 @@ describeIfDb('US3 stock transfer (integration)', () => {
       authUser,
     );
 
-    expect(stn.status).toBe(StockTransferStatus.dang_chuyen);
+    // Luồng: nhap → submit → cho_chuyen → ship → dang_chuyen → receive.
+    // Hàng chỉ rời kho đi ở bước ship.
+    expect(stn.status).toBe(StockTransferStatus.nhap);
+    await transferService.transition(BigInt(stn.id), 'submit', authUser);
+    await transferService.transition(BigInt(stn.id), 'ship', authUser);
+
+    const shipped = await prisma.stockTransfer.findUniqueOrThrow({
+      where: { id: BigInt(stn.id) },
+    });
+    expect(shipped.status).toBe(StockTransferStatus.dang_chuyen);
 
     const fromAfterCreate = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId: fromLocationId } },
@@ -129,12 +155,10 @@ describeIfDb('US3 stock transfer (integration)', () => {
   });
 
   it('cancel hoàn on_hand kho đi và gỡ incoming kho nhận', async () => {
-    const authUser = {
+    const authUser = adminAuth({
       userId,
-      email: 'test@local.dev',
-      roles: ['admin'],
       locationIds: [fromLocationId, toLocationId],
-    };
+    });
 
     const fromBefore = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId: fromLocationId } },
@@ -157,6 +181,10 @@ describeIfDb('US3 stock transfer (integration)', () => {
       authUser,
     );
 
+    // Hủy phiếu còn ở trạng thái `nhap` sẽ XOÁ hẳn phiếu và chưa từng đụng tồn;
+    // muốn kiểm phần hoàn tồn thì phải đẩy qua ship trước.
+    await transferService.transition(BigInt(stn.id), 'submit', authUser);
+    await transferService.transition(BigInt(stn.id), 'ship', authUser);
     await transferService.cancel(BigInt(stn.id), authUser);
 
     const fromAfter = await prisma.inventoryLevel.findUnique({

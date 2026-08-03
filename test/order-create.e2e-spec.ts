@@ -7,6 +7,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -48,7 +49,7 @@ describeIfDb('order create reserves stock', () => {
         location_id: locationId.toString(),
         items: [{ variant_id: variantId.toString(), location_id: locationId.toString(), quantity: 1, price: 1 }],
       },
-      { userId, email: 't', roles: ['admin'], locationIds: [locationId] },
+      adminAuth({ userId, locationIds: [locationId] }),
     );
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
       where: { variantId_locationId: { variantId, locationId } },

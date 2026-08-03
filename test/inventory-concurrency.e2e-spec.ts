@@ -10,7 +10,6 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { sortForLocking } from '../src/modules/inventory/inventory.types';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { BusinessException } from '../src/common/exceptions/business.exception';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -96,7 +95,7 @@ describeIfDb('Inventory concurrency (integration)', () => {
       createdById: userId,
     });
 
-  it('10 request tranh 4 tồn: đúng 4 thắng, 6 bị INSUFFICIENT_STOCK, không oversell', async () => {
+  it('10 request tranh 4 tồn: không mất cập nhật, available âm đúng bằng phần vượt', async () => {
     await inventory.applyMovement({
       variantId: variantA,
       locationId,
@@ -111,28 +110,22 @@ describeIfDb('Inventory concurrency (integration)', () => {
       Array.from({ length: 10 }, () => reserveOne(variantA)),
     );
 
-    const wins = results.filter((r) => r.status === 'fulfilled');
-    const losses = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected',
-    );
+    // Giữ chỗ vượt tồn KHÔNG còn bị chặn ở tầng này: bán âm là hành vi thiết kế
+    // (giống Sapo), chốt chặn đã dời sang bước đóng gói/đẩy vận chuyển —
+    // INSUFFICIENT_STOCK giờ chỉ còn ở FulfillmentService.
+    const losses = results.filter((r) => r.status === 'rejected');
+    expect(losses).toHaveLength(0);
 
-    expect(wins).toHaveLength(4);
-    expect(losses).toHaveLength(6);
-    for (const loss of losses) {
-      expect(loss.reason).toBeInstanceOf(BusinessException);
-      expect((loss.reason as BusinessException).code).toBe(
-        'INSUFFICIENT_STOCK',
-      );
-    }
-
+    // Thứ THẬT SỰ cần bảo vệ ở đây là khoá hàng: 10 request đồng thời phải cộng
+    // đủ 10, không được mất cập nhật nào (lost update).
     const level = await prisma.inventoryLevel.findUniqueOrThrow({
       where: {
         variantId_locationId: { variantId: variantA, locationId },
       },
     });
     expect(level.onHand).toBe(4);
-    expect(level.committed).toBe(4);
-    expect(level.available).toBe(0);
+    expect(level.committed).toBe(10);
+    expect(level.available).toBe(-6);
 
     // Sổ cái khớp số dư sau bão request
     const check = await inventory.reconcile(variantA, locationId);

@@ -14,6 +14,7 @@ import { OrderService } from '../src/modules/orders/order.service';
 import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -30,12 +31,7 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
   let locationId: bigint;
   let variantId: bigint;
 
-  const auth = () => ({
-    userId,
-    email: 'admin@local.dev',
-    roles: ['admin'],
-    locationIds: [] as bigint[],
-  });
+  const auth = () => adminAuth({ userId });
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -105,22 +101,29 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     expect(level.available).toBeLessThanOrEqual(8);
   });
 
-  it('KC2 — INSUFFICIENT_STOCK & MISSING_WAREHOUSE', async () => {
-    await expect(
-      orders.create(
-        {
-          location_id: locationId.toString(),
-          items: [
-            {
-              variant_id: variantId.toString(),
-              location_id: locationId.toString(),
-              quantity: 999,
-            },
-          ],
-        },
-        auth(),
-      ),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+  it('KC2 — bán âm cho phép & MISSING_WAREHOUSE', async () => {
+    // Đặt vượt tồn KHÔNG còn bị chặn lúc tạo đơn: chốt chặn đã dời sang bước
+    // đóng gói/đẩy vận chuyển (FulfillmentService). Xem oversell-order.e2e-spec
+    // cho phần khẳng định chốt chặn đó.
+    const res = await orders.create(
+      {
+        location_id: locationId.toString(),
+        items: [
+          {
+            variant_id: variantId.toString(),
+            location_id: locationId.toString(),
+            quantity: 999,
+          },
+        ],
+      },
+      auth(),
+    );
+    expect(res.status).toBe(OrderStatus.open);
+
+    const level = await prisma.inventoryLevel.findUniqueOrThrow({
+      where: { variantId_locationId: { variantId, locationId } },
+    });
+    expect(level.available).toBeLessThan(0);
 
     await expect(
       orders.create(

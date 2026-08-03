@@ -24,6 +24,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { computeAvailable } from '../src/modules/inventory/inventory.types';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -46,12 +47,8 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
   let variantId: bigint;
   let userId: bigint;
 
-  const adminUser = () => ({
-    userId,
-    email: 'admin@local.dev',
-    roles: ['admin'],
-    locationIds: [warehouseK1, warehouseK2],
-  });
+  const adminUser = () =>
+    adminAuth({ userId, locationIds: [warehouseK1, warehouseK2] });
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -168,6 +165,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
         supplier_id: supplierId.toString(),
         location_id: warehouseK1.toString(),
         purchase_order_id: po.id,
+        invoice_symbol: 'AA/26E',
         items: [
           {
             variant_id: variantId.toString(),
@@ -222,7 +220,16 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       },
       auth,
     );
-    expect(stn.status).toBe(StockTransferStatus.dang_chuyen);
+    // Luồng hiện tại: nhap → submit → cho_chuyen → ship → dang_chuyen → receive
+    expect(stn.status).toBe(StockTransferStatus.nhap);
+
+    await transferService.transition(BigInt(stn.id), 'submit', auth);
+    await transferService.transition(BigInt(stn.id), 'ship', auth);
+
+    const shipped = await prisma.stockTransfer.findUniqueOrThrow({
+      where: { id: BigInt(stn.id) },
+    });
+    expect(shipped.status).toBe(StockTransferStatus.dang_chuyen);
 
     await transferService.receive(BigInt(stn.id), auth);
 
@@ -271,6 +278,9 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
     });
     const onHandBeforeExceed = afterReturn?.onHand ?? 0;
+    // Số lượng vượt phải tính từ tồn khả dụng hiện tại, không hard-code: các KC
+    // trước trong file này đều làm thay đổi tồn của cùng cặp (variant, kho).
+    const exceedQty = (afterReturn?.available ?? 0) + 5;
 
     const returnOut = await prisma.inventoryMovement.findFirst({
       where: {
@@ -290,7 +300,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
           items: [
             {
               variant_id: variantId.toString(),
-              quantity: 18,
+              quantity: exceedQty,
               unit_price: 50000,
             },
           ],
@@ -376,12 +386,17 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       auth,
     );
 
-    const onHandAfterCreate = (
+    // Phiếu nháp chưa đụng tồn; hàng chỉ rời kho ở bước ship. Hủy phiếu còn ở
+    // trạng thái `nhap` sẽ XOÁ hẳn phiếu nên phải đẩy qua ship trước.
+    await transferService.transition(BigInt(stn.id), 'submit', auth);
+    await transferService.transition(BigInt(stn.id), 'ship', auth);
+
+    const onHandAfterShip = (
       await prisma.inventoryLevel.findUniqueOrThrow({
         where: { variantId_locationId: { variantId, locationId: warehouseK1 } },
       })
     ).onHand;
-    expect(onHandAfterCreate).toBe(onHandBeforeCancel - 2);
+    expect(onHandAfterShip).toBe(onHandBeforeCancel - 2);
 
     await transferService.cancel(BigInt(stn.id), auth);
 

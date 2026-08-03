@@ -10,6 +10,9 @@ import {
 
 export type { AutoConditions, CreateCategoryDto };
 
+/** Số id mỗi lô khi gán/gỡ danh mục auto hàng loạt. */
+const AUTO_WRITE_CHUNK = 1000;
+
 export type CategoryTreeNode = {
   id: string;
   name: string;
@@ -119,13 +122,57 @@ export class CategoryService {
     }
   }
 
+  /**
+   * Quét lại toàn bộ SP cho mọi danh mục auto.
+   *
+   * Chạy theo lô: bản cũ mở một transaction cho MỖI sản phẩm, với 12k+ sản phẩm
+   * thì một request tạo danh mục auto treo hàng giờ. Vẫn dùng chung
+   * `matchesAuto` nên kết quả gán/gỡ không đổi.
+   */
   async evaluateAutoForAllProducts() {
-    const products = await this.prisma.product.findMany({ select: { id: true } });
-    for (const p of products) {
-      await this.prisma.$transaction((tx) =>
-        this.evaluateAutoForProduct(tx, p.id),
-      );
+    const autoCategories = await this.prisma.category.findMany({
+      where: { conditionType: CategoryConditionType.auto },
+    });
+    if (!autoCategories.length) return;
+
+    const products = await this.prisma.product.findMany({
+      select: { id: true, vendor: true, productType: true, tags: true },
+    });
+
+    for (const cat of autoCategories) {
+      const matched = new Set<bigint>();
+      for (const p of products) {
+        if (this.matchesAuto(p, cat.rules)) matched.add(p.id);
+      }
+
+      const current = await this.prisma.productCategory.findMany({
+        where: { categoryId: cat.id },
+        select: { productId: true },
+      });
+      const currentIds = new Set(current.map((r) => r.productId));
+
+      const toAdd = [...matched].filter((id) => !currentIds.has(id));
+      const toRemove = [...currentIds].filter((id) => !matched.has(id));
+
+      for (const chunk of this.chunk(toAdd)) {
+        await this.prisma.productCategory.createMany({
+          data: chunk.map((productId) => ({ productId, categoryId: cat.id })),
+          skipDuplicates: true,
+        });
+      }
+      for (const chunk of this.chunk(toRemove)) {
+        await this.prisma.productCategory.deleteMany({
+          where: { categoryId: cat.id, productId: { in: chunk } },
+        });
+      }
     }
+  }
+
+  /** Cắt lô để câu lệnh không phình quá số tham số Postgres cho phép. */
+  private chunk(ids: bigint[], size = AUTO_WRITE_CHUNK): bigint[][] {
+    const out: bigint[][] = [];
+    for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+    return out;
   }
 
   matchesAuto(

@@ -119,14 +119,30 @@ function check(group, name, ok, detail) {
   check('ĐƠN', 'đơn nào cũng có dòng hàng', n(orderNoItem) === 0,
     n(orderNoItem) ? `${n(orderNoItem)} đơn rỗng` : '');
 
+  // Sapo tính subtotal_line_items_quantity theo số lượng CÒN LẠI sau huỷ/hoàn
+  // (`current_quantity`), không phải số đặt ban đầu (`quantity`) — so với
+  // `quantity` là so nhầm hai đại lượng khác định nghĩa.
   const totalDrift = await q(`
     SELECT count(*)::int n FROM (
       SELECT o.id, o.subtotal_line_items_quantity AS sl,
-             (SELECT COALESCE(sum(i.quantity),0) FROM order_items i WHERE i.order_id = o.id) AS thuc
+             (SELECT COALESCE(sum(COALESCE(i.current_quantity, i.quantity)),0)
+                FROM order_items i WHERE i.order_id = o.id) AS thuc
       FROM orders o
     ) t WHERE t.sl <> t.thuc`);
-  check('ĐƠN', 'subtotal_line_items_quantity khớp tổng số lượng dòng hàng', n(totalDrift) === 0,
+  check('ĐƠN', 'subtotal_line_items_quantity khớp Σ current_quantity', n(totalDrift) === 0,
     n(totalDrift) ? `${n(totalDrift)} đơn lệch` : '');
+
+  // Đơn thiếu dòng hàng: header ≠ Σ quantity mà không dòng nào bị huỷ. Nguyên
+  // nhân đã truy được: dòng trỏ tới phiên bản chưa nhập về từ Sapo.
+  const missingLines = await q(`
+    SELECT count(*)::int n FROM (
+      SELECT o.id FROM orders o JOIN order_items i ON i.order_id = o.id
+      GROUP BY o.id, o.subtotal_line_items_quantity
+      HAVING o.subtotal_line_items_quantity <> SUM(i.quantity)
+         AND count(*) FILTER (WHERE i.current_quantity IS DISTINCT FROM i.quantity) = 0
+    ) t`);
+  check('ĐƠN', 'không có đơn bị thiếu dòng hàng', n(missingLines) === 0,
+    n(missingLines) ? `${n(missingLines)} đơn thiếu dòng (phiên bản chưa nhập từ Sapo)` : '');
 
   const badStatus = await q(`
     SELECT count(*)::int n FROM orders

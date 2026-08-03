@@ -7,6 +7,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -37,7 +38,7 @@ describeIfDb('order guards', () => {
     await expect(
       orders.create(
         { location_id: locationId.toString(), items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }] },
-        { userId, email: 't', roles: ['admin'], locationIds: [] },
+        adminAuth({ userId }),
       ),
     ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });
   });

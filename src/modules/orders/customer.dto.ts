@@ -82,18 +82,59 @@ export class ListCustomersQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number;
 }
 
+/** Sapo `customer_group.rules[]` — một điều kiện của nhóm tự động */
+export class CustomerGroupRuleDto {
+  /** Xem danh mục ở GET /customer-groups/rule-options */
+  @IsString() column!: string;
+  /** equals | not_equals | greater_than | less_than | contains | ... */
+  @IsString() relation!: string;
+  /** Bỏ trống với relation không cần giá trị (is_set / is_not_set) */
+  @IsOptional() @IsString() condition?: string;
+}
+
 export class CreateCustomerGroupDto {
   @IsString() name!: string;
   @IsOptional() @IsString() code?: string;
   @IsOptional() @IsString() note?: string;
   /** Sapo `type` — auto (theo rules) | manual (chọn tay) */
   @IsOptional() @IsString() type?: string;
+  /** Sapo `disjunctive`: true = thoả 1 điều kiện bất kỳ (OR), false = thoả mọi điều kiện (AND) */
   @IsOptional() @IsBoolean() disjunctive?: boolean;
-  @IsOptional() rules?: unknown;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CustomerGroupRuleDto)
+  rules?: CustomerGroupRuleDto[];
 }
 
-export class UpdateCustomerGroupDto extends CreateCustomerGroupDto {
-  @IsOptional() @IsString() declare name: string;
+/**
+ * Sửa nhóm là cập nhật từng phần: mọi trường bỏ trống đều giữ nguyên giá trị cũ.
+ * Không kế thừa `CreateCustomerGroupDto` vì `name` ở đó bắt buộc, mà TypeScript
+ * không cho lớp con nới một thuộc tính bắt buộc thành tuỳ chọn.
+ */
+export class UpdateCustomerGroupDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() note?: string;
+  /** Sapo `type` — auto (theo rules) | manual (chọn tay) */
+  @IsOptional() @IsString() type?: string;
+  @IsOptional() @IsBoolean() disjunctive?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CustomerGroupRuleDto)
+  rules?: CustomerGroupRuleDto[];
+}
+
+/** Đếm thử số khách khớp điều kiện trước khi lưu nhóm */
+export class PreviewCustomerGroupDto {
+  @IsOptional() @IsBoolean() disjunctive?: boolean;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CustomerGroupRuleDto)
+  rules!: CustomerGroupRuleDto[];
 }
 
 export class SetGroupMembersDto {
