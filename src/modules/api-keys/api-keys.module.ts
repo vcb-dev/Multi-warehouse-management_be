@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+import { RbacModule } from '../rbac/rbac.module';
 import { ApiKeyController } from './api-key.controller';
 import { ApiKeyService } from './api-key.service';
-import { ApiKeyGuard } from './api-key.guard';
 
 @Module({
+  imports: [RbacModule],
   controllers: [ApiKeyController],
-  providers: [ApiKeyService, ApiKeyGuard],
-  exports: [ApiKeyService, ApiKeyGuard],
+  providers: [ApiKeyService],
+  exports: [ApiKeyService],
 })
 export class ApiKeysModule {}

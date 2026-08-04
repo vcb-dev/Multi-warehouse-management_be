@@ -1,28 +1,15 @@
-import {
-  ArrayNotEmpty,
-  IsArray,
-  IsDateString,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { IsDateString, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateApiKeyDto {
   @IsString()
   @MinLength(3)
   name: string;
 
-  /** vd `product-monthly-ops` — endpoint tích hợp key này được phép gọi. */
-  @IsArray()
-  @ArrayNotEmpty()
-  @IsString({ each: true })
-  scopes: string[];
-
-  /** Bỏ trống = không giới hạn (xem được mọi kho). */
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  location_ids?: string[];
+  /** Key xác thực THAY user này — quyền của key = quyền thật của user (roles/permissions),
+   * y hệt JWT. Muốn key toàn quyền thì trỏ vào user có role admin; muốn hẹp quyền thì
+   * trỏ vào một user dịch vụ được gán role hẹp qua màn quản lý vai trò hiện có. */
+  @IsString()
+  acting_user_id: string;
 
   @IsOptional()
   @IsDateString()
