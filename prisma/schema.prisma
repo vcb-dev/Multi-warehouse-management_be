@@ -317,6 +317,7 @@ model User {
   createdFulfillments    Fulfillment[]               @relation("FulfillmentCreatedBy")
   createdCarrierTickets  CarrierTicket[]             @relation("CarrierTicketCreatedBy")
   savedReports           SavedReport[]               @relation("SavedReportUser")
+  apiKeys                ApiKey[]
 
   @@map("users")
 }
@@ -482,22 +483,22 @@ model Location {
 
 /// Sapo `customer_groups` — cùng dạng rule như custom_collections
 model CustomerGroup {
-  id        BigInt   @id @default(autoincrement())
-  sapoId    BigInt?  @unique @map("sapo_id")
+  id             BigInt   @id @default(autoincrement())
+  sapoId         BigInt?  @unique @map("sapo_id")
   /// Mã nội bộ của dự án (Sapo không có) — dùng cho bảng giá
-  code      String   @unique
-  name      String
-  note      String?  @db.Text
+  code           String   @unique
+  name           String
+  note           String?  @db.Text
   /// Sapo `type` — auto (theo rules) | manual (chọn tay)
-  type      String   @default("manual")
+  type           String   @default("manual")
   /// Sapo `disjunctive`: true = thoả 1 rule bất kỳ (OR), false = thoả mọi rule (AND)
-  disjunctive Boolean @default(false)
+  disjunctive    Boolean  @default(false)
   /// Sapo `rules[]` — [{column, relation, condition}]
-  rules      Json?
-  customersCount Int  @default(0) @map("customers_count")
-  catalogsCount  Int  @default(0) @map("catalogs_count")
-  createdOn  DateTime @default(now()) @map("created_on")
-  modifiedOn DateTime @updatedAt @map("modified_on")
+  rules          Json?
+  customersCount Int      @default(0) @map("customers_count")
+  catalogsCount  Int      @default(0) @map("catalogs_count")
+  createdOn      DateTime @default(now()) @map("created_on")
+  modifiedOn     DateTime @updatedAt @map("modified_on")
 
   priceLists PriceList[]
   members    CustomerGroupMember[]
@@ -519,39 +520,38 @@ model CustomerGroupMember {
   @@map("customer_group_members")
 }
 
-
 /// Theo Sapo `/admin/products.json`. Các cờ requires_shipping/taxable/
 /// inventory_management/inventory_policy/unit sống ở ProductVariant như Sapo
 /// (xem docs/sapo-schema-mapping.md mục Phase 2).
 model Product {
-  id             BigInt    @id @default(autoincrement())
-  sapoId         BigInt?   @unique @map("sapo_id")
-  alias          String    @unique
-  name           String
-  vendor         String?
+  id                 BigInt    @id @default(autoincrement())
+  sapoId             BigInt?   @unique @map("sapo_id")
+  alias              String    @unique
+  name               String
+  vendor             String?
   /// Không có ở Sapo — field riêng của dự án, giữ nguyên
-  category       String?
-  material       String?
-  craftType      String?   @map("craft_type")
-  isDiscontinued Boolean   @default(false) @map("is_discontinued")
-  productType    String?   @map("product_type")
+  category           String?
+  material           String?
+  craftType          String?   @map("craft_type")
+  isDiscontinued     Boolean   @default(false) @map("is_discontinued")
+  productType        String?   @map("product_type")
   /// Sapo trả tags dạng chuỗi phân tách dấu phẩy; dự án giữ mảng để không phá
   /// logic lọc/khớp danh mục tự động — quy đổi khi đồng bộ với Sapo.
-  tags           String[]  @default([])
+  tags               String[]  @default([])
   /// Không có ở Sapo — ảnh đại diện tiện dụng, nguồn thật là ProductImage đầu tiên
-  imageUrl       String?   @map("image_url")
-  metaTitle      String?   @map("meta_title")
-  metaDescription String?  @map("meta_description")
-  content        String?   @db.Text
-  summary        String?   @db.Text
-  vatPitCategoryCode String? @map("vat_pit_category_code")
-  templateLayout String?   @map("template_layout")
-  type           String    @default("normal")
+  imageUrl           String?   @map("image_url")
+  metaTitle          String?   @map("meta_title")
+  metaDescription    String?   @map("meta_description")
+  content            String?   @db.Text
+  summary            String?   @db.Text
+  vatPitCategoryCode String?   @map("vat_pit_category_code")
+  templateLayout     String?   @map("template_layout")
+  type               String    @default("normal")
   /// Sapo dùng chuỗi ("active"/"draft"/...), không phải boolean is_published
-  status         String    @default("draft")
-  publishedOn    DateTime? @map("published_on")
-  createdOn      DateTime  @default(now()) @map("created_on")
-  modifiedOn     DateTime  @updatedAt @map("modified_on")
+  status             String    @default("draft")
+  publishedOn        DateTime? @map("published_on")
+  createdOn          DateTime  @default(now()) @map("created_on")
+  modifiedOn         DateTime  @updatedAt @map("modified_on")
 
   variants      ProductVariant[]
   images        ProductImage[]
@@ -590,38 +590,38 @@ model ProductOption {
 }
 
 model ProductVariant {
-  id             BigInt   @id @default(autoincrement())
-  productId      BigInt   @map("product_id")
-  sapoId         BigInt?  @unique @map("sapo_id")
+  id                  BigInt   @id @default(autoincrement())
+  productId           BigInt   @map("product_id")
+  sapoId              BigInt?  @unique @map("sapo_id")
   /// Sapo InventoryItem.id — quan hệ 1:1 với variant, dùng để gọi API InventoryLevel
-  inventoryItemId BigInt? @unique @map("inventory_item_id")
-  sku            String   @unique
-  title          String?
-  barcode        String?
-  price          Decimal  @default(0) @db.Decimal(18, 2)
-  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(18, 2)
+  inventoryItemId     BigInt?  @unique @map("inventory_item_id")
+  sku                 String   @unique
+  title               String?
+  barcode             String?
+  price               Decimal  @default(0) @db.Decimal(18, 2)
+  compareAtPrice      Decimal? @map("compare_at_price") @db.Decimal(18, 2)
   /// Không map trực tiếp field nào của Sapo variant — đồng bộ từ InventoryItem.cost_price (1:1 với variant)
-  cost           Decimal  @default(0) @db.Decimal(18, 2)
-  weight         Decimal? @db.Decimal(18, 4)
-  weightUnit     String?  @map("weight_unit")
+  cost                Decimal  @default(0) @db.Decimal(18, 2)
+  weight              Decimal? @db.Decimal(18, 4)
+  weightUnit          String?  @map("weight_unit")
   /// Không có ở Sapo (Sapo dùng image_id trỏ ProductImage) — giữ URL tiện dụng, đỡ phải join
-  imageUrl       String?  @map("image_url")
+  imageUrl            String?  @map("image_url")
   /// Không có ở Sapo — cho phép ẩn variant khỏi bán mà không xóa (đã phát sinh chứng từ)
-  enabled        Boolean  @default(true)
-  unit           String?
+  enabled             Boolean  @default(true)
+  unit                String?
   /// Dời từ Product xuống đây theo đúng Sapo (Phase 2)
-  requiresShipping Boolean @default(true) @map("requires_shipping")
-  taxable        Boolean  @default(true)
+  requiresShipping    Boolean  @default(true) @map("requires_shipping")
+  taxable             Boolean  @default(true)
   /// Sapo: "bizweb" = có quản lý tồn qua hệ thống, "" = không quản lý
-  inventoryManagement String @default("bizweb") @map("inventory_management")
+  inventoryManagement String   @default("bizweb") @map("inventory_management")
   /// Sapo: "deny" | "continue" (continue = cho phép bán khi hết hàng)
-  inventoryPolicy String  @default("deny") @map("inventory_policy")
-  lotManagement  Boolean  @default(false) @map("lot_management")
-  position       Int      @default(0)
-  type           String   @default("normal")
-  requiresComponents Boolean @default(false) @map("requires_components")
+  inventoryPolicy     String   @default("deny") @map("inventory_policy")
+  lotManagement       Boolean  @default(false) @map("lot_management")
+  position            Int      @default(0)
+  type                String   @default("normal")
+  requiresComponents  Boolean  @default(false) @map("requires_components")
 
-  product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product          Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues     VariantOptionValue[]
   inventoryLevels  InventoryLevel[]
   movements        InventoryMovement[]
@@ -654,35 +654,35 @@ model VariantOptionValue {
 
 /// Sapo `custom_collections` — danh mục sản phẩm
 model Category {
-  id             BigInt                @id @default(autoincrement())
-  sapoId         BigInt?               @unique @map("sapo_id")
-  name           String
+  id              BigInt                @id @default(autoincrement())
+  sapoId          BigInt?               @unique @map("sapo_id")
+  name            String
   /// Sapo `alias` (trước đây là `slug`)
-  alias          String                @unique
-  description    String?               @db.Text
-  metaTitle       String?              @map("meta_title")
-  metaDescription String?              @map("meta_description")
-  templateLayout  String?              @map("template_layout")
+  alias           String                @unique
+  description     String?               @db.Text
+  metaTitle       String?               @map("meta_title")
+  metaDescription String?               @map("meta_description")
+  templateLayout  String?               @map("template_layout")
   /// Sapo `sort_order` — vd "created-desc", "alpha-asc", "manual"
-  sortOrder       String?              @map("sort_order")
-  publishedOn     DateTime?            @map("published_on")
+  sortOrder       String?               @map("sort_order")
+  publishedOn     DateTime?             @map("published_on")
   /// Sapo `products_count` — Sapo tính sẵn, chỉ dùng hiển thị
-  productsCount   Int                  @default(0) @map("products_count")
+  productsCount   Int                   @default(0) @map("products_count")
   /// Sapo `image` là object — trải phẳng các field thực dùng
-  imageSrc       String?               @map("image_src")
-  imageAlt       String?               @map("image_alt")
-  imageWidth     Int?                  @map("image_width")
-  imageHeight    Int?                  @map("image_height")
+  imageSrc        String?               @map("image_src")
+  imageAlt        String?               @map("image_alt")
+  imageWidth      Int?                  @map("image_width")
+  imageHeight     Int?                  @map("image_height")
   /// Sapo `rules` (mảng điều kiện) + `disjunctive` (true = OR, false = AND).
   /// `conditionType` là field riêng của dự án: manual = chọn tay, auto = theo rules.
-  rules          Json?
-  disjunctive    Boolean               @default(false)
-  conditionType  CategoryConditionType @default(manual) @map("condition_type")
+  rules           Json?
+  disjunctive     Boolean               @default(false)
+  conditionType   CategoryConditionType @default(manual) @map("condition_type")
   /// Riêng của dự án — Sapo custom_collection không có cây phân cấp / kênh bán
-  parentId       BigInt?               @map("parent_id")
-  salesChannels  String[]              @default([]) @map("sales_channels")
-  createdOn      DateTime              @default(now()) @map("created_on")
-  modifiedOn     DateTime              @updatedAt @map("modified_on")
+  parentId        BigInt?               @map("parent_id")
+  salesChannels   String[]              @default([]) @map("sales_channels")
+  createdOn       DateTime              @default(now()) @map("created_on")
+  modifiedOn      DateTime              @updatedAt @map("modified_on")
 
   parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id])
   children Category[]        @relation("CategoryTree")
@@ -693,11 +693,11 @@ model Category {
 
 /// Sapo `collects` — bảng nối product ⇄ custom_collection
 model ProductCategory {
-  productId  BigInt @map("product_id")
-  categoryId BigInt @map("category_id")
+  productId  BigInt   @map("product_id")
+  categoryId BigInt   @map("category_id")
   /// Sapo `position` / `featured`
-  position   Int     @default(0)
-  featured   Boolean @default(false)
+  position   Int      @default(0)
+  featured   Boolean  @default(false)
   createdOn  DateTime @default(now()) @map("created_on")
   modifiedOn DateTime @updatedAt @map("modified_on")
 
@@ -723,12 +723,12 @@ model PriceList {
   id              BigInt   @id @default(autoincrement())
   code            String   @unique
   name            String
-  locationId        BigInt?  @map("location_id")
+  locationId      BigInt?  @map("location_id")
   customerGroupId BigInt?  @map("customer_group_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  location Location?         @relation(fields: [locationId], references: [id])
+  location      Location?       @relation(fields: [locationId], references: [id])
   customerGroup CustomerGroup?  @relation(fields: [customerGroupId], references: [id])
   items         PriceListItem[]
 
@@ -786,7 +786,7 @@ model InventoryLevel {
 model InventoryMovement {
   id            BigInt          @id @default(autoincrement())
   variantId     BigInt          @map("variant_id")
-  locationId   BigInt          @map("location_id")
+  locationId    BigInt          @map("location_id")
   bucket        InventoryBucket
   change        Int
   type          MovementType
@@ -796,7 +796,7 @@ model InventoryMovement {
   createdAt     DateTime        @default(now()) @map("created_at")
 
   variant   ProductVariant @relation(fields: [variantId], references: [id])
-  location Location      @relation(fields: [locationId], references: [id])
+  location  Location       @relation(fields: [locationId], references: [id])
   createdBy User?          @relation("MovementCreatedBy", fields: [createdById], references: [id])
 
   @@index([variantId, locationId, bucket, createdAt]) // T046
@@ -926,7 +926,7 @@ model GoodsReceipt {
   id                BigInt             @id @default(autoincrement())
   code              String             @unique
   supplierId        BigInt             @map("supplier_id")
-  locationId       BigInt             @map("location_id")
+  locationId        BigInt             @map("location_id")
   purchaseOrderId   BigInt?            @map("purchase_order_id")
   status            GoodsReceiptStatus @default(chua_nhap)
   paymentStatus     PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
@@ -946,7 +946,7 @@ model GoodsReceipt {
   receivedAt        DateTime?          @map("received_at")
 
   supplier        Supplier           @relation(fields: [supplierId], references: [id])
-  location Location          @relation(fields: [locationId], references: [id])
+  location        Location           @relation(fields: [locationId], references: [id])
   purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   createdBy       User               @relation("ReiCreatedBy", fields: [createdById], references: [id])
   assignedTo      User?              @relation("ReiAssignedTo", fields: [assignedToId], references: [id])
@@ -980,24 +980,24 @@ model GoodsReceiptItem {
 // --- Chuyển kho (US3) ---
 
 model StockTransfer {
-  id              BigInt              @id @default(autoincrement())
-  code            String              @unique
+  id             BigInt              @id @default(autoincrement())
+  code           String              @unique
   fromLocationId BigInt              @map("from_location_id")
   toLocationId   BigInt              @map("to_location_id")
-  status          StockTransferStatus @default(nhap)
-  note            String?
-  totalQuantity   Int                 @default(0) @map("total_quantity")
-  createdById     BigInt              @map("created_by")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  shippedAt       DateTime?           @map("shipped_at")
-  receivedAt      DateTime?           @map("received_at")
-  receivedById    BigInt?             @map("received_by")
+  status         StockTransferStatus @default(nhap)
+  note           String?
+  totalQuantity  Int                 @default(0) @map("total_quantity")
+  createdById    BigInt              @map("created_by")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  shippedAt      DateTime?           @map("shipped_at")
+  receivedAt     DateTime?           @map("received_at")
+  receivedById   BigInt?             @map("received_by")
 
-  fromLocation Location           @relation("TransferFrom", fields: [fromLocationId], references: [id])
-  toLocation   Location           @relation("TransferTo", fields: [toLocationId], references: [id])
-  createdBy     User                @relation("StnCreatedBy", fields: [createdById], references: [id])
-  receivedBy    User?               @relation("StnReceivedBy", fields: [receivedById], references: [id])
-  items         StockTransferItem[]
+  fromLocation Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  createdBy    User                @relation("StnCreatedBy", fields: [createdById], references: [id])
+  receivedBy   User?               @relation("StnReceivedBy", fields: [receivedById], references: [id])
+  items        StockTransferItem[]
 
   @@index([fromLocationId])
   @@index([toLocationId])
@@ -1025,7 +1025,7 @@ model PurchaseReturn {
   id             BigInt       @id @default(autoincrement())
   code           String       @unique
   supplierId     BigInt       @map("supplier_id")
-  locationId    BigInt       @map("location_id")
+  locationId     BigInt       @map("location_id")
   // Đơn nhập hàng gốc — có giá trị khi tạo phiếu trả "theo đơn", null khi trả tự do
   goodsReceiptId BigInt?      @map("goods_receipt_id")
   totalQuantity  Int          @default(0) @map("total_quantity")
@@ -1036,7 +1036,7 @@ model PurchaseReturn {
   createdAt      DateTime     @default(now()) @map("created_at")
 
   supplier     Supplier             @relation(fields: [supplierId], references: [id])
-  location Location            @relation(fields: [locationId], references: [id])
+  location     Location             @relation(fields: [locationId], references: [id])
   goodsReceipt GoodsReceipt?        @relation(fields: [goodsReceiptId], references: [id])
   createdBy    User                 @relation("PvnCreatedBy", fields: [createdById], references: [id])
   items        PurchaseReturnItem[]
@@ -1066,30 +1066,30 @@ model PurchaseReturnItem {
 
 /// Sapo `customers`
 model Customer {
-  id        BigInt   @id @default(autoincrement())
-  sapoId    BigInt?  @unique @map("sapo_id")
-  firstName String?  @map("first_name")
-  lastName  String?  @map("last_name")
-  email     String?
-  phone     String?
-  company   String?
-  tags      String[] @default([])
-  note      String?  @db.Text
+  id               BigInt    @id @default(autoincrement())
+  sapoId           BigInt?   @unique @map("sapo_id")
+  firstName        String?   @map("first_name")
+  lastName         String?   @map("last_name")
+  email            String?
+  phone            String?
+  company          String?
+  tags             String[]  @default([])
+  note             String?   @db.Text
   /// Sapo `state` — enabled | disabled | invited
-  state     String   @default("enabled")
-  verifiedEmail    Boolean  @default(false) @map("verified_email")
+  state            String    @default("enabled")
+  verifiedEmail    Boolean   @default(false) @map("verified_email")
   /// Sapo `gender` — male | female | other (chuỗi tự do như Sapo, không enum)
-  gender    String?
-  dob       DateTime?
-  acceptsMarketing Boolean  @default(false) @map("accepts_marketing")
+  gender           String?
+  dob              DateTime?
+  acceptsMarketing Boolean   @default(false) @map("accepts_marketing")
   /// Sapo lưu sẵn các số tổng hợp này trên customer — đồng bộ để lọc/sắp xếp
   /// nhanh; giá trị sống vẫn tính lại từ bảng orders khi hiển thị chi tiết.
-  ordersCount      Int      @default(0) @map("orders_count")
-  totalSpent       Decimal  @default(0) @map("total_spent") @db.Decimal(18, 2)
-  lastOrderId      BigInt?  @map("last_order_id")
-  lastOrderName    String?  @map("last_order_name")
-  createdOn        DateTime @default(now()) @map("created_on")
-  modifiedOn       DateTime @updatedAt @map("modified_on")
+  ordersCount      Int       @default(0) @map("orders_count")
+  totalSpent       Decimal   @default(0) @map("total_spent") @db.Decimal(18, 2)
+  lastOrderId      BigInt?   @map("last_order_id")
+  lastOrderName    String?   @map("last_order_name")
+  createdOn        DateTime  @default(now()) @map("created_on")
+  modifiedOn       DateTime  @updatedAt @map("modified_on")
 
   orders        Order[]
   draftOrders   DraftOrder[]
@@ -1133,7 +1133,6 @@ model CustomerAddress {
   @@map("customer_addresses")
 }
 
-
 enum CustomerLedgerReferenceType {
   order
   payment
@@ -1162,63 +1161,63 @@ model CustomerLedgerEntry {
 }
 
 model Order {
-  id                 BigInt        @id @default(autoincrement())
-  sapoId             BigInt?       @unique @map("sapo_id")
+  id                BigInt                  @id @default(autoincrement())
+  sapoId            BigInt?                 @unique @map("sapo_id")
   /// Sapo `name` — mã đơn. Đơn đồng bộ dùng đúng mã Sapo trả về (HK93027,
   /// 585144452587096032...); đơn tạo tại app dùng mã app tự sinh (CNHN000001).
-  name               String        @unique
+  name              String                  @unique
   /// Sapo `number` / `order_number` — số thứ tự đơn trong store (chỉ đơn đồng bộ)
-  number             Int?
-  orderNumber        Int?          @map("order_number")
-  customerId         BigInt?       @map("customer_id")
-  locationId           BigInt        @map("location_id")
+  number            Int?
+  orderNumber       Int?                    @map("order_number")
+  customerId        BigInt?                 @map("customer_id")
+  locationId        BigInt                  @map("location_id")
   /// Sapo `source_name` — kênh bán (facebook/tiktokshop/shopee/web/pos/zalo/...).
   /// Là chuỗi tự do (không enum) vì Sapo liên tục thêm kênh mới.
-  sourceName         String?       @map("source_name")
-  status             OrderStatus   @default(open)
-  financialStatus    OrderFinancialStatus    @default(pending) @map("financial_status")
-  fulfillmentStatus  OrderFulfillmentStatus? @map("fulfillment_status")
-  returnStatus       OrderReturnStatus       @default(no_return) @map("return_status")
-  refundStatus       OrderRefundStatus       @default(no_refund) @map("refund_status")
+  sourceName        String?                 @map("source_name")
+  status            OrderStatus             @default(open)
+  financialStatus   OrderFinancialStatus    @default(pending) @map("financial_status")
+  fulfillmentStatus OrderFulfillmentStatus? @map("fulfillment_status")
+  returnStatus      OrderReturnStatus       @default(no_return) @map("return_status")
+  refundStatus      OrderRefundStatus       @default(no_refund) @map("refund_status")
   /// Field đồng bộ/báo cáo từ Sapo — không điều khiển nghiệp vụ nội bộ
-  issueStatus        String?       @map("issue_status")
+  issueStatus       String?                 @map("issue_status")
   /// Cùng họ với return_status/refund_status nên cũng phải có default: để nullable thì
   /// mọi bộ lọc `restock_status = 'no_restock'` sẽ bỏ sót toàn bộ đơn chưa từng nhập lại.
-  restockStatus      OrderRestockStatus @default(no_restock) @map("restock_status")
-  cancelReason       String?       @map("cancel_reason")
-  cancelledOn        DateTime?     @map("cancelled_on")
-  closedOn           DateTime?     @map("closed_on")
+  restockStatus     OrderRestockStatus      @default(no_restock) @map("restock_status")
+  cancelReason      String?                 @map("cancel_reason")
+  cancelledOn       DateTime?               @map("cancelled_on")
+  closedOn          DateTime?               @map("closed_on")
   /// null = chưa xác nhận (~"ordered" cũ); có giá trị = đã xác nhận (~"processing" cũ)
-  confirmedOn        DateTime?     @map("confirmed_on")
-  completedOn        DateTime?     @map("completed_on")
-  paidOn             DateTime?     @map("paid_on")
+  confirmedOn       DateTime?               @map("confirmed_on")
+  completedOn       DateTime?               @map("completed_on")
+  paidOn            DateTime?               @map("paid_on")
   /// Sapo `assignee_id` / `user_id`
-  assignedToId       BigInt?       @map("assignee_id")
-  createdById        BigInt        @map("user_id")
-  email              String?
-  phone              String?
+  assignedToId      BigInt?                 @map("assignee_id")
+  createdById       BigInt                  @map("user_id")
+  email             String?
+  phone             String?
 
   // --- Tiền tệ (tên theo Sapo) ---
   /// Sapo `sub_total_price` (Sapo trả thêm `subtotal_price` trùng giá trị)
-  subTotalPrice      Decimal       @default(0) @map("sub_total_price") @db.Decimal(18, 2)
-  totalDiscounts     Decimal       @default(0) @map("total_discounts") @db.Decimal(18, 2)
-  totalTax           Decimal       @default(0) @map("total_tax") @db.Decimal(18, 2)
-  totalShippingPrice Decimal       @default(0) @map("total_shipping_price") @db.Decimal(18, 2)
-  totalPrice         Decimal       @default(0) @map("total_price") @db.Decimal(18, 2)
-  subtotalLineItemsQuantity Int    @default(0) @map("subtotal_line_items_quantity")
-  totalReceived      Decimal       @default(0) @map("total_received") @db.Decimal(18, 2)
+  subTotalPrice             Decimal  @default(0) @map("sub_total_price") @db.Decimal(18, 2)
+  totalDiscounts            Decimal  @default(0) @map("total_discounts") @db.Decimal(18, 2)
+  totalTax                  Decimal  @default(0) @map("total_tax") @db.Decimal(18, 2)
+  totalShippingPrice        Decimal  @default(0) @map("total_shipping_price") @db.Decimal(18, 2)
+  totalPrice                Decimal  @default(0) @map("total_price") @db.Decimal(18, 2)
+  subtotalLineItemsQuantity Int      @default(0) @map("subtotal_line_items_quantity")
+  totalReceived             Decimal  @default(0) @map("total_received") @db.Decimal(18, 2)
   /// Các field tiền Sapo tính sẵn — chỉ đồng bộ/báo cáo, nghiệp vụ nội bộ tự tính lại
-  currency           String        @default("VND")
-  gateway            String?
-  totalWeight        Int?          @map("total_weight")
-  netPayment         Decimal?      @map("net_payment") @db.Decimal(18, 2)
-  unpaidAmount       Decimal?      @map("unpaid_amount") @db.Decimal(18, 2)
-  totalOutstanding   Decimal?      @map("total_outstanding") @db.Decimal(18, 2)
-  totalRefunded      Decimal?      @map("total_refunded") @db.Decimal(18, 2)
+  currency                  String   @default("VND")
+  gateway                   String?
+  totalWeight               Int?     @map("total_weight")
+  netPayment                Decimal? @map("net_payment") @db.Decimal(18, 2)
+  unpaidAmount              Decimal? @map("unpaid_amount") @db.Decimal(18, 2)
+  totalOutstanding          Decimal? @map("total_outstanding") @db.Decimal(18, 2)
+  totalRefunded             Decimal? @map("total_refunded") @db.Decimal(18, 2)
 
-  shippingMethod     String?       @map("shipping_method")
-  note               String?       @db.Text
-  tags               String[]      @default([])
+  shippingMethod String?  @map("shipping_method")
+  note           String?  @db.Text
+  tags           String[] @default([])
 
   // --- Mốc thời gian (tên theo Sapo) ---
   /// Sapo `created_on` — ngày đặt hàng thật (KHÔNG phải lúc ghi vào DB này)
@@ -1231,71 +1230,71 @@ model Order {
 
   // Giao hàng — Sapo gom vào object `shipping_address`, ở đây trải phẳng theo
   // tiền tố `shipping_` (Postgres không có kiểu object; giữ phẳng để query/index).
-  deliveryMode          OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
-  shippingName          String?  @map("shipping_name")
-  shippingFirstName     String?  @map("shipping_first_name")
-  shippingLastName      String?  @map("shipping_last_name")
-  shippingPhone         String?  @map("shipping_phone")
-  shippingAddress1      String?  @map("shipping_address1")
-  shippingAddress2      String?  @map("shipping_address2")
-  shippingWard          String?  @map("shipping_ward")
-  shippingWardCode      String?  @map("shipping_ward_code")
-  shippingDistrict      String?  @map("shipping_district")
-  shippingDistrictCode  String?  @map("shipping_district_code")
-  shippingProvince      String?  @map("shipping_province")
-  shippingProvinceCode  String?  @map("shipping_province_code")
-  shippingCity          String?  @map("shipping_city")
-  shippingCountry       String?  @map("shipping_country")
-  shippingCountryCode   String?  @map("shipping_country_code")
-  shippingZip           String?  @map("shipping_zip")
-  shippingCompany       String?  @map("shipping_company")
-  shippingLatitude      Decimal? @map("shipping_latitude") @db.Decimal(10, 7)
-  shippingLongitude     Decimal? @map("shipping_longitude") @db.Decimal(10, 7)
+  deliveryMode         OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
+  shippingName         String?           @map("shipping_name")
+  shippingFirstName    String?           @map("shipping_first_name")
+  shippingLastName     String?           @map("shipping_last_name")
+  shippingPhone        String?           @map("shipping_phone")
+  shippingAddress1     String?           @map("shipping_address1")
+  shippingAddress2     String?           @map("shipping_address2")
+  shippingWard         String?           @map("shipping_ward")
+  shippingWardCode     String?           @map("shipping_ward_code")
+  shippingDistrict     String?           @map("shipping_district")
+  shippingDistrictCode String?           @map("shipping_district_code")
+  shippingProvince     String?           @map("shipping_province")
+  shippingProvinceCode String?           @map("shipping_province_code")
+  shippingCity         String?           @map("shipping_city")
+  shippingCountry      String?           @map("shipping_country")
+  shippingCountryCode  String?           @map("shipping_country_code")
+  shippingZip          String?           @map("shipping_zip")
+  shippingCompany      String?           @map("shipping_company")
+  shippingLatitude     Decimal?          @map("shipping_latitude") @db.Decimal(10, 7)
+  shippingLongitude    Decimal?          @map("shipping_longitude") @db.Decimal(10, 7)
 
   // Sapo `billing_address` — cùng cấu trúc, chỉ giữ các field thực sự dùng
-  billingName          String?  @map("billing_name")
-  billingPhone         String?  @map("billing_phone")
-  billingAddress1      String?  @map("billing_address1")
-  billingWard          String?  @map("billing_ward")
-  billingDistrict      String?  @map("billing_district")
-  billingProvince      String?  @map("billing_province")
-  billingCountry       String?  @map("billing_country")
-  billingZip           String?  @map("billing_zip")
+  billingName     String? @map("billing_name")
+  billingPhone    String? @map("billing_phone")
+  billingAddress1 String? @map("billing_address1")
+  billingWard     String? @map("billing_ward")
+  billingDistrict String? @map("billing_district")
+  billingProvince String? @map("billing_province")
+  billingCountry  String? @map("billing_country")
+  billingZip      String? @map("billing_zip")
 
   // Thông số kiện hàng (riêng của dự án — Sapo để ở fulfillment/shipping_lines)
-  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
-  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
-  deliveryLengthCm     Int?     @map("delivery_length_cm")
-  deliveryWidthCm      Int?     @map("delivery_width_cm")
-  deliveryHeightCm     Int?     @map("delivery_height_cm")
-  deliveryRequirement  String?  @map("delivery_requirement")
-  deliveryNote         String?  @map("delivery_note") @db.Text
+  deliveryCodAmount   Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams Int?     @map("delivery_weight_grams")
+  deliveryLengthCm    Int?     @map("delivery_length_cm")
+  deliveryWidthCm     Int?     @map("delivery_width_cm")
+  deliveryHeightCm    Int?     @map("delivery_height_cm")
+  deliveryRequirement String?  @map("delivery_requirement")
+  deliveryNote        String?  @map("delivery_note") @db.Text
 
   // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
-  invoiceTaxCode         String?  @map("invoice_tax_code")
-  invoiceCompanyName     String?  @map("invoice_company_name")
-  invoiceAddress         String?  @map("invoice_address")
-  invoiceBuyerName       String?  @map("invoice_buyer_name")
-  invoiceIdCard          String?  @map("invoice_id_card")
-  invoiceBudgetCode      String?  @map("invoice_budget_code")
-  invoicePhone           String?  @map("invoice_phone")
-  invoiceEmail           String?  @map("invoice_email")
-  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+  invoiceTaxCode        String? @map("invoice_tax_code")
+  invoiceCompanyName    String? @map("invoice_company_name")
+  invoiceAddress        String? @map("invoice_address")
+  invoiceBuyerName      String? @map("invoice_buyer_name")
+  invoiceIdCard         String? @map("invoice_id_card")
+  invoiceBudgetCode     String? @map("invoice_budget_code")
+  invoicePhone          String? @map("invoice_phone")
+  invoiceEmail          String? @map("invoice_email")
+  invoiceSellToConsumer Boolean @default(false) @map("invoice_sell_to_consumer")
 
   /// Bỏ `created_at` cũ (chỉ là lúc sync vào DB này, không mang nghĩa nghiệp vụ)
   /// — ngày đặt hàng thật nằm ở `created_on`.
-  modifiedOn         DateTime      @updatedAt @map("modified_on")
+  modifiedOn DateTime @updatedAt @map("modified_on")
 
-  customer   Customer?     @relation(fields: [customerId], references: [id])
-  location Location        @relation(fields: [locationId], references: [id])
-  assignedTo User?         @relation("OrderAssignedTo", fields: [assignedToId], references: [id])
-  createdBy  User          @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  items        OrderItem[]
-  returns      OrderReturn[]
-  refunds      OrderRefund[]
-  fromDraft    DraftOrder?   @relation("DraftConverted")
-  fulfillments Fulfillment[]
-  shippingLines OrderShippingLine[]
+  customer       Customer?           @relation(fields: [customerId], references: [id])
+  location       Location            @relation(fields: [locationId], references: [id])
+  assignedTo     User?               @relation("OrderAssignedTo", fields: [assignedToId], references: [id])
+  createdBy      User                @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  items          OrderItem[]
+  returns        OrderReturn[]
+  refunds        OrderRefund[]
+  fromDraft      DraftOrder?         @relation("DraftConverted")
+  fulfillments   Fulfillment[]
+  shippingLines  OrderShippingLine[]
   carrierTickets CarrierTicket[]
 
   @@index([locationId, status, createdOn])
@@ -1307,35 +1306,35 @@ model Order {
 
 /// Sapo `line_items` của Order
 model OrderItem {
-  id          BigInt  @id @default(autoincrement())
-  orderId     BigInt  @map("order_id")
-  variantId   BigInt  @map("variant_id")
+  id                     BigInt   @id @default(autoincrement())
+  orderId                BigInt   @map("order_id")
+  variantId              BigInt   @map("variant_id")
   /// Sapo `product_id` / `inventory_item_id` — lưu id gốc bên Sapo để đối soát
-  productId       BigInt? @map("product_id")
-  inventoryItemId BigInt? @map("inventory_item_id")
+  productId              BigInt?  @map("product_id")
+  inventoryItemId        BigInt?  @map("inventory_item_id")
   /// Sapo `name` (tên hiển thị đầy đủ) và `variant_title` (tên phiên bản)
-  name         String
-  variantTitle String? @map("variant_title")
-  sku         String
-  quantity    Int
-  price       Decimal @db.Decimal(18, 2)
+  name                   String
+  variantTitle           String?  @map("variant_title")
+  sku                    String
+  quantity               Int
+  price                  Decimal  @db.Decimal(18, 2)
   /// Sapo `total_discount` / `discounted_total` / `original_total`
-  totalDiscount   Decimal @default(0) @map("total_discount") @db.Decimal(18, 2)
-  discountedTotal Decimal @map("discounted_total") @db.Decimal(18, 2)
-  originalTotal   Decimal? @map("original_total") @db.Decimal(18, 2)
+  totalDiscount          Decimal  @default(0) @map("total_discount") @db.Decimal(18, 2)
+  discountedTotal        Decimal  @map("discounted_total") @db.Decimal(18, 2)
+  originalTotal          Decimal? @map("original_total") @db.Decimal(18, 2)
   /// Không có ở Sapo — chốt giá vốn (`ProductVariant.cost`) tại thời điểm bán để báo cáo
   /// lợi nhuận kỳ cũ không trôi khi giá vốn thay đổi. NULL với đơn tạo trước tính năng này
   /// (báo cáo fallback về `variant.cost` hiện tại).
-  costPrice       Decimal? @map("cost_price") @db.Decimal(18, 2)
+  costPrice              Decimal? @map("cost_price") @db.Decimal(18, 2)
   /// Số lượng theo từng trạng thái xử lý (Sapo tính sẵn) — đồng bộ/báo cáo
-  fulfillableQuantity    Int? @map("fulfillable_quantity")
-  currentQuantity        Int? @map("current_quantity")
-  nonFulfillableQuantity Int? @map("non_fulfillable_quantity")
-  refundableQuantity     Int? @map("refundable_quantity")
-  grams            Int?
-  taxable          Boolean @default(true)
-  requiresShipping Boolean @default(true) @map("requires_shipping")
-  restockable      Boolean @default(true)
+  fulfillableQuantity    Int?     @map("fulfillable_quantity")
+  currentQuantity        Int?     @map("current_quantity")
+  nonFulfillableQuantity Int?     @map("non_fulfillable_quantity")
+  refundableQuantity     Int?     @map("refundable_quantity")
+  grams                  Int?
+  taxable                Boolean  @default(true)
+  requiresShipping       Boolean  @default(true) @map("requires_shipping")
+  restockable            Boolean  @default(true)
 
   order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant ProductVariant @relation(fields: [variantId], references: [id])
@@ -1370,120 +1369,120 @@ model ShippingProvider {
 
 /// Sapo `fulfillments` của Order — phiếu đóng gói + vận đơn
 model Fulfillment {
-  id                    BigInt                @id @default(autoincrement())
-  sapoId                BigInt?               @unique @map("sapo_id")
+  id      BigInt  @id @default(autoincrement())
+  sapoId  BigInt? @unique @map("sapo_id")
   /// Sapo `name` — mã vận đơn nội bộ (vd FUN620368)
-  name                  String                @unique
-  orderId               BigInt                @map("order_id")
-  storeId               BigInt?               @map("store_id")
+  name    String  @unique
+  orderId BigInt  @map("order_id")
+  storeId BigInt? @map("store_id")
   /// Sapo `status` — success | cancelled
-  status                String                @default("success")
+  status  String  @default("success")
 
   // --- Đóng gói (Sapo `packed_status`) ---
-  packedStatus          PackingStatus?        @map("packed_status")
-  assignedPackerId      BigInt?               @map("assigned_packer_id")
-  packedOn              DateTime?             @map("packed_on")
-  deliveryNotePrintedAt DateTime?             @map("delivery_note_printed_at")
+  packedStatus          PackingStatus? @map("packed_status")
+  assignedPackerId      BigInt?        @map("assigned_packer_id")
+  packedOn              DateTime?      @map("packed_on")
+  deliveryNotePrintedAt DateTime?      @map("delivery_note_printed_at")
 
   // --- Vận đơn ---
-  shipmentStatus        ShipmentStatus?       @map("shipment_status")
+  shipmentStatus         ShipmentStatus?            @map("shipment_status")
   /// Sapo `delivery_method` — hàng rời kho theo cách nào
-  deliveryMethod        FulfillmentDeliveryMethod? @map("delivery_method")
-  shipmentCategory      ShipmentCategory?     @map("shipment_category")
-  packageCategory       PackageCategory?      @map("package_category")
+  deliveryMethod         FulfillmentDeliveryMethod? @map("delivery_method")
+  shipmentCategory       ShipmentCategory?          @map("shipment_category")
+  packageCategory        PackageCategory?           @map("package_category")
   /// Loại đối tác của dự án (tích hợp API vs tự liên hệ) — Sapo không tách khái niệm này
-  shippingType          ShippingProviderType? @map("shipping_type")
-  providerId            BigInt?               @map("provider_id")
-  serviceCode           String?               @map("service_code")
-  serviceName           String?               @map("service_name")
+  shippingType           ShippingProviderType?      @map("shipping_type")
+  providerId             BigInt?                    @map("provider_id")
+  serviceCode            String?                    @map("service_code")
+  serviceName            String?                    @map("service_name")
   /// Sapo `tracking_info` — mã vận đơn của hãng vận chuyển
-  trackingNumber        String?               @map("tracking_number")
-  trackingUrl           String?               @map("tracking_url")
-  trackingCompany       String?               @map("tracking_company")
+  trackingNumber         String?                    @map("tracking_number")
+  trackingUrl            String?                    @map("tracking_url")
+  trackingCompany        String?                    @map("tracking_company")
   /// Sapo `tracking_info.carrier` / `carrier_name` (VIETTEL_POST, JT_EXPRESS, GHN...)
-  carrier               String?
-  carrierName           String?               @map("carrier_name")
+  carrier                String?
+  carrierName            String?                    @map("carrier_name")
   /// Đơn ghép nhiều kiện — Sapo trả mảng
-  trackingNumbers       String[]              @default([]) @map("tracking_numbers")
-  trackingUrls          String[]              @default([]) @map("tracking_urls")
-  shippingLabelSlipUrl  String?               @map("shipping_label_slip_url")
-  shippingLabelSlipError String?              @map("shipping_label_slip_error")
-  notifyCustomer        Boolean               @default(false) @map("notify_customer")
-  totalQuantity         Int                   @default(0) @map("total_quantity")
+  trackingNumbers        String[]                   @default([]) @map("tracking_numbers")
+  trackingUrls           String[]                   @default([]) @map("tracking_urls")
+  shippingLabelSlipUrl   String?                    @map("shipping_label_slip_url")
+  shippingLabelSlipError String?                    @map("shipping_label_slip_error")
+  notifyCustomer         Boolean                    @default(false) @map("notify_customer")
+  totalQuantity          Int                        @default(0) @map("total_quantity")
   /// Sapo `sla` (object fast/confirm/avoid_cancellation) + `abnormal` + `picking_issues`
-  sla                   Json?
-  abnormal              Json?
-  pickingIssues         Json?                 @map("picking_issues")
+  sla                    Json?
+  abnormal               Json?
+  pickingIssues          Json?                      @map("picking_issues")
 
   // --- Kích thước/phí (của dự án — Sapo để ở shipping_lines/ĐTVC) ---
-  shippingFee           Decimal               @default(0) @map("shipping_fee") @db.Decimal(18, 2)
-  feePayer              ShippingFeePayer      @default(shop_tra) @map("fee_payer")
-  codAmount             Decimal               @default(0) @map("cod_amount") @db.Decimal(18, 2)
-  weightGrams           Int?                  @map("weight_grams")
-  lengthCm              Int?                  @map("length_cm")
-  widthCm               Int?                  @map("width_cm")
-  heightCm              Int?                  @map("height_cm")
-  deliveryRequirement   String?               @map("delivery_requirement")
-  note                  String?               @db.Text
+  shippingFee         Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  feePayer            ShippingFeePayer @default(shop_tra) @map("fee_payer")
+  codAmount           Decimal          @default(0) @map("cod_amount") @db.Decimal(18, 2)
+  weightGrams         Int?             @map("weight_grams")
+  lengthCm            Int?             @map("length_cm")
+  widthCm             Int?             @map("width_cm")
+  heightCm            Int?             @map("height_cm")
+  deliveryRequirement String?          @map("delivery_requirement")
+  note                String?          @db.Text
 
   // --- Địa chỉ nhận (snapshot; Sapo lấy từ order.shipping_address) ---
-  toName                String?               @map("to_name")
-  toPhone               String?               @map("to_phone")
-  toAddress             String?               @map("to_address")
-  toWard                String?               @map("to_ward")
-  toDistrict            String?               @map("to_district")
-  toProvince            String?               @map("to_province")
+  toName     String? @map("to_name")
+  toPhone    String? @map("to_phone")
+  toAddress  String? @map("to_address")
+  toWard     String? @map("to_ward")
+  toDistrict String? @map("to_district")
+  toProvince String? @map("to_province")
 
   // --- Địa chỉ lấy hàng (Sapo `origin_address`) ---
-  locationId            BigInt?               @map("location_id")
-  originName            String?               @map("origin_name")
-  originEmail           String?               @map("origin_email")
-  originPhone           String?               @map("origin_phone")
-  originAddress1        String?               @map("origin_address1")
-  originAddress2        String?               @map("origin_address2")
-  originWard            String?               @map("origin_ward")
-  originWardCode        String?               @map("origin_ward_code")
-  originDistrict        String?               @map("origin_district")
-  originDistrictCode    String?               @map("origin_district_code")
-  originProvince        String?               @map("origin_province")
-  originProvinceCode    String?               @map("origin_province_code")
-  originCity            String?               @map("origin_city")
-  originCountry         String?               @map("origin_country")
-  originCountryCode     String?               @map("origin_country_code")
-  originZipCode         String?               @map("origin_zip_code")
+  locationId         BigInt? @map("location_id")
+  originName         String? @map("origin_name")
+  originEmail        String? @map("origin_email")
+  originPhone        String? @map("origin_phone")
+  originAddress1     String? @map("origin_address1")
+  originAddress2     String? @map("origin_address2")
+  originWard         String? @map("origin_ward")
+  originWardCode     String? @map("origin_ward_code")
+  originDistrict     String? @map("origin_district")
+  originDistrictCode String? @map("origin_district_code")
+  originProvince     String? @map("origin_province")
+  originProvinceCode String? @map("origin_province_code")
+  originCity         String? @map("origin_city")
+  originCountry      String? @map("origin_country")
+  originCountryCode  String? @map("origin_country_code")
+  originZipCode      String? @map("origin_zip_code")
 
   // --- Mốc thời gian (tên theo Sapo) ---
-  shipmentCreatedOn     DateTime?             @map("shipment_created_on")
-  pickedOn              DateTime?             @map("picked_on")
-  pickedUserId          BigInt?               @map("picked_user_id")
-  sortedOn              DateTime?             @map("sorted_on")
-  sortedUserId          BigInt?               @map("sorted_user_id")
-  inspectedOn           DateTime?             @map("inspected_on")
-  issuedOn              DateTime?             @map("issued_on")
-  issuedBy              String?               @map("issued_by")
-  issuedUserId          BigInt?               @map("issued_user_id")
-  issuedClientId        BigInt?               @map("issued_client_id")
-  handedOverAt          DateTime?             @map("handed_over_at")
-  handedBy              String?               @map("handed_by")
-  handedUserId          BigInt?               @map("handed_user_id")
-  pickedUpAt            DateTime?             @map("picked_up_at")
-  deliveredOn           DateTime?             @map("delivered_on")
-  expectedDeliveryDate  DateTime?             @map("expected_delivery_date")
-  orderShipDeadline     DateTime?             @map("order_ship_deadline")
-  returnedAt            DateTime?             @map("returned_at")
-  cancelledOn           DateTime?             @map("cancelled_on")
-  closedAt              DateTime?             @map("closed_at")
-  cancelReason          String?               @map("cancel_reason")
-  createdById           BigInt                @map("created_by")
-  createdOn             DateTime              @default(now()) @map("created_on")
-  modifiedOn            DateTime              @updatedAt @map("modified_on")
+  shipmentCreatedOn    DateTime? @map("shipment_created_on")
+  pickedOn             DateTime? @map("picked_on")
+  pickedUserId         BigInt?   @map("picked_user_id")
+  sortedOn             DateTime? @map("sorted_on")
+  sortedUserId         BigInt?   @map("sorted_user_id")
+  inspectedOn          DateTime? @map("inspected_on")
+  issuedOn             DateTime? @map("issued_on")
+  issuedBy             String?   @map("issued_by")
+  issuedUserId         BigInt?   @map("issued_user_id")
+  issuedClientId       BigInt?   @map("issued_client_id")
+  handedOverAt         DateTime? @map("handed_over_at")
+  handedBy             String?   @map("handed_by")
+  handedUserId         BigInt?   @map("handed_user_id")
+  pickedUpAt           DateTime? @map("picked_up_at")
+  deliveredOn          DateTime? @map("delivered_on")
+  expectedDeliveryDate DateTime? @map("expected_delivery_date")
+  orderShipDeadline    DateTime? @map("order_ship_deadline")
+  returnedAt           DateTime? @map("returned_at")
+  cancelledOn          DateTime? @map("cancelled_on")
+  closedAt             DateTime? @map("closed_at")
+  cancelReason         String?   @map("cancel_reason")
+  createdById          BigInt    @map("created_by")
+  createdOn            DateTime  @default(now()) @map("created_on")
+  modifiedOn           DateTime  @updatedAt @map("modified_on")
 
-  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  packer     User?             @relation("FulfillmentPacker", fields: [assignedPackerId], references: [id])
-  provider   ShippingProvider? @relation(fields: [providerId], references: [id])
-  location   Location?         @relation(fields: [locationId], references: [id])
-  createdBy  User              @relation("FulfillmentCreatedBy", fields: [createdById], references: [id])
-  items      FulfillmentLineItem[]
+  order          Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  packer         User?                 @relation("FulfillmentPacker", fields: [assignedPackerId], references: [id])
+  provider       ShippingProvider?     @relation(fields: [providerId], references: [id])
+  location       Location?             @relation(fields: [locationId], references: [id])
+  createdBy      User                  @relation("FulfillmentCreatedBy", fields: [createdById], references: [id])
+  items          FulfillmentLineItem[]
   carrierTickets CarrierTicket[]
 
   @@index([orderId])
@@ -1493,17 +1492,17 @@ model Fulfillment {
 
 /// Sapo `fulfillment.line_items` — dòng hàng thuộc một phiếu giao
 model FulfillmentLineItem {
-  id            BigInt  @id @default(autoincrement())
-  fulfillmentId BigInt  @map("fulfillment_id")
+  id                     BigInt   @id @default(autoincrement())
+  fulfillmentId          BigInt   @map("fulfillment_id")
   /// Sapo `line_item_id` — trỏ về dòng hàng của đơn
-  orderItemId   BigInt? @map("order_item_id")
-  variantId     BigInt  @map("variant_id")
-  productId     BigInt? @map("product_id")
-  name          String
-  title         String?
-  variantTitle  String? @map("variant_title")
-  sku           String
-  quantity      Int
+  orderItemId            BigInt?  @map("order_item_id")
+  variantId              BigInt   @map("variant_id")
+  productId              BigInt?  @map("product_id")
+  name                   String
+  title                  String?
+  variantTitle           String?  @map("variant_title")
+  sku                    String
+  quantity               Int
   /// Sapo `effective_quantity` — số lượng thực giao sau khi trừ phần hủy/hoàn
   effectiveQuantity      Int?     @map("effective_quantity")
   fulfillableQuantity    Int?     @map("fulfillable_quantity")
@@ -1529,18 +1528,18 @@ model FulfillmentLineItem {
 
 /// Sapo `order.shipping_lines` — dòng phí/phương thức vận chuyển của đơn
 model OrderShippingLine {
-  id       BigInt  @id @default(autoincrement())
-  orderId  BigInt  @map("order_id")
+  id                  BigInt  @id @default(autoincrement())
+  orderId             BigInt  @map("order_id")
   /// Sapo `title` / `code` — vd "Vận hành bởi nhà bán hàng" / sapo_fulfillment_by_seller
-  title    String?
-  code     String?
-  source   String?
-  price    Decimal @default(0) @db.Decimal(18, 2)
-  carrier      String?
-  carrierName  String? @map("carrier_name")
+  title               String?
+  code                String?
+  source              String?
+  price               Decimal @default(0) @db.Decimal(18, 2)
+  carrier             String?
+  carrierName         String? @map("carrier_name")
   /// Sapo `discount_allocations` / `tax_lines` — mảng, chỉ lưu đối soát
-  discountAllocations Json? @map("discount_allocations")
-  taxLines            Json? @map("tax_lines")
+  discountAllocations Json?   @map("discount_allocations")
+  taxLines            Json?   @map("tax_lines")
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
@@ -1566,34 +1565,34 @@ enum CarrierTicketCategory {
 /// Phiếu hỗ trợ mở với hãng vận chuyển (GHN `ticket/*`). Sapo không có khái niệm này nên
 /// đây là bảng riêng của dự án, đặt tên theo vốn từ của hãng.
 model CarrierTicket {
-  id            BigInt                @id @default(autoincrement())
-  providerId    BigInt                @map("provider_id")
-  fulfillmentId BigInt?               @map("fulfillment_id")
-  orderId       BigInt?               @map("order_id")
+  id                BigInt                @id @default(autoincrement())
+  providerId        BigInt                @map("provider_id")
+  fulfillmentId     BigInt?               @map("fulfillment_id")
+  orderId           BigInt?               @map("order_id")
   /// GHN `id` — khóa để upsert khi callback/đồng bộ về
-  externalId    String                @unique @map("external_id")
+  externalId        String                @unique @map("external_id")
   /// GHN `order_code` = mã vận đơn (`fulfillments.tracking_number`)
-  orderCode     String                @map("order_code")
-  category      CarrierTicketCategory
-  status        CarrierTicketStatus   @default(dang_xu_ly)
+  orderCode         String                @map("order_code")
+  category          CarrierTicketCategory
+  status            CarrierTicketStatus   @default(dang_xu_ly)
   /// Giá trị thô của hãng, giữ lại vì GHN có thể thêm trạng thái mới
-  statusRaw     String?               @map("status_raw")
-  description   String                @db.Text
-  attachments   Json?
-  contactName   String?               @map("contact_name")
-  contactEmail  String?               @map("contact_email")
-  contactPhone  String?               @map("contact_phone")
-  createdById   BigInt?               @map("created_by")
-  externalCreatedAt DateTime?         @map("external_created_at")
-  externalUpdatedAt DateTime?         @map("external_updated_at")
-  syncedAt      DateTime?             @map("synced_at")
-  createdAt     DateTime              @default(now()) @map("created_at")
-  updatedAt     DateTime              @updatedAt @map("updated_at")
+  statusRaw         String?               @map("status_raw")
+  description       String                @db.Text
+  attachments       Json?
+  contactName       String?               @map("contact_name")
+  contactEmail      String?               @map("contact_email")
+  contactPhone      String?               @map("contact_phone")
+  createdById       BigInt?               @map("created_by")
+  externalCreatedAt DateTime?             @map("external_created_at")
+  externalUpdatedAt DateTime?             @map("external_updated_at")
+  syncedAt          DateTime?             @map("synced_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
 
-  provider    ShippingProvider        @relation(fields: [providerId], references: [id])
-  fulfillment Fulfillment?            @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
-  order       Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  createdBy   User?                   @relation("CarrierTicketCreatedBy", fields: [createdById], references: [id])
+  provider    ShippingProvider       @relation(fields: [providerId], references: [id])
+  fulfillment Fulfillment?           @relation(fields: [fulfillmentId], references: [id], onDelete: SetNull)
+  order       Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy   User?                  @relation("CarrierTicketCreatedBy", fields: [createdById], references: [id])
   messages    CarrierTicketMessage[]
 
   @@index([orderCode])
@@ -1621,56 +1620,56 @@ model CarrierTicketMessage {
 }
 
 model DraftOrder {
-  id               BigInt           @id @default(autoincrement())
-  code             String           @unique
+  id                 BigInt           @id @default(autoincrement())
+  code               String           @unique
   locationId         BigInt           @map("location_id")
-  customerId       BigInt?          @map("customer_id")
-  source           OrderSource      @default(other)
-  status           DraftOrderStatus @default(draft)
-  createdById      BigInt           @map("created_by")
-  currency         String           @default("VND")
-  subtotal         Decimal          @default(0) @db.Decimal(18, 2)
-  discountTotal    Decimal          @default(0) @map("discount_total") @db.Decimal(18, 2)
-  taxTotal         Decimal          @default(0) @map("tax_total") @db.Decimal(18, 2)
-  shippingFee      Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
-  totalAmount      Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
-  shippingMethod   String?          @map("shipping_method")
-  note             String?          @db.Text
-  tags             String[]         @default([])
-  expectedDeliveryAt DateTime?      @map("expected_delivery_at")
-  convertedOrderId BigInt?          @unique @map("converted_order_id")
+  customerId         BigInt?          @map("customer_id")
+  source             OrderSource      @default(other)
+  status             DraftOrderStatus @default(draft)
+  createdById        BigInt           @map("created_by")
+  currency           String           @default("VND")
+  subtotal           Decimal          @default(0) @db.Decimal(18, 2)
+  discountTotal      Decimal          @default(0) @map("discount_total") @db.Decimal(18, 2)
+  taxTotal           Decimal          @default(0) @map("tax_total") @db.Decimal(18, 2)
+  shippingFee        Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
+  totalAmount        Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
+  shippingMethod     String?          @map("shipping_method")
+  note               String?          @db.Text
+  tags               String[]         @default([])
+  expectedDeliveryAt DateTime?        @map("expected_delivery_at")
+  convertedOrderId   BigInt?          @unique @map("converted_order_id")
 
   // Giao hàng (nhập lúc tạo đơn — chỉ lưu thông tin, không tự tạo vận đơn)
   deliveryMode        OrderDeliveryMode @default(giao_hang_sau) @map("delivery_mode")
-  deliveryToName       String?  @map("delivery_to_name")
-  deliveryToPhone      String?  @map("delivery_to_phone")
-  deliveryToAddress    String?  @map("delivery_to_address")
-  deliveryToWard       String?  @map("delivery_to_ward")
-  deliveryToDistrict   String?  @map("delivery_to_district")
-  deliveryToProvince   String?  @map("delivery_to_province")
-  deliveryCodAmount    Decimal? @map("delivery_cod_amount") @db.Decimal(18, 2)
-  deliveryWeightGrams  Int?     @map("delivery_weight_grams")
-  deliveryLengthCm     Int?     @map("delivery_length_cm")
-  deliveryWidthCm      Int?     @map("delivery_width_cm")
-  deliveryHeightCm     Int?     @map("delivery_height_cm")
-  deliveryRequirement  String?  @map("delivery_requirement")
-  deliveryNote         String?  @map("delivery_note") @db.Text
+  deliveryToName      String?           @map("delivery_to_name")
+  deliveryToPhone     String?           @map("delivery_to_phone")
+  deliveryToAddress   String?           @map("delivery_to_address")
+  deliveryToWard      String?           @map("delivery_to_ward")
+  deliveryToDistrict  String?           @map("delivery_to_district")
+  deliveryToProvince  String?           @map("delivery_to_province")
+  deliveryCodAmount   Decimal?          @map("delivery_cod_amount") @db.Decimal(18, 2)
+  deliveryWeightGrams Int?              @map("delivery_weight_grams")
+  deliveryLengthCm    Int?              @map("delivery_length_cm")
+  deliveryWidthCm     Int?              @map("delivery_width_cm")
+  deliveryHeightCm    Int?              @map("delivery_height_cm")
+  deliveryRequirement String?           @map("delivery_requirement")
+  deliveryNote        String?           @map("delivery_note") @db.Text
 
   // Hóa đơn điện tử (chỉ lưu thông tin, không tích hợp tra cứu/xuất thật)
-  invoiceTaxCode         String?  @map("invoice_tax_code")
-  invoiceCompanyName     String?  @map("invoice_company_name")
-  invoiceAddress         String?  @map("invoice_address")
-  invoiceBuyerName       String?  @map("invoice_buyer_name")
-  invoiceIdCard          String?  @map("invoice_id_card")
-  invoiceBudgetCode      String?  @map("invoice_budget_code")
-  invoicePhone           String?  @map("invoice_phone")
-  invoiceEmail           String?  @map("invoice_email")
-  invoiceSellToConsumer  Boolean  @default(false) @map("invoice_sell_to_consumer")
+  invoiceTaxCode        String? @map("invoice_tax_code")
+  invoiceCompanyName    String? @map("invoice_company_name")
+  invoiceAddress        String? @map("invoice_address")
+  invoiceBuyerName      String? @map("invoice_buyer_name")
+  invoiceIdCard         String? @map("invoice_id_card")
+  invoiceBudgetCode     String? @map("invoice_budget_code")
+  invoicePhone          String? @map("invoice_phone")
+  invoiceEmail          String? @map("invoice_email")
+  invoiceSellToConsumer Boolean @default(false) @map("invoice_sell_to_consumer")
 
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  location Location           @relation(fields: [locationId], references: [id])
+  location       Location         @relation(fields: [locationId], references: [id])
   customer       Customer?        @relation(fields: [customerId], references: [id])
   createdBy      User             @relation("DraftOrderCreatedBy", fields: [createdById], references: [id])
   convertedOrder Order?           @relation("DraftConverted", fields: [convertedOrderId], references: [id])
@@ -1703,13 +1702,13 @@ model DraftOrderItem {
 /// Phiếu trả hàng — tương ứng `return_id` mà Sapo gắn lên refund.
 /// Tiền hoàn và việc nhập lại kho nằm ở `OrderRefund` (giống Sapo).
 model OrderReturn {
-  id           BigInt   @id @default(autoincrement())
-  sapoId       BigInt?  @unique @map("sapo_id")
-  code         String   @unique
-  orderId      BigInt   @map("order_id")
-  reason       String?  @db.Text
-  createdById  BigInt   @map("created_by")
-  createdOn    DateTime @default(now()) @map("created_on")
+  id          BigInt   @id @default(autoincrement())
+  sapoId      BigInt?  @unique @map("sapo_id")
+  code        String   @unique
+  orderId     BigInt   @map("order_id")
+  reason      String?  @db.Text
+  createdById BigInt   @map("created_by")
+  createdOn   DateTime @default(now()) @map("created_on")
 
   order     Order         @relation(fields: [orderId], references: [id])
   createdBy User          @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
@@ -1736,10 +1735,10 @@ model OrderRefund {
   createdById   BigInt   @map("user_id")
   createdOn     DateTime @default(now()) @map("created_on")
 
-  order     Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderReturn OrderReturn?        @relation(fields: [returnId], references: [id])
-  createdBy User                  @relation("OrderRefundCreatedBy", fields: [createdById], references: [id])
-  lineItems OrderRefundLineItem[]
+  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderReturn OrderReturn?          @relation(fields: [returnId], references: [id])
+  createdBy   User                  @relation("OrderRefundCreatedBy", fields: [createdById], references: [id])
+  lineItems   OrderRefundLineItem[]
 
   @@index([orderId])
   @@index([returnId])
@@ -1748,22 +1747,22 @@ model OrderRefund {
 
 /// Sapo `refund.refund_line_items[]`
 model OrderRefundLineItem {
-  id          BigInt      @id @default(autoincrement())
-  sapoId      BigInt?     @unique @map("sapo_id")
-  refundId    BigInt      @map("refund_id")
+  id           BigInt      @id @default(autoincrement())
+  sapoId       BigInt?     @unique @map("sapo_id")
+  refundId     BigInt      @map("refund_id")
   /// Sapo `line_item_id`
-  orderItemId BigInt?     @map("order_item_id")
-  variantId   BigInt      @map("variant_id")
-  locationId  BigInt      @map("location_id")
-  productName String      @map("product_name")
-  sku         String
-  variantTitle String?    @map("variant_title")
-  quantity    Int
-  price       Decimal     @db.Decimal(18, 2)
-  subtotal    Decimal     @default(0) @db.Decimal(18, 2)
-  totalTax    Decimal     @default(0) @map("total_tax") @db.Decimal(18, 2)
+  orderItemId  BigInt?     @map("order_item_id")
+  variantId    BigInt      @map("variant_id")
+  locationId   BigInt      @map("location_id")
+  productName  String      @map("product_name")
+  sku          String
+  variantTitle String?     @map("variant_title")
+  quantity     Int
+  price        Decimal     @db.Decimal(18, 2)
+  subtotal     Decimal     @default(0) @db.Decimal(18, 2)
+  totalTax     Decimal     @default(0) @map("total_tax") @db.Decimal(18, 2)
   /// Sapo `restock_type` — quyết định dòng này có nhập lại kho không
-  restockType RestockType @map("restock_type")
+  restockType  RestockType @map("restock_type")
 
   refund   OrderRefund    @relation(fields: [refundId], references: [id], onDelete: Cascade)
   variant  ProductVariant @relation(fields: [variantId], references: [id])
@@ -1775,16 +1774,13 @@ model OrderRefundLineItem {
   @@map("order_refund_items")
 }
 
-
-
-
 model Voucher {
   id             BigInt      @id @default(autoincrement())
   code           String      @unique
   type           VoucherType
   amountIn       Decimal     @default(0) @map("amount_in") @db.Decimal(18, 2)
   amountOut      Decimal     @default(0) @map("amount_out") @db.Decimal(18, 2)
-  locationId       BigInt      @map("location_id")
+  locationId     BigInt      @map("location_id")
   createdById    BigInt      @map("created_by")
   sourceDocument String?     @map("source_document")
   referenceType  String?     @map("reference_type")
@@ -1793,8 +1789,8 @@ model Voucher {
   recordedAt     DateTime    @default(now()) @map("recorded_at")
   createdAt      DateTime    @default(now()) @map("created_at")
 
-  location Location @relation(fields: [locationId], references: [id])
-  createdBy User   @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+  location  Location @relation(fields: [locationId], references: [id])
+  createdBy User     @relation("VoucherCreatedBy", fields: [createdById], references: [id])
 
   @@index([locationId, type, recordedAt])
   @@map("vouchers")
@@ -1805,21 +1801,45 @@ model Voucher {
 /// Báo cáo người dùng lưu/ghim lên màn tổng quan. Bản thân báo cáo KHÔNG có bảng dữ liệu
 /// riêng — số liệu tổng hợp trực tiếp từ các bảng nghiệp vụ theo `report_key`.
 model SavedReport {
-  id         BigInt   @id @default(autoincrement())
-  userId     BigInt   @map("user_id")
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
   /// Id báo cáo trong `report-registry.ts` (vd `doanh-thu-theo-thoi-gian`)
-  reportKey  String   @map("report_key")
+  reportKey String   @map("report_key")
   /// Bộ lọc đã lưu kèm (khoảng thời gian, kho, kênh...) — dạng snake_case như query API
-  filters    Json?
-  isPinned   Boolean  @default(true) @map("is_pinned")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  filters   Json?
+  isPinned  Boolean  @default(true) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   user User @relation("SavedReportUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, reportKey])
   @@index([userId, isPinned])
   @@map("saved_reports")
+}
+
+/// API key tĩnh cho đối tác bên thứ 3 gọi API server-to-server, không qua login/JWT.
+/// Chỉ `keyHash` (SHA-256) được lưu — raw key chỉ hiển thị đúng một lần lúc tạo.
+model ApiKey {
+  id          BigInt    @id @default(autoincrement())
+  name        String
+  /// 12 ký tự đầu của raw key — chỉ để hiển thị trong danh sách quản lý, KHÔNG dùng để xác thực.
+  keyPrefix   String    @map("key_prefix")
+  keyHash     String    @unique @map("key_hash")
+  /// Endpoint được phép gọi, vd `product-monthly-ops` — kiểm bởi `@RequireApiScope`.
+  scopes      String[]  @default([])
+  /// Kho được phép xem — rỗng nghĩa là không giới hạn (mọi kho).
+  locationIds BigInt[]  @default([]) @map("location_ids")
+  isActive    Boolean   @default(true) @map("is_active")
+  expiresAt   DateTime? @map("expires_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdById BigInt    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@map("api_keys")
 }
 
 // --- Chat CSKH (002 US4) ---
