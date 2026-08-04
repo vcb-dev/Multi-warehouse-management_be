@@ -55,3 +55,26 @@ export class PinReportDto {
   @IsObject()
   filters?: Record<string, unknown>;
 }
+
+/** Query cho dashboard "Sản phẩm — Vận hành theo tháng". */
+export class ProductMonthlyOpsQueryDto {
+  /** "YYYY-MM". Mặc định tháng hiện tại. */
+  @IsOptional()
+  @IsString()
+  month?: string;
+
+  @IsOptional()
+  @IsString()
+  category_id?: string;
+
+  @IsOptional()
+  @IsString()
+  location_id?: string;
+
+  /** Số dòng tối đa cho bảng "Top sản phẩm được order nhiều nhất". */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  top_limit?: number;
+}

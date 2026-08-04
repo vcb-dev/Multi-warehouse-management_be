@@ -16,7 +16,11 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { sendXlsx } from '../../common/utils/send-xlsx';
-import { PinReportDto, RunReportQueryDto } from './report.dto';
+import {
+  PinReportDto,
+  ProductMonthlyOpsQueryDto,
+  RunReportQueryDto,
+} from './report.dto';
 import { ReportService } from './report.service';
 
 @ApiTags('reports')
@@ -37,6 +41,16 @@ export class ReportsController {
   @RequirePermission('report:view')
   pinned(@CurrentUser() user: AuthUser) {
     return this.reports.listPinned(user);
+  }
+
+  /** Dashboard "Sản phẩm — Vận hành theo tháng" — không nằm trong khung ReportDef chung. */
+  @Get('san-pham-van-hanh-theo-thang')
+  @RequirePermission('report:view')
+  productMonthlyOps(
+    @Query() query: ProductMonthlyOpsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.reports.productMonthlyOps(query, user);
   }
 
   @Get(':id/export')

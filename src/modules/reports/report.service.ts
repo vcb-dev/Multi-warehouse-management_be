@@ -6,7 +6,12 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getReport, reportCatalog } from './report-registry';
-import { PinReportDto, RunReportQueryDto } from './report.dto';
+import {
+  PinReportDto,
+  ProductMonthlyOpsQueryDto,
+  RunReportQueryDto,
+} from './report.dto';
+import { runProductMonthlyOps } from './reports/product-monthly-ops.report';
 import {
   ReportColumn,
   ReportContext,
@@ -16,6 +21,7 @@ import {
 
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_RANGE_DAYS = 30;
+const DEFAULT_TOP_LIMIT = 10;
 /** Chặn export vô hạn — 100k dòng đã quá đủ cho báo cáo vận hành. */
 const EXPORT_LIMIT = 100_000;
 
@@ -47,6 +53,36 @@ export class ReportService {
       total: result.total,
       page: ctx.page,
       page_size: ctx.pageSize,
+    };
+  }
+
+  /** Dashboard "Sản phẩm — Vận hành theo tháng" — xem `product-monthly-ops.report.ts`. */
+  async productMonthlyOps(query: ProductMonthlyOpsQueryDto, user: AuthUser) {
+    const locationIds = await this.resolveLocations(query.location_id, user);
+    const { year, month, from, to, prevFrom } = this.resolveMonth(query.month);
+
+    const result = await runProductMonthlyOps({
+      prisma: this.prisma,
+      from,
+      to,
+      prevFrom,
+      locationIds,
+      categoryId: query.category_id ? BigInt(query.category_id) : undefined,
+      topLimit: query.top_limit ?? DEFAULT_TOP_LIMIT,
+    });
+
+    return {
+      period: {
+        year,
+        month,
+        from: from.toISOString().slice(0, 10),
+        to: new Date(to.getTime() - 1).toISOString().slice(0, 10),
+      },
+      filters: {
+        category_id: query.category_id ?? null,
+        location_id: query.location_id ?? null,
+      },
+      ...result,
     };
   }
 
@@ -224,5 +260,33 @@ export class ReportService {
       );
     }
     return { from: start, to: endExclusive };
+  }
+
+  /** Parse "YYYY-MM" → khoảng [đầu tháng, đầu tháng sau) + đầu tháng liền trước (để so sánh). */
+  private resolveMonth(month?: string) {
+    const now = new Date();
+    let year = now.getFullYear();
+    let monthIndex = now.getMonth(); // 0-based
+
+    if (month) {
+      const m = /^(\d{4})-(\d{2})$/.exec(month);
+      if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Tháng không hợp lệ, định dạng YYYY-MM',
+          422,
+        );
+      }
+      year = Number(m[1]);
+      monthIndex = Number(m[2]) - 1;
+    }
+
+    return {
+      year,
+      month: monthIndex + 1,
+      from: new Date(year, monthIndex, 1),
+      to: new Date(year, monthIndex + 1, 1),
+      prevFrom: new Date(year, monthIndex - 1, 1),
+    };
   }
 }
