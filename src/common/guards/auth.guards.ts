@@ -1,4 +1,8 @@
-import { ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { CanActivate, ForbiddenException } from '@nestjs/common';
@@ -16,22 +20,49 @@ import {
 } from '../decorators/permissions.decorator';
 import { BusinessException } from '../exceptions/business.exception';
 import { PERMISSION_SCOPE } from '../../modules/rbac/permission-catalog';
+import { ApiKeyService } from '../../modules/api-keys/api-key.service';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/**
+ * Cổng xác thực duy nhất của toàn hệ thống — chấp nhận HAI cách:
+ * - `Authorization: Bearer <jwt>` (đăng nhập bình thường, qua passport-jwt).
+ * - `x-api-key: <key>` (đối tác server-to-server, không đăng nhập). Key xác thực THAY
+ *   một user có sẵn (`ApiKey.actingUserId`) nên `req.user` dựng ra có đúng shape/quyền như
+ *   JWT — `PermissionGuard` phía sau không cần biết request đến từ đường nào.
+ */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
-  constructor(private reflector: Reflector) {
+  constructor(
+    private reflector: Reflector,
+    private apiKeys: ApiKeyService,
+  ) {
     super();
   }
 
-  canActivate(context: ExecutionContext) {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
     if (isPublic) return true;
-    return super.canActivate(context);
+
+    const req = context.switchToHttp().getRequest<{
+      headers: Record<string, string | string[] | undefined>;
+      user?: AuthUser;
+    }>();
+    const apiKeyHeader = req.headers['x-api-key'];
+    const rawKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+    if (rawKey) {
+      const authUser = await this.apiKeys.resolveAuthUser(rawKey);
+      if (!authUser) {
+        throw new UnauthorizedException('API key không hợp lệ hoặc đã hết hạn');
+      }
+      req.user = authUser;
+      return true;
+    }
+
+    return super.canActivate(context) as Promise<boolean>;
   }
 }
 
