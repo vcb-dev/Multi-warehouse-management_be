@@ -132,4 +132,36 @@ describeIfDb('product monthly ops (integration)', () => {
       reports.productMonthlyOps({ month: 'not-a-month' }, admin),
     ).rejects.toBeInstanceOf(BusinessException);
   });
+
+  it('lọc theo tuần (ISO week) trả đúng khoảng ngày và đủ khối dữ liệu', async () => {
+    const res = await reports.productMonthlyOps({ week: '2026-W27' }, admin);
+
+    expect(res.period).toEqual({
+      year: 2026,
+      week: 27,
+      from: '2026-06-28',
+      to: '2026-07-05',
+    });
+    expect(typeof res.kpis.products_ordered.value).toBe('number');
+    expect(Array.isArray(res.top_ordered_products)).toBe(true);
+  }, 15_000);
+
+  it('tuần không hợp lệ → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ week: '2026-W99' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await expect(
+      reports.productMonthlyOps({ week: 'not-a-week' }, admin),
+    ).rejects.toBeInstanceOf(BusinessException);
+  });
+
+  it('truyền cả month và week → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ month: '2026-07', week: '2026-W27' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+  });
 });

@@ -58,10 +58,15 @@ export class PinReportDto {
 
 /** Query cho dashboard "Sản phẩm — Vận hành theo tháng". */
 export class ProductMonthlyOpsQueryDto {
-  /** "YYYY-MM". Mặc định tháng hiện tại. */
+  /** "YYYY-MM". Mặc định tháng hiện tại. Bỏ qua nếu có `week`. */
   @IsOptional()
   @IsString()
   month?: string;
+
+  /** "YYYY-Www" (ISO week, vd "2026-W32"). Có giá trị thì ưu tiên hơn `month`. */
+  @IsOptional()
+  @IsString()
+  week?: string;
 
   @IsOptional()
   @IsString()
