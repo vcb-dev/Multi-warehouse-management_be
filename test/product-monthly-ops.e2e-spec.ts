@@ -164,4 +164,77 @@ describeIfDb('product monthly ops (integration)', () => {
       code: 'VALIDATION_ERROR',
     });
   });
+
+  it('lọc theo ngày trả đúng khoảng ngày và đủ khối dữ liệu', async () => {
+    const res = await reports.productMonthlyOps({ day: '2026-07-15' }, admin);
+
+    expect(res.period).toEqual({
+      year: 2026,
+      month: 7,
+      day: 15,
+      from: '2026-07-14',
+      to: '2026-07-15',
+    });
+    expect(typeof res.kpis.products_ordered.value).toBe('number');
+    expect(Array.isArray(res.top_ordered_products)).toBe(true);
+  }, 15_000);
+
+  it('ngày không hợp lệ → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ day: '2026-02-30' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await expect(
+      reports.productMonthlyOps({ day: 'not-a-day' }, admin),
+    ).rejects.toBeInstanceOf(BusinessException);
+  });
+
+  it('lọc theo khoảng ngày (from/to) trả đúng khoảng và đủ khối dữ liệu', async () => {
+    const res = await reports.productMonthlyOps(
+      { from: '2026-07-01', to: '2026-07-10' },
+      admin,
+    );
+
+    expect(res.period).toEqual({ from: '2026-06-30', to: '2026-07-10' });
+    expect(typeof res.kpis.products_ordered.value).toBe('number');
+    expect(Array.isArray(res.top_ordered_products)).toBe(true);
+  }, 15_000);
+
+  it('chỉ truyền from hoặc to (thiếu 1 vế) → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ from: '2026-07-01' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await expect(
+      reports.productMonthlyOps({ to: '2026-07-10' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('from sau to → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ from: '2026-07-10', to: '2026-07-01' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('truyền nhiều hơn 1 kiểu lọc thời gian → BusinessException VALIDATION_ERROR', async () => {
+    await expect(
+      reports.productMonthlyOps({ day: '2026-07-15', month: '2026-07' }, admin),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await expect(
+      reports.productMonthlyOps(
+        { from: '2026-07-01', to: '2026-07-10', week: '2026-W27' },
+        admin,
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+  });
 });

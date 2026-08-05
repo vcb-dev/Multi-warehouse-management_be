@@ -58,18 +58,8 @@ export class ReportService {
 
   /** Dashboard "Sản phẩm — Vận hành theo tháng" — xem `product-monthly-ops.report.ts`. */
   async productMonthlyOps(query: ProductMonthlyOpsQueryDto, user: AuthUser) {
-    if (query.month && query.week) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        'Chỉ chọn tháng hoặc tuần, không dùng cùng lúc',
-        422,
-      );
-    }
-
     const locationIds = await this.resolveLocations(query.location_id, user);
-    const { period, from, to, prevFrom } = query.week
-      ? this.resolveWeek(query.week)
-      : this.resolveMonth(query.month);
+    const { period, from, to, prevFrom } = this.resolveProductOpsPeriod(query);
 
     const result = await runProductMonthlyOps({
       prisma: this.prisma,
@@ -329,5 +319,95 @@ export class ReportService {
     );
 
     return { period: { year, week: weekNum }, from, to, prevFrom };
+  }
+
+  /**
+   * Chọn đúng 1 kiểu khoảng thời gian cho dashboard "Sản phẩm — Vận hành theo tháng":
+   * `day` > `from`+`to` > `week` > `month` (mặc định tháng hiện tại khi không truyền gì).
+   * Truyền từ 2 kiểu trở lên, hoặc chỉ 1 trong 2 mốc `from`/`to`, đều là lỗi — tránh áp
+   * dụng nhầm bộ lọc mà người dùng không chủ đích chọn.
+   */
+  private resolveProductOpsPeriod(query: ProductMonthlyOpsQueryDto) {
+    const hasRange = Boolean(query.from || query.to);
+    if (hasRange && !(query.from && query.to)) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Lọc theo khoảng ngày cần truyền đủ cả from và to',
+        422,
+      );
+    }
+
+    const selected = [query.day, hasRange, query.week, query.month].filter(
+      Boolean,
+    ).length;
+    if (selected > 1) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chỉ chọn một trong: ngày (day), khoảng ngày (from/to), tuần (week) hoặc tháng (month)',
+        422,
+      );
+    }
+
+    if (query.day) return this.resolveDay(query.day);
+    if (hasRange) return this.resolveCustomRange(query.from!, query.to!);
+    if (query.week) return this.resolveWeek(query.week);
+    return this.resolveMonth(query.month);
+  }
+
+  /** Parse "YYYY-MM-DD" → khoảng [ngày đó, ngày kế tiếp) + ngày liền trước (để so sánh). */
+  private resolveDay(day: string) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    const year = m ? Number(m[1]) : NaN;
+    const monthIndex = m ? Number(m[2]) - 1 : NaN;
+    const date = m ? Number(m[3]) : NaN;
+    const from = m ? new Date(year, monthIndex, date) : new Date(NaN);
+    // `Date` tự cuộn ngày không tồn tại (vd 31/2) sang tháng sau — đối chiếu lại để bắt lỗi này.
+    const valid =
+      m &&
+      !Number.isNaN(from.getTime()) &&
+      from.getFullYear() === year &&
+      from.getMonth() === monthIndex &&
+      from.getDate() === date;
+    if (!valid) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ngày không hợp lệ, định dạng YYYY-MM-DD',
+        422,
+      );
+    }
+
+    return {
+      period: { year, month: monthIndex + 1, day: date },
+      from,
+      to: new Date(year, monthIndex, date + 1),
+      prevFrom: new Date(year, monthIndex, date - 1),
+    };
+  }
+
+  /**
+   * Khoảng ngày tuỳ chọn [from, to] (bao gồm `to`) — kỳ trước để so sánh lấy cùng độ dài,
+   * liền kề trước `from` (vd chọn 10 ngày thì kỳ trước cũng là 10 ngày ngay trước đó).
+   */
+  private resolveCustomRange(fromStr: string, toStr: string) {
+    const from = new Date(`${fromStr}T00:00:00`);
+    const toInclusive = new Date(`${toStr}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(toInclusive.getTime())) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Khoảng thời gian không hợp lệ',
+        422,
+      );
+    }
+    const to = new Date(toInclusive.getTime() + 24 * 60 * 60 * 1000);
+    if (from >= to) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ngày bắt đầu phải trước ngày kết thúc',
+        422,
+      );
+    }
+    const prevFrom = new Date(from.getTime() - (to.getTime() - from.getTime()));
+
+    return { period: {}, from, to, prevFrom };
   }
 }
