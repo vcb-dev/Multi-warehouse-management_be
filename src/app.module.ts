@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -24,6 +25,7 @@ import { FulfillmentsModule } from './modules/fulfillments/fulfillments.module';
 import { ConversationModule } from './modules/conversations/conversation.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage/storage.module';
 
@@ -31,6 +33,22 @@ import { StorageModule } from './common/storage/storage.module';
   imports: [
     NestConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    // Chỉ throttle request xác thực bằng x-api-key (đối tác bên thứ 3) — bỏ qua traffic
+    // JWT nội bộ (skipIf), vì API key giờ gọi được MỌI route nên cần chặn lạm dụng ở tầng
+    // toàn cục, không riêng route nào.
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000,
+        limit: 120,
+        skipIf: (context) => {
+          const req = context
+            .switchToHttp()
+            .getRequest<{ headers: Record<string, unknown> }>();
+          return !req.headers['x-api-key'];
+        },
+      },
+    ]),
     PrismaModule,
     StorageModule,
     VouchersModule,
@@ -50,6 +68,7 @@ import { StorageModule } from './common/storage/storage.module';
     ConversationModule,
     RbacModule,
     ReportsModule,
+    ApiKeysModule,
   ],
   controllers: [AppController],
   providers: [
@@ -57,6 +76,7 @@ import { StorageModule } from './common/storage/storage.module';
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })
