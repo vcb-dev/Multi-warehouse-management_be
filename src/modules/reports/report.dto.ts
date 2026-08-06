@@ -58,10 +58,30 @@ export class PinReportDto {
 
 /** Query cho dashboard "Sản phẩm — Vận hành theo tháng". */
 export class ProductMonthlyOpsQueryDto {
-  /** "YYYY-MM". Mặc định tháng hiện tại. */
+  /** "YYYY-MM". Mặc định tháng hiện tại. Bỏ qua nếu có `week`/`day`/`from`+`to`. */
   @IsOptional()
   @IsString()
   month?: string;
+
+  /** "YYYY-Www" (ISO week, vd "2026-W32"). Chỉ chọn một trong `month`/`week`/`day`/`from`+`to`. */
+  @IsOptional()
+  @IsString()
+  week?: string;
+
+  /** "YYYY-MM-DD" — lọc đúng 1 ngày. Chỉ chọn một trong `month`/`week`/`day`/`from`+`to`. */
+  @IsOptional()
+  @IsString()
+  day?: string;
+
+  /** "YYYY-MM-DD" — mốc đầu khoảng tuỳ chọn, phải đi kèm `to`. */
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  /** "YYYY-MM-DD" — mốc cuối khoảng tuỳ chọn (bao gồm ngày này), phải đi kèm `from`. */
+  @IsOptional()
+  @IsString()
+  to?: string;
 
   @IsOptional()
   @IsString()

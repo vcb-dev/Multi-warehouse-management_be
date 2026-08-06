@@ -59,7 +59,7 @@ export class ReportService {
   /** Dashboard "Sản phẩm — Vận hành theo tháng" — xem `product-monthly-ops.report.ts`. */
   async productMonthlyOps(query: ProductMonthlyOpsQueryDto, user: AuthUser) {
     const locationIds = await this.resolveLocations(query.location_id, user);
-    const { year, month, from, to, prevFrom } = this.resolveMonth(query.month);
+    const { period, from, to, prevFrom } = this.resolveProductOpsPeriod(query);
 
     const result = await runProductMonthlyOps({
       prisma: this.prisma,
@@ -73,8 +73,7 @@ export class ReportService {
 
     return {
       period: {
-        year,
-        month,
+        ...period,
         from: from.toISOString().slice(0, 10),
         to: new Date(to.getTime() - 1).toISOString().slice(0, 10),
       },
@@ -282,11 +281,133 @@ export class ReportService {
     }
 
     return {
-      year,
-      month: monthIndex + 1,
+      period: { year, month: monthIndex + 1 },
       from: new Date(year, monthIndex, 1),
       to: new Date(year, monthIndex + 1, 1),
       prevFrom: new Date(year, monthIndex - 1, 1),
     };
+  }
+
+  /** Parse "YYYY-Www" (ISO week) → khoảng [thứ 2, thứ 2 tuần sau) + thứ 2 tuần liền trước. */
+  private resolveWeek(week: string) {
+    const m = /^(\d{4})-W(\d{2})$/.exec(week);
+    const weekNum = m ? Number(m[2]) : NaN;
+    if (!m || weekNum < 1 || weekNum > 53) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Tuần không hợp lệ, định dạng YYYY-Www (vd 2026-W32)',
+        422,
+      );
+    }
+    const year = Number(m[1]);
+
+    // ISO 8601: tuần 1 là tuần chứa ngày 4/1. Lùi về thứ 2 của tuần đó rồi cộng thêm
+    // (weekNum - 1) tuần để ra thứ 2 của tuần cần tìm.
+    const jan4 = new Date(year, 0, 4);
+    const jan4Weekday = (jan4.getDay() + 6) % 7; // Monday=0 .. Sunday=6
+    const week1Monday = new Date(year, 0, 4 - jan4Weekday);
+    const from = new Date(
+      week1Monday.getFullYear(),
+      week1Monday.getMonth(),
+      week1Monday.getDate() + (weekNum - 1) * 7,
+    );
+    const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7);
+    const prevFrom = new Date(
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate() - 7,
+    );
+
+    return { period: { year, week: weekNum }, from, to, prevFrom };
+  }
+
+  /**
+   * Chọn đúng 1 kiểu khoảng thời gian cho dashboard "Sản phẩm — Vận hành theo tháng":
+   * `day` > `from`+`to` > `week` > `month` (mặc định tháng hiện tại khi không truyền gì).
+   * Truyền từ 2 kiểu trở lên, hoặc chỉ 1 trong 2 mốc `from`/`to`, đều là lỗi — tránh áp
+   * dụng nhầm bộ lọc mà người dùng không chủ đích chọn.
+   */
+  private resolveProductOpsPeriod(query: ProductMonthlyOpsQueryDto) {
+    const hasRange = Boolean(query.from || query.to);
+    if (hasRange && !(query.from && query.to)) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Lọc theo khoảng ngày cần truyền đủ cả from và to',
+        422,
+      );
+    }
+
+    const selected = [query.day, hasRange, query.week, query.month].filter(
+      Boolean,
+    ).length;
+    if (selected > 1) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chỉ chọn một trong: ngày (day), khoảng ngày (from/to), tuần (week) hoặc tháng (month)',
+        422,
+      );
+    }
+
+    if (query.day) return this.resolveDay(query.day);
+    if (hasRange) return this.resolveCustomRange(query.from!, query.to!);
+    if (query.week) return this.resolveWeek(query.week);
+    return this.resolveMonth(query.month);
+  }
+
+  /** Parse "YYYY-MM-DD" → khoảng [ngày đó, ngày kế tiếp) + ngày liền trước (để so sánh). */
+  private resolveDay(day: string) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    const year = m ? Number(m[1]) : NaN;
+    const monthIndex = m ? Number(m[2]) - 1 : NaN;
+    const date = m ? Number(m[3]) : NaN;
+    const from = m ? new Date(year, monthIndex, date) : new Date(NaN);
+    // `Date` tự cuộn ngày không tồn tại (vd 31/2) sang tháng sau — đối chiếu lại để bắt lỗi này.
+    const valid =
+      m &&
+      !Number.isNaN(from.getTime()) &&
+      from.getFullYear() === year &&
+      from.getMonth() === monthIndex &&
+      from.getDate() === date;
+    if (!valid) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ngày không hợp lệ, định dạng YYYY-MM-DD',
+        422,
+      );
+    }
+
+    return {
+      period: { year, month: monthIndex + 1, day: date },
+      from,
+      to: new Date(year, monthIndex, date + 1),
+      prevFrom: new Date(year, monthIndex, date - 1),
+    };
+  }
+
+  /**
+   * Khoảng ngày tuỳ chọn [from, to] (bao gồm `to`) — kỳ trước để so sánh lấy cùng độ dài,
+   * liền kề trước `from` (vd chọn 10 ngày thì kỳ trước cũng là 10 ngày ngay trước đó).
+   */
+  private resolveCustomRange(fromStr: string, toStr: string) {
+    const from = new Date(`${fromStr}T00:00:00`);
+    const toInclusive = new Date(`${toStr}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(toInclusive.getTime())) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Khoảng thời gian không hợp lệ',
+        422,
+      );
+    }
+    const to = new Date(toInclusive.getTime() + 24 * 60 * 60 * 1000);
+    if (from >= to) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ngày bắt đầu phải trước ngày kết thúc',
+        422,
+      );
+    }
+    const prevFrom = new Date(from.getTime() - (to.getTime() - from.getTime()));
+
+    return { period: {}, from, to, prevFrom };
   }
 }
