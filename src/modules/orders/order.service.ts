@@ -37,6 +37,7 @@ import {
   ListOrdersQueryDto,
   OrderTransitionDto,
   PayOrderDto,
+  ShippingAddressDto,
   UpdateOrderDto,
 } from './order.dto';
 import {
@@ -48,6 +49,9 @@ import {
   serializeOrderDetail,
   serializeOrderListItem,
 } from './order.serializer';
+
+// DB xa + lặp nhiều dòng giữ chỗ/tồn — timeout mặc định 5s của Prisma quá ngắn.
+const TX_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 
 type ResolvedItem = {
   variantId: bigint;
@@ -593,7 +597,19 @@ export class OrderService {
       dto.tax_rate ?? 0,
     );
 
-    const customerId = dto.customer_id ? BigInt(dto.customer_id) : null;
+    if (!dto.customer_id?.trim()) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Phải chọn khách hàng',
+        422,
+      );
+    }
+
+    const customerId = BigInt(dto.customer_id.trim());
+    const shippingAddress = await this.resolveShippingAddress(
+      customerId,
+      dto.shipping_address,
+    );
     const assignedToId = dto.assigned_to
       ? BigInt(dto.assigned_to)
       : user.userId;
@@ -608,9 +624,10 @@ export class OrderService {
     }
 
     try {
-      const order = await this.repo.client.$transaction(async (tx) => {
-        const name =
-          dto.name?.trim() || (await generateOrderCode(tx, locationId));
+      const order = await this.repo.client.$transaction(
+        async (tx) => {
+          const name =
+            dto.name?.trim() || (await generateOrderCode(tx, locationId));
 
         const initialPaidReachesFull =
           initialPaid >= totals.totalPrice && totals.totalPrice > 0;
@@ -646,26 +663,26 @@ export class OrderService {
               ? new Date(dto.expected_delivery_date)
               : null,
             deliveryMode: dto.delivery_mode ?? undefined,
-            shippingName: dto.shipping_address?.name?.trim() || null,
-            shippingFirstName: dto.shipping_address?.first_name?.trim() || null,
-            shippingLastName: dto.shipping_address?.last_name?.trim() || null,
-            shippingPhone: dto.shipping_address?.phone?.trim() || null,
-            shippingAddress1: dto.shipping_address?.address1?.trim() || null,
-            shippingAddress2: dto.shipping_address?.address2?.trim() || null,
-            shippingWard: dto.shipping_address?.ward?.trim() || null,
-            shippingWardCode: dto.shipping_address?.ward_code?.trim() || null,
-            shippingDistrict: dto.shipping_address?.district?.trim() || null,
+            shippingName: shippingAddress.name?.trim() || null,
+            shippingFirstName: shippingAddress.first_name?.trim() || null,
+            shippingLastName: shippingAddress.last_name?.trim() || null,
+            shippingPhone: shippingAddress.phone?.trim() || null,
+            shippingAddress1: shippingAddress.address1?.trim() || null,
+            shippingAddress2: shippingAddress.address2?.trim() || null,
+            shippingWard: shippingAddress.ward?.trim() || null,
+            shippingWardCode: shippingAddress.ward_code?.trim() || null,
+            shippingDistrict: shippingAddress.district?.trim() || null,
             shippingDistrictCode:
-              dto.shipping_address?.district_code?.trim() || null,
-            shippingProvince: dto.shipping_address?.province?.trim() || null,
+              shippingAddress.district_code?.trim() || null,
+            shippingProvince: shippingAddress.province?.trim() || null,
             shippingProvinceCode:
-              dto.shipping_address?.province_code?.trim() || null,
-            shippingCity: dto.shipping_address?.city?.trim() || null,
-            shippingCountry: dto.shipping_address?.country?.trim() || null,
+              shippingAddress.province_code?.trim() || null,
+            shippingCity: shippingAddress.city?.trim() || null,
+            shippingCountry: shippingAddress.country?.trim() || null,
             shippingCountryCode:
-              dto.shipping_address?.country_code?.trim() || null,
-            shippingZip: dto.shipping_address?.zip?.trim() || null,
-            shippingCompany: dto.shipping_address?.company?.trim() || null,
+              shippingAddress.country_code?.trim() || null,
+            shippingZip: shippingAddress.zip?.trim() || null,
+            shippingCompany: shippingAddress.company?.trim() || null,
             deliveryCodAmount: dto.delivery_cod_amount ?? null,
             deliveryWeightGrams: dto.delivery_weight_grams ?? null,
             deliveryLengthCm: dto.delivery_length_cm ?? null,
@@ -773,7 +790,9 @@ export class OrderService {
         });
 
         return record;
-      });
+      },
+      TX_OPTIONS,
+    );
 
       return {
         id: order.id.toString(),
@@ -905,22 +924,23 @@ export class OrderService {
           409,
         );
       }
-      await this.repo.client.$transaction(async (tx) => {
-        for (const item of sortForLocking(order.items)) {
-          await this.inventory.applyMovement(
-            {
-              variantId: item.variantId,
-              locationId: order.locationId,
-              bucket: InventoryBucket.committed,
-              change: -item.quantity,
-              type: MovementType.order_release,
-              referenceType: 'order',
-              referenceId: order.id,
-              createdById: user.userId,
-            },
-            tx,
-          );
-        }
+      await this.repo.client.$transaction(
+        async (tx) => {
+          for (const item of sortForLocking(order.items)) {
+            await this.inventory.applyMovement(
+              {
+                variantId: item.variantId,
+                locationId: order.locationId,
+                bucket: InventoryBucket.committed,
+                change: -item.quantity,
+                type: MovementType.order_release,
+                referenceType: 'order',
+                referenceId: order.id,
+                createdById: user.userId,
+              },
+              tx,
+            );
+          }
         // Hủy đơn giảm công nợ đúng giá trị đơn; phần khách đã trả
         // trở thành nợ âm (shop nợ khách) chờ hoàn tiền
         if (order.customerId) {
@@ -1000,7 +1020,9 @@ export class OrderService {
             metadata: { code: order.name },
           },
         });
-      });
+      },
+      TX_OPTIONS,
+    );
       return { id: id.toString(), status: OrderStatus.cancelled };
     }
 
@@ -1023,27 +1045,30 @@ export class OrderService {
           409,
         );
       }
-      const deliveredOn = await this.repo.client.$transaction(async (tx) => {
-        await this.shipOrderItems(order, user, tx);
-        const now = new Date();
-        await tx.order.update({
-          where: { id },
-          data: {
-            deliveredOn: now,
-            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
-          },
-        });
-        await tx.activityLog.create({
-          data: {
-            userId: user.userId,
-            action: 'order.ship',
-            entityType: 'order',
-            entityId: id,
-            metadata: { code: order.name },
-          },
-        });
-        return now;
-      });
+      const deliveredOn = await this.repo.client.$transaction(
+        async (tx) => {
+          await this.shipOrderItems(order, user, tx);
+          const now = new Date();
+          await tx.order.update({
+            where: { id },
+            data: {
+              deliveredOn: now,
+              fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            },
+          });
+          await tx.activityLog.create({
+            data: {
+              userId: user.userId,
+              action: 'order.ship',
+              entityType: 'order',
+              entityId: id,
+              metadata: { code: order.name },
+            },
+          });
+          return now;
+        },
+        TX_OPTIONS,
+      );
       return {
         id: id.toString(),
         status: order.status,
@@ -1063,33 +1088,36 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
-      await this.repo.client.$transaction(async (tx) => {
-        // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
-        // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
-        if (!order.deliveredOn) {
-          await this.shipOrderItems(order, user, tx);
-        }
-        const now = new Date();
-        await tx.order.update({
-          where: { id },
-          data: {
-            status: OrderStatus.closed,
-            closedOn: now,
-            completedOn: now,
-            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
-            deliveredOn: order.deliveredOn ?? now,
-          },
-        });
-        await tx.activityLog.create({
-          data: {
-            userId: user.userId,
-            action: 'order.complete',
-            entityType: 'order',
-            entityId: id,
-            metadata: { code: order.name },
-          },
-        });
-      });
+      await this.repo.client.$transaction(
+        async (tx) => {
+          // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
+          // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
+          if (!order.deliveredOn) {
+            await this.shipOrderItems(order, user, tx);
+          }
+          const now = new Date();
+          await tx.order.update({
+            where: { id },
+            data: {
+              status: OrderStatus.closed,
+              closedOn: now,
+              completedOn: now,
+              fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+              deliveredOn: order.deliveredOn ?? now,
+            },
+          });
+          await tx.activityLog.create({
+            data: {
+              userId: user.userId,
+              action: 'order.complete',
+              entityType: 'order',
+              entityId: id,
+              metadata: { code: order.name },
+            },
+          });
+        },
+        TX_OPTIONS,
+      );
       return { id: id.toString(), status: OrderStatus.closed };
     }
 
@@ -1101,7 +1129,7 @@ export class OrderService {
     params: {
       locationId: bigint;
       sourceName?: string;
-      customerId?: bigint | null;
+      customerId: bigint;
       items: ResolvedItem[];
       totalDiscounts?: number;
       totalShippingPrice?: number;
@@ -1113,7 +1141,7 @@ export class OrderService {
     const dto: CreateOrderDto = {
       location_id: params.locationId.toString(),
       source_name: params.sourceName,
-      customer_id: params.customerId?.toString(),
+      customer_id: params.customerId.toString(),
       items: params.items.map((i) => ({
         variant_id: i.variantId.toString(),
         location_id: i.locationId.toString(),
@@ -1171,6 +1199,70 @@ export class OrderService {
       });
     }
     return result;
+  }
+
+  private shippingAddressComplete(sa?: ShippingAddressDto | null) {
+    return !!(
+      sa?.address1?.trim() &&
+      sa?.ward?.trim() &&
+      sa?.district?.trim() &&
+      sa?.province?.trim()
+    );
+  }
+
+  /** Ưu tiên địa chỉ gửi lên; thiếu thì lấy địa chỉ mặc định của khách. */
+  private async resolveShippingAddress(
+    customerId: bigint,
+    fromDto?: ShippingAddressDto,
+  ): Promise<ShippingAddressDto> {
+    const dto = fromDto ?? {};
+    if (this.shippingAddressComplete(dto)) return dto;
+
+    const customer = await this.repo.client.customer.findUnique({
+      where: { id: customerId },
+      include: {
+        addresses: { orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] },
+      },
+    });
+    if (!customer) return dto;
+
+    const addr =
+      customer.addresses.find((a) => a.isDefault) ?? customer.addresses[0];
+    const name =
+      dto.name?.trim() ||
+      (addr
+        ? [addr.firstName, addr.lastName].filter(Boolean).join(' ')
+        : '') ||
+      [customer.firstName, customer.lastName].filter(Boolean).join(' ');
+    const phone =
+      dto.phone?.trim() ||
+      addr?.phone?.trim() ||
+      customer.phone?.trim() ||
+      undefined;
+
+    if (!addr) {
+      return { ...dto, name: name || undefined, phone };
+    }
+
+    return {
+      name: name || undefined,
+      first_name: dto.first_name || addr.firstName || undefined,
+      last_name: dto.last_name || addr.lastName || undefined,
+      phone,
+      address1: dto.address1?.trim() || addr.address1 || undefined,
+      address2: dto.address2?.trim() || addr.address2 || undefined,
+      ward: dto.ward?.trim() || addr.ward || undefined,
+      ward_code: dto.ward_code?.trim() || addr.wardCode || undefined,
+      district: dto.district?.trim() || addr.district || undefined,
+      district_code: dto.district_code?.trim() || addr.districtCode || undefined,
+      province: dto.province?.trim() || addr.province || undefined,
+      province_code: dto.province_code?.trim() || addr.provinceCode || undefined,
+      city: dto.city?.trim() || addr.city || undefined,
+      country: dto.country?.trim() || addr.country || undefined,
+      country_code: dto.country_code?.trim() || addr.countryCode || undefined,
+      zip: dto.zip?.trim() || addr.zip || undefined,
+      company: dto.company?.trim() || addr.company || undefined,
+    };
   }
 }
 

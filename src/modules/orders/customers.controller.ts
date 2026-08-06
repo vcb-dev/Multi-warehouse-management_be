@@ -44,7 +44,7 @@ export class CustomersController {
 
   /** Dropdown chọn khách khi tạo đơn — chỉ id + nhãn, tối đa 20 dòng. */
   @Get('options')
-  @RequirePermission('customer:view')
+  @RequirePermission('customer:view', 'order:create')
   async options(@Query('q') q?: string) {
     const term = q?.trim();
     const rows = await this.prisma.customer.findMany({
@@ -71,7 +71,7 @@ export class CustomersController {
   }
 
   @Get(':id')
-  @RequirePermission('customer:view')
+  @RequirePermission('customer:view', 'order:create')
   findOne(@Param('id') id: string) {
     return this.customers.findOne(BigInt(id));
   }

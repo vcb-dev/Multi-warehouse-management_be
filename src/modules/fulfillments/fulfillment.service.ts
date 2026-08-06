@@ -877,13 +877,14 @@ export class FulfillmentService {
     if (!provider)
       throw new NotFoundException('Không tìm thấy hãng vận chuyển');
 
+    const externalStatus = dto.status ?? '';
     const status = this.providers
       .adapterFor(provider.code)
-      .mapWebhookStatus(dto.status ?? '');
+      .mapWebhookStatus(externalStatus);
     if (!status) {
       throw new BusinessException(
         'VALIDATION_ERROR',
-        `Trạng thái không được hỗ trợ: ${dto.status}`,
+        `Trạng thái không được hỗ trợ: ${externalStatus}`,
         422,
       );
     }

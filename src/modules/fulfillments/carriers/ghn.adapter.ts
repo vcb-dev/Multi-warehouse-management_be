@@ -10,7 +10,7 @@ import {
   CarrierShipmentResult,
 } from './carrier-adapter';
 import { GhnLocationResolver } from './ghn-location-resolver';
-import { GHN_TRACKING_URL, GhnClient } from './ghn.client';
+import { GHN_TRACKING_URL, GhnClient, isGhnSandbox } from './ghn.client';
 
 /** Giá trị `carrier` ghi vào `fulfillments` — cùng vốn từ Sapo (VIETTEL_POST, JT_EXPRESS, GHN...). */
 export const GHN_CARRIER = 'GHN';
@@ -77,6 +77,31 @@ const DEFAULT_REQUIRED_NOTE = 'CHOXEMHANGKHONGTHU';
 
 /** Kích thước tối thiểu GHN nhận (đơn hàng nhỏ vẫn phải khai kiện). */
 const MIN_DIMENSION_CM = 1;
+
+/**
+ * GHN sandbox: shop Hà Nội thường không resolve được kho khi gửi `from_*` thật hoặc bỏ trống.
+ * Docs GHN dùng ví dụ HCM — gửi đúng 3 field địa danh này (không cần from_name) thì create được.
+ * ponytail: chỉ retry trên sandbox; production vẫn ưu tiên ShopId, không gửi placeholder.
+ */
+const SANDBOX_FROM_GEO_FALLBACK = {
+  wardName: 'Phường 14',
+  districtName: 'Quận 10',
+  provinceName: 'HCM',
+} as const;
+
+/** Shop GHN phải có district_id + ward_code hợp lệ — nếu không GHN báo "không lấy được thông tin kho". */
+export function assertGhnPickupReady(config: CarrierConnectionConfig) {
+  const districtId = config.from_district_id;
+  const wardCode = config.from_ward_code?.trim();
+  if (districtId && districtId > 0 && wardCode) return;
+  throw new BusinessException(
+    'VALIDATION_ERROR',
+    `Shop GHN ${config.shop_id ?? ''} chưa có địa chỉ kho lấy hàng (thiếu Quận/Huyện hoặc Phường/Xã). ` +
+      'Vào api.ghn.vn → Quản lý cửa hàng → cập nhật đầy đủ địa chỉ shop, hoặc tạo shop sandbox mới. ' +
+      'Sau đó kết nối lại GHN trong Cấu hình vận chuyển.',
+    422,
+  );
+}
 
 export class GhnAdapter implements CarrierAdapter {
   private readonly logger = new Logger(GhnAdapter.name);
@@ -145,6 +170,7 @@ export class GhnAdapter implements CarrierAdapter {
   ): Promise<CarrierShipmentResult> {
     const creds = this.credentials(config);
     const shopId = Number(config.shop_id);
+    const pickup = await this.resolvePickupShop(config, creds);
 
     const to = await this.locations.resolve(
       {
@@ -157,60 +183,68 @@ export class GhnAdapter implements CarrierAdapter {
 
     const service = await this.pickService(input.serviceCode, {
       shopId,
-      fromDistrict: config.from_district_id ?? null,
+      fromDistrict: pickup.districtId,
       toDistrict: to.districtId,
       creds,
     });
 
-    const created = await this.client.createOrder(
-      {
-        client_order_code: input.clientOrderCode,
-        to_name: input.toName,
-        to_phone: input.toPhone,
-        to_address: input.toAddress,
-        to_ward_code: to.wardCode,
-        to_district_id: to.districtId,
-        // Địa chỉ lấy hàng: ưu tiên kho của đơn, thiếu thì GHN dùng shop mặc định
-        ...(input.originName ? { from_name: input.originName } : {}),
-        ...(input.originPhone ? { from_phone: input.originPhone } : {}),
-        ...(input.originAddress ? { from_address: input.originAddress } : {}),
-        ...(input.originWard ? { from_ward_name: input.originWard } : {}),
-        ...(input.originDistrict
-          ? { from_district_name: input.originDistrict }
-          : {}),
-        ...(input.originProvince
-          ? { from_province_name: input.originProvince }
-          : {}),
-        cod_amount: Math.max(0, Math.round(input.codAmount)),
-        insurance_value: Math.max(0, Math.round(input.insuranceValue)),
-        weight: Math.max(1, Math.round(input.weightGrams)),
-        length: Math.max(MIN_DIMENSION_CM, input.lengthCm ?? MIN_DIMENSION_CM),
-        width: Math.max(MIN_DIMENSION_CM, input.widthCm ?? MIN_DIMENSION_CM),
-        height: Math.max(MIN_DIMENSION_CM, input.heightCm ?? MIN_DIMENSION_CM),
-        ...(service.serviceId ? { service_id: service.serviceId } : {}),
-        service_type_id: service.serviceTypeId,
-        // 1 = shop trả phí, 2 = người nhận trả phí
-        payment_type_id: input.feePayer === ShippingFeePayer.khach_tra ? 2 : 1,
-        required_note:
-          REQUIRED_NOTE_MAP[input.deliveryRequirement ?? ''] ??
-          DEFAULT_REQUIRED_NOTE,
-        ...(input.note ? { note: input.note } : {}),
-        items: input.items.map((i) => ({
-          name: i.name,
-          ...(i.code ? { code: i.code } : {}),
-          quantity: i.quantity,
-          price: Math.max(0, Math.round(i.price)),
-          // GHN đòi weight từng dòng; chia đều khối lượng kiện cho số lượng hàng
-          weight: Math.max(
-            1,
-            Math.round(
-              input.weightGrams / Math.max(1, totalQuantity(input.items)),
-            ),
-          ),
-        })),
-      },
-      creds,
-    );
+    const returnPhone = pickup.phone ?? input.originPhone ?? '0900000000';
+    const returnAddress = pickup.address ?? input.originAddress ?? '—';
+
+    const basePayload = this.buildCreatePayload(input, to, service, {
+      returnPhone,
+      returnAddress,
+    });
+
+    // GHN docs: không truyền from_* thì lấy theo ShopId. Sandbox shop Hà Nội hay lỗi kho → retry HCM.
+    const fromGeoAttempts: Array<typeof SANDBOX_FROM_GEO_FALLBACK | null> = [
+      null,
+      ...(isGhnSandbox() ? [SANDBOX_FROM_GEO_FALLBACK] : []),
+    ];
+
+    let created;
+    let lastWarehouseError: BusinessException | null = null;
+    for (const fromGeo of fromGeoAttempts) {
+      try {
+        created = await this.client.createOrder(
+          fromGeo
+            ? {
+                ...basePayload,
+                from_ward_name: fromGeo.wardName,
+                from_district_name: fromGeo.districtName,
+                from_province_name: fromGeo.provinceName,
+              }
+            : basePayload,
+          creds,
+        );
+        if (fromGeo) {
+          this.logger.warn(
+            `GHN sandbox: tạo đơn thành công sau khi dùng from_* placeholder HCM (shop ${config.shop_id})`,
+          );
+        }
+        break;
+      } catch (e) {
+        if (
+          e instanceof BusinessException &&
+          e.message.includes('thông tin kho')
+        ) {
+          lastWarehouseError = e;
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    if (!created && lastWarehouseError) {
+      const portal = isGhnSandbox() ? '5sao.ghn.dev' : 'khachhang.ghn.vn';
+      throw new BusinessException(
+        lastWarehouseError.code,
+        `${lastWarehouseError.message} Shop "${pickup.name ?? config.shop_id}" (ID ${config.shop_id}): ` +
+          `district_id=${pickup.districtId}, ward_code=${pickup.wardCode}. ` +
+          `Vào ${portal} → Quản lý cửa hàng → cập nhật địa chỉ kho đầy đủ → kết nối lại GHN.`,
+        lastWarehouseError.statusCode,
+      );
+    }
 
     if (!created?.order_code) {
       throw new BusinessException(
@@ -253,6 +287,58 @@ export class GhnAdapter implements CarrierAdapter {
    * Chọn dịch vụ GHN cho tuyến. Ưu tiên khớp tên dịch vụ ("Chuẩn"/"Nhanh") với
    * `service_code` nội bộ; không khớp thì lấy dịch vụ đầu tiên GHN mở cho tuyến đó.
    */
+  private buildCreatePayload(
+    input: CarrierShipmentInput,
+    to: {
+      wardName: string;
+      districtName: string;
+      provinceName: string;
+    },
+    service: { serviceId: number | null; serviceTypeId: number },
+    returnInfo: { returnPhone: string; returnAddress: string },
+  ) {
+    return {
+      client_order_code: input.clientOrderCode,
+      to_name: input.toName,
+      to_phone: input.toPhone,
+      to_address: input.toAddress,
+      to_ward_name: to.wardName,
+      to_district_name: to.districtName,
+      to_province_name: to.provinceName,
+      return_phone: returnInfo.returnPhone,
+      return_address: returnInfo.returnAddress,
+      return_district_id: null,
+      return_ward_code: '',
+      cod_amount: Math.max(0, Math.round(input.codAmount)),
+      insurance_value: Math.max(0, Math.round(input.insuranceValue)),
+      weight: Math.max(1, Math.round(input.weightGrams)),
+      length: Math.max(MIN_DIMENSION_CM, input.lengthCm ?? MIN_DIMENSION_CM),
+      width: Math.max(MIN_DIMENSION_CM, input.widthCm ?? MIN_DIMENSION_CM),
+      height: Math.max(MIN_DIMENSION_CM, input.heightCm ?? MIN_DIMENSION_CM),
+      ...(service.serviceId ? { service_id: service.serviceId } : {}),
+      service_type_id: service.serviceTypeId,
+      payment_type_id: input.feePayer === ShippingFeePayer.khach_tra ? 2 : 1,
+      required_note:
+        REQUIRED_NOTE_MAP[input.deliveryRequirement ?? ''] ??
+        DEFAULT_REQUIRED_NOTE,
+      content:
+        input.items.map((i) => i.name).join(', ').slice(0, 200) || 'Hang hoa',
+      ...(input.note ? { note: input.note } : {}),
+      items: input.items.map((i) => ({
+        name: i.name,
+        ...(i.code ? { code: i.code } : {}),
+        quantity: i.quantity,
+        price: Math.max(0, Math.round(i.price)),
+        weight: Math.max(
+          1,
+          Math.round(
+            input.weightGrams / Math.max(1, totalQuantity(input.items)),
+          ),
+        ),
+      })),
+    };
+  }
+
   private async pickService(
     serviceCode: string | null,
     ctx: {
@@ -262,11 +348,6 @@ export class GhnAdapter implements CarrierAdapter {
       creds: { token: string; shopId?: string | number | null };
     },
   ): Promise<{ serviceId: number | null; serviceTypeId: number }> {
-    if (!ctx.fromDistrict) {
-      // Chưa kết nối đủ (thiếu địa chỉ lấy hàng) — để GHN tự chọn theo loại dịch vụ
-      return { serviceId: null, serviceTypeId: 2 };
-    }
-
     let services: {
       service_id: number;
       short_name: string;
@@ -313,6 +394,70 @@ export class GhnAdapter implements CarrierAdapter {
       );
     }
     return { token: config.token, shopId: config.shop_id };
+  }
+
+  /** Lấy địa chỉ kho lấy hàng live từ GHN — không tin config DB có thể cũ. */
+  private async resolvePickupShop(
+    config: CarrierConnectionConfig,
+    creds: { token: string; shopId?: string | number | null },
+  ) {
+    const shops = await this.client.getShops({ token: creds.token });
+    const shop = shops.find((s) => String(s._id) === String(config.shop_id));
+    if (!shop) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `ShopID ${config.shop_id} không thuộc Token GHN hiện tại. Kết nối lại trong Cấu hình vận chuyển.`,
+        422,
+      );
+    }
+    const districtId =
+      shop.district_id && shop.district_id > 0 ? shop.district_id : null;
+    const wardCode = shop.ward_code?.trim() || null;
+    if (!districtId || !wardCode) {
+      const portal = isGhnSandbox() ? '5sao.ghn.dev' : 'khachhang.ghn.vn';
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `Shop GHN "${shop.name}" (${shop._id}) chưa có Quận/Huyện hoặc Phường/Xã. ` +
+          `Vào ${portal} → Quản lý cửa hàng → cập nhật địa chỉ đầy đủ, rồi kết nối lại.`,
+        422,
+      );
+    }
+    const wards = await this.client.getWards(districtId, {
+      token: creds.token,
+    });
+    const wardName =
+      wards.find((w) => w.WardCode === wardCode)?.WardName ?? '';
+
+    const provinces = await this.client.getProvinces({ token: creds.token });
+    const addrHint = shop.address ?? '';
+    const ordered = [
+      ...provinces.filter((p) => addrHint.includes(p.ProvinceName)),
+      ...provinces.filter((p) => !addrHint.includes(p.ProvinceName)),
+    ];
+    let districtName = '';
+    let provinceName = '';
+    for (const p of ordered) {
+      const districts = await this.client.getDistricts(p.ProvinceID, {
+        token: creds.token,
+      });
+      const d = districts.find((x) => x.DistrictID === districtId);
+      if (d) {
+        districtName = d.DistrictName;
+        provinceName = p.ProvinceName;
+        break;
+      }
+    }
+
+    return {
+      name: shop.name ?? config.from_name ?? null,
+      phone: shop.phone ?? config.from_phone ?? null,
+      address: shop.address ?? config.from_address ?? null,
+      districtId,
+      wardCode,
+      wardName,
+      districtName,
+      provinceName,
+    };
   }
 }
 

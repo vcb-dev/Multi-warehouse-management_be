@@ -14,9 +14,7 @@ export function resolveGhnBaseUrl(): string {
     process.env.GHN_API_BASE_URL?.trim() || process.env.GHN_BASE_URL?.trim();
   if (explicit) {
     const url = explicit.replace(/\/$/, '');
-    return url.includes('/shiip/public-api')
-      ? url
-      : `${url}/shiip/public-api`;
+    return url.includes('/shiip/public-api') ? url : `${url}/shiip/public-api`;
   }
 
   const env = (process.env.GHN_ENV ?? 'production').trim().toLowerCase();
@@ -72,14 +70,25 @@ export type GhnCreateOrderPayload = {
   to_name: string;
   to_phone: string;
   to_address: string;
-  to_ward_code: string;
-  to_district_id: number;
+  /** GHN create ưu tiên tên — gửi ID đôi khi báo "không lấy được thông tin kho" (đặc biệt sandbox). */
+  to_ward_name?: string;
+  to_district_name?: string;
+  to_province_name?: string;
+  to_ward_code?: string;
+  to_district_id?: number;
   from_name?: string;
   from_phone?: string;
   from_address?: string;
+  from_district_id?: number;
+  from_ward_code?: string;
   from_ward_name?: string;
   from_district_name?: string;
   from_province_name?: string;
+  return_phone?: string;
+  return_address?: string;
+  return_district_id?: number | null;
+  return_ward_code?: string;
+  content?: string;
   cod_amount?: number;
   insurance_value?: number;
   weight: number;
@@ -210,36 +219,75 @@ export class GhnClient {
 
     const raw = (await res.json().catch(() => null)) as GhnEnvelope<T> | null;
     if (!res.ok || !raw || (raw.code !== undefined && raw.code !== 200)) {
-      const message =
+      const codeMsg =
         raw?.code_message ?? raw?.message ?? `GHN trả về HTTP ${res.status}`;
-      this.logger.warn(`GHN ${path} lỗi: ${message}`);
-      const hint = isGhnSandbox()
-        ? ' (đang dùng sandbox — Token production cần GHN_ENV=production)'
-        : ' (đang dùng production — Token test cần GHN_ENV=sandbox)';
-      throw new BusinessException('CARRIER_ERROR', `GHN: ${message}${hint}`, 422);
+      const detail =
+        raw?.message && raw.message !== codeMsg ? raw.message : null;
+      if (path === 'v2/shipping-order/create' && typeof body === 'string') {
+        try {
+          const keys = Object.keys(JSON.parse(body) as object).join(', ');
+          this.logger.warn(`GHN create payload keys: ${keys}`);
+        } catch {
+          /* ignore */
+        }
+      }
+      this.logger.warn(
+        `GHN ${path} lỗi: ${codeMsg}${detail ? ` | ${detail}` : ''}`,
+      );
+      const warehouseHint = (detail ?? codeMsg).includes('thông tin kho')
+        ? ' Shop GHN cần có đủ Tỉnh/Quận/Phường trên api.ghn.vn → Quản lý cửa hàng.'
+        : '';
+      const envHint = isGhnSandbox()
+        ? 'Môi trường: sandbox (GHN_ENV=sandbox)'
+        : 'Môi trường: production (GHN_ENV=production)';
+      throw new BusinessException(
+        'CARRIER_ERROR',
+        `GHN: ${codeMsg}${detail ? ` — ${detail}` : ''}.${warehouseHint} ${envHint}`,
+        422,
+      );
     }
     return raw.data as T;
+  }
+
+  /** Master-data chỉ cần Token — ShopId (nếu gửi kèm) có thể làm GHN trả `data: null`. */
+  private tokenOnly(creds: Credentials): Credentials {
+    return { token: creds.token };
+  }
+
+  /** Master data đôi khi trả `data: null` hoặc một object đơn — chuẩn hoá về mảng. */
+  private async postList<T>(
+    path: string,
+    body: unknown,
+    creds: Credentials,
+  ): Promise<T[]> {
+    const data = await this.post<T[] | T | null>(path, body, creds);
+    if (data == null) return [];
+    return Array.isArray(data) ? data : [data];
   }
 
   // --- Master data địa chỉ (dùng để map tên tỉnh/huyện/xã sang ID của GHN) ---
 
   getProvinces(creds: Credentials) {
-    return this.post<GhnProvince[]>('master-data/province', {}, creds);
+    return this.postList<GhnProvince>(
+      'master-data/province',
+      {},
+      this.tokenOnly(creds),
+    );
   }
 
   getDistricts(provinceId: number, creds: Credentials) {
-    return this.post<GhnDistrict[]>(
+    return this.postList<GhnDistrict>(
       'master-data/district',
       { province_id: provinceId },
-      creds,
+      this.tokenOnly(creds),
     );
   }
 
   getWards(districtId: number, creds: Credentials) {
-    return this.post<GhnWard[]>(
+    return this.postList<GhnWard>(
       'master-data/ward',
       { district_id: districtId },
-      creds,
+      this.tokenOnly(creds),
     );
   }
 
@@ -262,15 +310,21 @@ export class GhnClient {
    * `service_id` thật thay vì đoán `service_type_id`, vì GHN mở dịch vụ khác nhau theo tuyến.
    */
   getAvailableServices(
-    input: { shopId: number; fromDistrict: number; toDistrict: number },
+    input: {
+      shopId: number;
+      fromDistrict?: number | null;
+      toDistrict: number;
+    },
     creds: Credentials,
   ) {
     return this.post<GhnService[]>(
       'v2/shipping-order/available-services',
       {
         shop_id: input.shopId,
-        from_district: input.fromDistrict,
         to_district: input.toDistrict,
+        ...(input.fromDistrict && input.fromDistrict > 0
+          ? { from_district: input.fromDistrict }
+          : {}),
       },
       creds,
     );
