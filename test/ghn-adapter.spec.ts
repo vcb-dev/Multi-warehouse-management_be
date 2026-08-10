@@ -1,4 +1,5 @@
 import { ShipmentStatus } from '@prisma/client';
+import { BusinessException } from '../src/common/exceptions/business.exception';
 import { GhnLocationResolver } from '../src/modules/fulfillments/carriers/ghn-location-resolver';
 import { GhnAdapter } from '../src/modules/fulfillments/carriers/ghn.adapter';
 import type { GhnClient } from '../src/modules/fulfillments/carriers/ghn.client';
@@ -90,5 +91,104 @@ describe('GHN-2 báo giá vẫn dùng biểu phí nội bộ', () => {
     expect(q500.fee).toBe(44080);
     // 1200g → 3 mức 500g → 2 mức phụ phí
     expect(q1200.fee).toBe(44080 + 2 * 5500);
+  });
+});
+
+describe('GHN-3 tạo vận đơn — payload create', () => {
+  it('gửi to_* theo tên GHN; không gửi from_* (ShopId); sandbox retry HCM', async () => {
+    const prevEnv = process.env.GHN_ENV;
+    process.env.GHN_ENV = 'sandbox';
+    let attempt = 0;
+    let captured: Record<string, unknown> | undefined;
+    const client = {
+      getShops: jest.fn().mockResolvedValue([
+        {
+          _id: 208660,
+          name: 'Kho test',
+          phone: '0964794541',
+          address: '39 Cầu Diễn',
+          district_id: 1482,
+          ward_code: '11007',
+        },
+      ]),
+      getAvailableServices: jest.fn().mockResolvedValue([
+        { service_id: 53320, short_name: 'Chuẩn', service_type_id: 2 },
+      ]),
+      createOrder: jest.fn(async (payload) => {
+        attempt++;
+        captured = payload as Record<string, unknown>;
+        if (attempt === 1) {
+          throw new BusinessException(
+            'CARRIER_ERROR',
+            'GHN: SERVER_ERR_COMMON — Lỗi hệ thống - không lấy được thông tin kho',
+            422,
+          );
+        }
+        return { order_code: 'GHN123', total_fee: 44080 };
+      }),
+      getWards: jest.fn().mockResolvedValue([
+        { WardCode: '11007', WardName: 'Phường Phú Diễn' },
+      ]),
+      getProvinces: jest.fn().mockResolvedValue([
+        { ProvinceID: 201, ProvinceName: 'Hà Nội' },
+      ]),
+      getDistricts: jest.fn().mockResolvedValue([
+        { DistrictID: 1482, DistrictName: 'Quận Bắc Từ Liêm' },
+      ]),
+    };
+    const resolver = new GhnLocationResolver(client as unknown as GhnClient);
+    jest.spyOn(resolver, 'resolve').mockResolvedValue({
+      districtId: 1556,
+      wardCode: '530106',
+      provinceName: 'Tiền Giang',
+      districtName: 'Thành phố Mỹ Tho',
+      wardName: 'Phường 5',
+    });
+    const adapter = new GhnAdapter(
+      client as unknown as GhnClient,
+      resolver,
+    );
+
+    await adapter.createShipment(
+      {
+        clientOrderCode: 'DH001',
+        serviceCode: 'standard',
+        toName: 'Nguyen Van A',
+        toPhone: '0901234567',
+        toAddress: '123 Test',
+        toWard: 'Phường 5',
+        toDistrict: 'Thành phố Mỹ Tho',
+        toProvince: 'Tiền Giang',
+        originName: 'Kho Sapo',
+        originPhone: '0987654321',
+        originAddress: '39 Cầu Diễn',
+        originWard: null,
+        originDistrict: null,
+        originProvince: null,
+        codAmount: 0,
+        insuranceValue: 100000,
+        feePayer: 'shop_tra' as const,
+        weightGrams: 500,
+        lengthCm: 10,
+        widthCm: 10,
+        heightCm: 10,
+        deliveryRequirement: null,
+        note: null,
+        items: [{ name: 'SP', code: null, quantity: 1, price: 100000 }],
+      },
+      {
+        token: 't',
+        shop_id: '208660',
+      },
+    );
+
+    expect(captured).toBeDefined();
+    expect(captured?.from_name).toBeUndefined();
+    expect(captured?.from_ward_name).toBe('Phường 14');
+    expect(captured?.from_district_name).toBe('Quận 10');
+    expect(captured?.from_province_name).toBe('HCM');
+    expect(captured?.to_ward_name).toBe('Phường 5');
+    expect(client.createOrder).toHaveBeenCalledTimes(2);
+    process.env.GHN_ENV = prevEnv;
   });
 });
