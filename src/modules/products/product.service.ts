@@ -8,8 +8,10 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { findProductIdsByQuery } from '../../common/search/unaccent-search';
 import { CategoryService } from '../categories/category.service';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateProductDto,
+  InitialStockDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
   ProductVariantDto,
@@ -32,6 +34,7 @@ export class ProductService {
     private repo: ProductRepository,
     private variants: VariantService,
     private categories: CategoryService,
+    private inventory: InventoryService,
   ) {}
 
   async buildListWhere(
@@ -103,6 +106,10 @@ export class ProductService {
 
   async create(dto: CreateProductDto, user: AuthUser) {
     await this.validateSkus(dto.variants?.map((v) => v.sku) ?? []);
+    const initialStockByLocation = await this.resolveInitialStock(
+      dto.initial_stock,
+      user,
+    );
 
     const alias = await this.uniqueAlias(dto.alias?.trim() || slugify(dto.name));
     const options = dto.options ?? [];
@@ -206,6 +213,20 @@ export class ProductService {
                 },
               });
             }
+          }
+
+          for (const [locationId, quantity] of initialStockByLocation) {
+            await this.inventory.adjustOnHandTo(
+              {
+                variantId: variant.id,
+                locationId,
+                targetOnHand: quantity,
+                referenceType: 'product',
+                referenceId: p.id,
+                createdById: user.userId,
+              },
+              tx,
+            );
           }
         }
 
@@ -669,6 +690,48 @@ export class ProductService {
         toRemove.map((v) => v.id),
       );
     }
+  }
+
+  /** Kho lưu trữ được chọn lúc tạo SP — tồn ban đầu áp đồng nhất cho mọi
+   *  variant. Bỏ qua dòng quantity <= 0 để không tạo InventoryLevel rác. */
+  private async resolveInitialStock(
+    rows: InitialStockDto[] | undefined,
+    user: AuthUser,
+  ): Promise<Map<bigint, number>> {
+    const positive = (rows ?? []).filter((r) => r.quantity > 0);
+    if (!positive.length) return new Map();
+
+    const seen = new Set<string>();
+    for (const row of positive) {
+      if (seen.has(row.location_id)) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Kho "${row.location_id}" bị lặp trong danh sách tồn ban đầu`,
+          422,
+        );
+      }
+      seen.add(row.location_id);
+    }
+
+    const ids = positive.map((r) => BigInt(r.location_id));
+    const locations = await this.repo.client.location.findMany({
+      where: { id: { in: ids } },
+    });
+    const activeIds = new Set(
+      locations.filter((l) => l.status === 'active').map((l) => l.id.toString()),
+    );
+    for (const id of ids) {
+      if (!activeIds.has(id.toString())) {
+        throw new BusinessException('VALIDATION_ERROR', 'Kho không hợp lệ', 422);
+      }
+      assertLocationPermission(user, 'inventory:receive', id);
+    }
+
+    const result = new Map<bigint, number>();
+    for (const row of positive) {
+      result.set(BigInt(row.location_id), row.quantity);
+    }
+    return result;
   }
 
   private async validateSkus(skus: string[], excludeProductId?: bigint) {

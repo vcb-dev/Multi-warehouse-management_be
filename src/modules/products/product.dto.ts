@@ -90,11 +90,21 @@ export class ProductVariantDto {
   allow_backorder?: boolean;
 }
 
+export class InitialStockDto {
+  @IsString()
+  @MinLength(1)
+  location_id!: string;
+
+  @IsInt()
+  @Min(0)
+  quantity!: number;
+}
+
 export class CreateProductDto {
   @IsString()
   @MinLength(1)
   name!: string;
-
+  
   @IsOptional()
   @IsString()
   alias?: string;
@@ -143,6 +153,14 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ProductVariantDto)
   variants?: ProductVariantDto[];
+
+  /** Chỉ dùng lúc TẠO — tồn ban đầu theo kho, áp đồng nhất cho mọi variant.
+   *  UpdateProductDto kế thừa field này nhưng update() cố ý không đọc. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InitialStockDto)
+  initial_stock?: InitialStockDto[];
 
   @IsOptional()
   @IsString()

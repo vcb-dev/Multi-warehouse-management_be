@@ -117,6 +117,29 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     expect(inv.data).toEqual([]);
   });
 
+  it('KC3b — initial_stock ghi tồn kho ban đầu, áp đồng nhất cho mọi variant', async () => {
+    const ts = Date.now();
+    const created = await products.create(
+      {
+        name: `KC3b ${ts}`,
+        options: [{ name: 'Size', values: ['M', 'L'] }],
+        variants: [
+          { option_values: ['M'], sku: `KC3B-${ts}-M`, price: 1 },
+          { option_values: ['L'], sku: `KC3B-${ts}-L`, price: 1 },
+        ],
+        initial_stock: [{ location_id: locationId.toString(), quantity: 10 }],
+      },
+      authUser(),
+    );
+    const inv = await products.getInventory(BigInt(created.id), {}, authUser());
+    expect(inv.data).toHaveLength(2); // 1 kho × 2 variant
+    for (const row of inv.data) {
+      expect(row.location_id).toBe(locationId.toString());
+      expect(row.on_hand).toBe(10);
+      expect(row.available).toBe(10);
+    }
+  }, 30_000); // DB remote — nhiều round trip hơn (2 variant × adjustOnHandTo), 5s mặc định của jest không đủ
+
   it('KC4 — resolvePrice branch override', async () => {
     const variant = await prisma.productVariant.findFirst();
     if (!variant) throw new Error('No variant');
