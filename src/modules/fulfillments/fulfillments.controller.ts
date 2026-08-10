@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Put,
+  Query,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -120,10 +130,18 @@ export class FulfillmentsController {
   /**
    * Webhook trạng thái đơn của GHN. `@Public` vì GHN không có JWT của hệ thống này —
    * xác thực bằng đối chiếu `ShopID` trong payload với cấu hình kết nối đã lưu.
+   * Nếu set GHN_WEBHOOK_SECRET thì bắt buộc header X-GHN-Webhook-Secret.
    */
   @Public()
   @Post('webhook/ghn')
-  webhookGhn(@Body() dto: GhnWebhookDto) {
+  webhookGhn(
+    @Body() dto: GhnWebhookDto,
+    @Headers('x-ghn-webhook-secret') webhookSecret?: string,
+  ) {
+    const expected = process.env.GHN_WEBHOOK_SECRET?.trim();
+    if (expected && webhookSecret !== expected) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
     return this.fulfillments.webhookGhn(dto);
   }
 

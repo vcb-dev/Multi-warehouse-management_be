@@ -25,7 +25,7 @@ async function seedShippingProviders() {
     {
       code: 'ghn',
       name: 'GHN Express',
-      isConnected: true,
+      isConnected: false,
       servicesConfig: [
         { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 44080, extra_fee_per_500g: 5500 },
         { code: 'fast', name: 'Nhanh', eta: '1-2 ngày', base_fee: 60500, extra_fee_per_500g: 7000 },
@@ -34,7 +34,7 @@ async function seedShippingProviders() {
     {
       code: 'spx',
       name: 'SPX Express',
-      isConnected: true,
+      isConnected: false,
       servicesConfig: [
         { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 39000, extra_fee_per_500g: 5000 },
       ],

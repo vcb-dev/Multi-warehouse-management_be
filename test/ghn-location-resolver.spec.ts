@@ -49,7 +49,13 @@ describe('GHN-3 map tên tỉnh/huyện/xã sang ID của GHN', () => {
         },
         CREDS,
       ),
-    ).resolves.toEqual({ districtId: 1482, wardCode: '1A0101' });
+    ).resolves.toEqual({
+      districtId: 1482,
+      wardCode: '1A0101',
+      provinceName: 'Hà Nội',
+      districtName: 'Ba Đình',
+      wardName: 'Phúc Xá',
+    });
   });
 
   it('khớp cả khi tên viết không dấu', async () => {
@@ -60,7 +66,13 @@ describe('GHN-3 map tên tỉnh/huyện/xã sang ID của GHN', () => {
         { province: 'Ha Noi', district: 'Ba Dinh', ward: 'Truc Bach' },
         CREDS,
       ),
-    ).resolves.toEqual({ districtId: 1482, wardCode: '1A0102' });
+    ).resolves.toEqual({
+      districtId: 1482,
+      wardCode: '1A0102',
+      provinceName: 'Hà Nội',
+      districtName: 'Ba Đình',
+      wardName: 'Trúc Bạch',
+    });
   });
 
   it('cache master data — gọi 2 lần chỉ tải danh sách 1 lần', async () => {
