@@ -319,6 +319,7 @@ model User {
   savedReports           SavedReport[]               @relation("SavedReportUser")
   apiKeysCreated         ApiKey[]                    @relation("ApiKeyCreatedBy")
   apiKeysActingAs        ApiKey[]                    @relation("ApiKeyActingUser")
+  variantPriceHistories  VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
 
   @@map("users")
 }
@@ -635,9 +636,27 @@ model ProductVariant {
   draftOrderItems  DraftOrderItem[]
   refundLineItems  OrderRefundLineItem[]
   fulfillmentItems FulfillmentLineItem[]
+  priceHistories   VariantPriceHistory[]
 
   @@index([productId])
   @@map("product_variants")
+}
+
+model VariantPriceHistory {
+  id          BigInt   @id @default(autoincrement())
+  variantId   BigInt   @map("variant_id")
+  field       String   // "price" | "cost"
+  oldValue    Decimal? @map("old_value") @db.Decimal(18, 2)
+  newValue    Decimal  @map("new_value") @db.Decimal(18, 2)
+  source      String   @default("manual") // "manual" | "import" | "create"
+  changedById BigInt?  @map("changed_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  changedBy User?          @relation("VariantPriceHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([variantId, createdAt(sort: Desc)])
+  @@map("variant_price_histories")
 }
 
 model VariantOptionValue {
