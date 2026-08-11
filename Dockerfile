@@ -25,12 +25,12 @@ COPY package.json pnpm-lock.yaml ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts/migrate-deploy.cjs ./scripts/migrate-deploy.cjs
 
 RUN mkdir -p uploads
 
 EXPOSE 3001
 
-# Auto-migrate khi start (idempotent; Prisma advisory lock nếu nhiều replica).
-# CI/CD cũng chạy migrate deploy trước khi redeploy — xem docs/RAILWAY_CICD.md
-# DIRECT_URL fallback = DATABASE_URL nếu Railway chỉ set 1 URL.
-CMD ["sh", "-c", "export DIRECT_URL=\"${DIRECT_URL:-$DATABASE_URL}\" && ./node_modules/.bin/prisma migrate deploy && node dist/src/main"]
+# Auto-migrate khi start qua migrate-deploy.cjs (ép RW + tự resolve P3009 rồi retry).
+# CI/CD cũng chạy cùng script trước khi redeploy — xem docs/RAILWAY_CICD.md
+CMD ["sh", "-c", "export DIRECT_URL=\"${DIRECT_URL:-$DATABASE_URL}\" && node scripts/migrate-deploy.cjs && exec node dist/src/main"]

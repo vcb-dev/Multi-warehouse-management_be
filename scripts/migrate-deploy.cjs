@@ -11,7 +11,11 @@ const fs = require('fs');
 const path = require('path');
 
 /** Migration từng fail trên production; SQL đã idempotent — resolve rồi chạy lại an toàn. */
-const KNOWN_FAILED_MIGRATIONS = ['20260806130000_add_inventory_levels_pk'];
+const KNOWN_FAILED_MIGRATIONS = [
+  '20260728130000_sapo_order_status_split',
+  '20260729090000_sapo_orders_items_collections',
+  '20260806130000_add_inventory_levels_pk',
+];
 
 function ensureWritableDbUrl(url) {
   if (!url) return url;
@@ -66,8 +70,18 @@ function isP3009(result) {
   return text.includes('P3009') || /failed migrations/i.test(text);
 }
 
-function resolveKnownFailedMigrations() {
-  for (const name of KNOWN_FAILED_MIGRATIONS) {
+function failedMigrationNames(result) {
+  const text = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  const parsed = [
+    ...text.matchAll(/The `([^`]+)` migration started at [\s\S]*? failed/g),
+  ].map((match) => match[1]);
+  // Chỉ resolve đúng migration đang failed — không đụng migration đã apply.
+  if (parsed.length > 0) return parsed;
+  return [...KNOWN_FAILED_MIGRATIONS];
+}
+
+function resolveFailedMigrations(names) {
+  for (const name of names) {
     console.log(
       `[migrate-deploy] Resolving failed migration as rolled-back: ${name}`,
     );
@@ -90,10 +104,11 @@ let result = runPrisma(['migrate', 'deploy']);
 printResult(result);
 
 if (result.status !== 0 && isP3009(result)) {
+  const names = failedMigrationNames(result);
   console.log(
-    '[migrate-deploy] Detected P3009 — clearing known failed migration(s) and retrying deploy',
+    `[migrate-deploy] Detected P3009 — clearing failed migration(s): ${names.join(', ')}`,
   );
-  resolveKnownFailedMigrations();
+  resolveFailedMigrations(names);
   result = runPrisma(['migrate', 'deploy']);
   printResult(result);
 }
