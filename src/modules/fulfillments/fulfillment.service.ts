@@ -1047,8 +1047,14 @@ export class FulfillmentService {
       return { received: true };
     }
 
-    const orderNumber = dto.DATA?.ORDER_NUMBER?.trim();
-    const orderReference = dto.DATA?.ORDER_REFERENCE?.trim();
+    const orderNumber =
+      typeof dto.DATA?.ORDER_NUMBER === 'string'
+        ? dto.DATA.ORDER_NUMBER.trim()
+        : undefined;
+    const orderReference =
+      typeof dto.DATA?.ORDER_REFERENCE === 'string'
+        ? dto.DATA.ORDER_REFERENCE.trim()
+        : undefined;
     if (!orderNumber) return { received: true };
 
     let f = await this.prisma.fulfillment.findFirst({

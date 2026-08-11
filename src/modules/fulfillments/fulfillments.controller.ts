@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
   Post,
   Put,
@@ -154,19 +155,28 @@ export class FulfillmentsController {
   }
 
   /**
-   * Webhook trạng thái đơn của ViettelPost. VTP gửi header `Token` = giá trị "tham số bí mật"
-   * cấu hình trên web VTP khi duyệt webhook — bắt buộc set `VTP_WEBHOOK_SECRET` để xác thực
-   * (khác GHN, VTP không có cơ chế đối chiếu ShopID trong payload).
+   * Webhook trạng thái đơn của ViettelPost. Theo tài liệu chính thức
+   * (`partner2.viettelpost.vn/document/webhook`): header `Authorization` là "token xác thực",
+   * còn payload mẫu cũng có field `TOKEN` (dạng số điện thoại tài khoản) ở ngoài `DATA` — tài
+   * liệu không nói rõ field nào mới thật sự là "tham số bí mật" cấu hình lúc đăng ký webhook, nên
+   * chấp nhận khớp 1 trong 2 (đối chiếu thật khi có tài khoản dev để test webhook thật).
+   * BẮT BUỘC trả HTTP 200 (không phải 201 mặc định của NestJS) — nếu không VTP coi là thất bại
+   * và retry tối đa 5 lần liên tục cho cùng một bản ghi hành trình.
    */
   @Public()
   @Post('webhook/vtp')
+  @HttpCode(200)
   webhookVtp(
     @Body() dto: VtpWebhookDto,
-    @Headers('token') webhookSecret?: string,
+    @Headers('authorization') authHeader?: string,
   ) {
     const expected = process.env.VTP_WEBHOOK_SECRET?.trim();
-    if (expected && webhookSecret !== expected) {
-      throw new UnauthorizedException('Invalid webhook secret');
+    if (expected) {
+      const headerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
+      const bodyToken = dto.TOKEN?.trim();
+      if (headerToken !== expected && bodyToken !== expected) {
+        throw new UnauthorizedException('Invalid webhook secret');
+      }
     }
     return this.fulfillments.webhookVtp(dto);
   }

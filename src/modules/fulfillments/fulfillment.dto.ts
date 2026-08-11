@@ -3,6 +3,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -243,52 +244,19 @@ export class GhnWebhookDto {
  * Payload webhook trạng thái đơn của ViettelPost — bọc trong `{ DATA, TOKEN }`, khác payload
  * phẳng của GHN. `ORDER_STATUS` là mã số (mục 8 tài liệu, 101–550), không phải chuỗi như GHN.
  */
-export class VtpWebhookData {
-  @IsOptional()
-  @IsString()
-  ORDER_NUMBER?: string;
-
-  @IsOptional()
-  @IsString()
-  ORDER_REFERENCE?: string;
-
-  @IsOptional()
-  @IsNumber()
-  ORDER_STATUS?: number;
-
-  @IsOptional()
-  @IsString()
-  STATUS_NAME?: string;
-
-  @IsOptional()
-  @IsNumber()
-  MONEY_COLLECTION?: number;
-
-  @IsOptional()
-  @IsNumber()
-  MONEY_TOTAL?: number;
-
-  @IsOptional()
-  @IsNumber()
-  MONEY_COLLECTION_ORIGIN?: number;
-
-  @IsOptional()
-  @IsNumber()
-  PRODUCT_WEIGHT?: number;
-
-  @IsOptional()
-  @IsString()
-  REASON_CODE?: string;
-
-  @IsOptional()
-  IS_RETURNING?: boolean;
-}
-
+/**
+ * `DATA` cố tình để dạng object mở (không whitelist field con) thay vì class riêng như trước:
+ * payload thật của VTP (theo tài liệu `partner2.viettelpost.vn/document/webhook`) có ~25 field
+ * tuỳ trạng thái đơn (ORDER_STATUSDATE, MONEY_FEECOD, EMPLOYEE_NAME, POD, DETAIL[], v.v.), nhiều
+ * hơn hẳn số field service này thực sự đọc — và tài liệu còn lẫn cả field lỗi chính tả
+ * (`LOCALION_CURRENTLY` cạnh `LOCATION_CURRENTLY`). Dùng class liệt kê hết dễ vỡ mỗi khi VTP đổi
+ * field; ValidationPipe toàn cục bật `whitelist + forbidNonWhitelisted` nên nếu vẫn dùng class
+ * cũ, mọi request webhook thật sẽ bị 400 vì các field chưa khai (đã xác nhận bằng curl thật).
+ */
 export class VtpWebhookDto {
   @IsOptional()
-  @ValidateNested()
-  @Type(() => VtpWebhookData)
-  DATA?: VtpWebhookData;
+  @IsObject()
+  DATA?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()
