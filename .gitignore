@@ -20,3 +20,6 @@ uploads/
 
 # Local pnpm allowBuilds overrides (not a workspace file)
 pnpm-allowBuilds.local.yaml
+
+# Output tạm cục bộ từ các script vận hành trong scripts/ (không commit)
+scripts-tmp/
