@@ -308,6 +308,7 @@ model User {
   vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
   supplierLedgerEntries  SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
   customerLedgerEntries  CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
+  variantPriceChanges    VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
   conversationsAssigned  Conversation[]              @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]       @relation("ConversationMessageAuthor")
   chatAudits             ChatAudit[]
@@ -635,9 +636,29 @@ model ProductVariant {
   draftOrderItems  DraftOrderItem[]
   refundLineItems  OrderRefundLineItem[]
   fulfillmentItems FulfillmentLineItem[]
+  priceHistory     VariantPriceHistory[]
 
   @@index([productId])
   @@map("product_variants")
+}
+
+/// Tái tạo từ DB thật (20260806120000_add_variant_price_history) — migration
+/// gốc bị áp thẳng vào DB dùng chung mà chưa từng commit vào git.
+model VariantPriceHistory {
+  id          BigInt   @id @default(autoincrement())
+  variantId   BigInt   @map("variant_id")
+  field       String
+  oldValue    Decimal? @map("old_value") @db.Decimal(18, 2)
+  newValue    Decimal  @map("new_value") @db.Decimal(18, 2)
+  source      String   @default("manual")
+  changedById BigInt?  @map("changed_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  changedBy User?          @relation("VariantPriceHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([variantId, createdAt(sort: Desc)])
+  @@map("variant_price_histories")
 }
 
 model VariantOptionValue {
