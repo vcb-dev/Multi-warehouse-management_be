@@ -149,11 +149,30 @@ export class CancelFulfillmentDto {
 }
 
 export class CarrierWebhookDto {
+  /** GHN payload */
+  @IsOptional()
   @IsString()
-  tracking_number!: string;
+  OrderCode?: string;
 
+  @IsOptional()
   @IsString()
-  status!: string;
+  Status?: string;
+
+  @IsOptional()
+  @IsString()
+  Type?: string;
+
+  @IsOptional()
+  ShopID?: number | string;
+
+  /** Stub / hãng khác — snake_case */
+  @IsOptional()
+  @IsString()
+  tracking_number?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 }
 
 /**
@@ -359,12 +378,31 @@ export class UpdateShippingProviderDto {
 }
 
 export class ConnectProviderDto {
-  /** Token/API key mô phỏng — lưu vào connection_config chờ adapter thật */
-  @IsOptional()
+  /** Token API của hãng (GHN: Token) */
   @IsString()
-  token?: string;
+  @MinLength(1)
+  token!: string;
 
-  @IsOptional()
+  /** ShopId GHN (bắt buộc với provider code=ghn) */
   @IsString()
-  shop_id?: string;
+  @MinLength(1)
+  shop_id!: string;
+}
+
+export class ListShipmentsQueryDto {
+  @IsOptional() @IsString() q?: string;
+  @IsOptional() @IsString() tab?: string;
+  @IsOptional() @IsString() shipment_status?: string;
+  @IsOptional() @IsString() location_id?: string;
+  @IsOptional() @IsString() provider_id?: string;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page_size?: number;
 }

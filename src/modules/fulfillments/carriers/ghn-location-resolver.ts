@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { BusinessException } from '../../../common/exceptions/business.exception';
-import { GhnClient } from './ghn.client';
+import { GhnClient, isGhnSandbox } from './ghn.client';
 
 /**
  * App lưu địa chỉ theo dữ liệu hành chính Việt Nam (`frontend/public/data/vn-address.json`,
@@ -97,6 +97,8 @@ export class GhnLocationResolver {
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value as T;
     const value = await load();
+    // ponytail: không cache mảng rỗng — lỗi token/env tạm thời sẽ kẹt 24h
+    if (Array.isArray(value) && value.length === 0) return value;
     this.cache.set(key, { at: Date.now(), value });
     return value;
   }
@@ -112,7 +114,13 @@ export class GhnLocationResolver {
       ward: string | null;
     },
     creds: Creds,
-  ): Promise<{ districtId: number; wardCode: string }> {
+  ): Promise<{
+    districtId: number;
+    wardCode: string;
+    provinceName: string;
+    districtName: string;
+    wardName: string;
+  }> {
     const { province, district, ward } = input;
     if (!province || !district || !ward) {
       throw new BusinessException(
@@ -138,6 +146,17 @@ export class GhnLocationResolver {
     const districts = await this.cached(`districts:${p.id}`, () =>
       this.client.getDistricts(p.id, creds),
     );
+    if (!districts.length) {
+      const env = isGhnSandbox() ? 'sandbox' : 'production';
+      const portal = isGhnSandbox() ? '5sao.ghn.dev' : 'khachhang.ghn.vn';
+      throw new BusinessException(
+        'CARRIER_ADDRESS_UNMATCHED',
+        `GHN không trả danh sách Quận/Huyện cho "${province}" (ProvinceID=${p.id}). ` +
+          `Backend đang GHN_ENV=${env} — Token phải lấy từ ${portal}. ` +
+          `Vào Cấu hình → kết nối lại GHN nếu vừa đổi môi trường.`,
+        422,
+      );
+    }
     const d = matchOne(
       districts.map((x) => ({
         name: x.DistrictName,
@@ -151,6 +170,13 @@ export class GhnLocationResolver {
     const wards = await this.cached(`wards:${d.id}`, () =>
       this.client.getWards(d.id, creds),
     );
+    if (!wards.length) {
+      throw new BusinessException(
+        'CARRIER_ADDRESS_UNMATCHED',
+        `GHN không trả danh sách Phường/Xã cho "${district}". Kiểm tra địa chỉ giao hàng.`,
+        422,
+      );
+    }
     const w = matchOne(
       wards.map((x) => ({
         name: x.WardName,
@@ -161,7 +187,14 @@ export class GhnLocationResolver {
     );
     if (!w) throw this.notFound('Phường/Xã', ward);
 
-    return { districtId: d.id, wardCode: w.code };
+    // Trả cả tên GHN chuẩn — create order dùng to_*_name; ID đôi khi gây lỗi "không lấy được thông tin kho".
+    return {
+      districtId: d.id,
+      wardCode: w.code,
+      provinceName: p.name,
+      districtName: d.name,
+      wardName: w.name,
+    };
   }
 
   private notFound(level: string, value: string) {

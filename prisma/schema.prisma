@@ -308,7 +308,6 @@ model User {
   vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
   supplierLedgerEntries  SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
   customerLedgerEntries  CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
-  variantPriceChanges    VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
   conversationsAssigned  Conversation[]              @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]       @relation("ConversationMessageAuthor")
   chatAudits             ChatAudit[]
@@ -320,6 +319,7 @@ model User {
   savedReports           SavedReport[]               @relation("SavedReportUser")
   apiKeysCreated         ApiKey[]                    @relation("ApiKeyCreatedBy")
   apiKeysActingAs        ApiKey[]                    @relation("ApiKeyActingUser")
+  variantPriceHistories  VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
 
   @@map("users")
 }
@@ -636,21 +636,19 @@ model ProductVariant {
   draftOrderItems  DraftOrderItem[]
   refundLineItems  OrderRefundLineItem[]
   fulfillmentItems FulfillmentLineItem[]
-  priceHistory     VariantPriceHistory[]
+  priceHistories   VariantPriceHistory[]
 
   @@index([productId])
   @@map("product_variants")
 }
 
-/// Tái tạo từ DB thật (20260806120000_add_variant_price_history) — migration
-/// gốc bị áp thẳng vào DB dùng chung mà chưa từng commit vào git.
 model VariantPriceHistory {
   id          BigInt   @id @default(autoincrement())
   variantId   BigInt   @map("variant_id")
-  field       String
+  field       String   // "price" | "cost"
   oldValue    Decimal? @map("old_value") @db.Decimal(18, 2)
   newValue    Decimal  @map("new_value") @db.Decimal(18, 2)
-  source      String   @default("manual")
+  source      String   @default("manual") // "manual" | "import" | "create"
   changedById BigInt?  @map("changed_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -706,7 +704,7 @@ model Category {
   createdOn       DateTime              @default(now()) @map("created_on")
   modifiedOn      DateTime              @updatedAt @map("modified_on")
 
-  parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id])
+  parent   Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
   children Category[]        @relation("CategoryTree")
   products ProductCategory[]
 

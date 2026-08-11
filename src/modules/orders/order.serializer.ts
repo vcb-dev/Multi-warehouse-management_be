@@ -26,7 +26,19 @@ export function serializeOrderListItem(
     deliveredOn: Date | null;
     phone: string | null;
     tags: string[];
-    customer: { firstName: string | null; lastName: string | null } | null;
+    shippingName: string | null;
+    shippingFirstName: string | null;
+    shippingLastName: string | null;
+    shippingPhone: string | null;
+    shippingAddress1: string | null;
+    shippingWard: string | null;
+    shippingDistrict: string | null;
+    shippingProvince: string | null;
+    customer: {
+      firstName: string | null;
+      lastName: string | null;
+      phone: string | null;
+    } | null;
     location: { name: string };
     createdBy: { firstName: string | null; lastName: string | null; email: string };
     items: { sku: string }[];
@@ -42,6 +54,20 @@ export function serializeOrderListItem(
     ? [o.customer.firstName, o.customer.lastName].filter(Boolean).join(' ')
     : null;
   const openFulfillment = o.fulfillments?.[0] ?? null;
+  const recipientName =
+    o.shippingName?.trim() ||
+    [o.shippingFirstName, o.shippingLastName].filter(Boolean).join(' ').trim() ||
+    customerName ||
+    '';
+  const recipientPhone =
+    o.shippingPhone?.trim() || o.phone?.trim() || o.customer?.phone?.trim() || '';
+  const carrierShipReady =
+    !!recipientName &&
+    !!recipientPhone &&
+    !!o.shippingAddress1?.trim() &&
+    !!o.shippingWard?.trim() &&
+    !!o.shippingDistrict?.trim() &&
+    !!o.shippingProvince?.trim();
   return {
     id: o.id.toString(),
     name: o.name,
@@ -71,6 +97,7 @@ export function serializeOrderListItem(
       .map((i) => i.sku)
       .join(', '),
     stock_ready: stockReady,
+    carrier_ship_ready: carrierShipReady,
   };
 }
 

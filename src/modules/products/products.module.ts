@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
 import { CategoriesModule } from '../categories/categories.module';
-import { ProductExportService, ProductImportService } from './product-import.service';
+import {
+  ProductExportService,
+  ProductImportService,
+} from './product-import.service';
 import { ProductRepository } from './product.repository';
 import { ProductService } from './product.service';
 import { ProductsController } from './products.controller';
 import { VariantService } from './variant.service';
+import { VariantPriceHistoryService } from './variant-price-history.service';
 
 @Module({
   imports: [CategoriesModule],
@@ -15,7 +19,13 @@ import { VariantService } from './variant.service';
     VariantService,
     ProductImportService,
     ProductExportService,
+    VariantPriceHistoryService,
   ],
-  exports: [ProductService, ProductRepository, VariantService],
+  exports: [
+    ProductService,
+    ProductRepository,
+    VariantService,
+    VariantPriceHistoryService,
+  ],
 })
 export class ProductsModule {}

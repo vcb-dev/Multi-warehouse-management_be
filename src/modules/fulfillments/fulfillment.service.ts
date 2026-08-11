@@ -877,13 +877,14 @@ export class FulfillmentService {
     if (!provider)
       throw new NotFoundException('Không tìm thấy hãng vận chuyển');
 
+    const externalStatus = dto.status ?? '';
     const status = this.providers
       .adapterFor(provider.code)
-      .mapWebhookStatus(dto.status);
+      .mapWebhookStatus(externalStatus);
     if (!status) {
       throw new BusinessException(
         'VALIDATION_ERROR',
-        `Trạng thái không được hỗ trợ: ${dto.status}`,
+        `Trạng thái không được hỗ trợ: ${externalStatus}`,
         422,
       );
     }
@@ -949,20 +950,49 @@ export class FulfillmentService {
 
     if (dto.Type && dto.Type !== 'Switch_status') return { received: true };
 
-    const status = this.providers
-      .adapterFor(GHN_PROVIDER_CODE)
-      .mapWebhookStatus(dto.Status ?? '');
+    const externalStatus = dto.Status ?? '';
+    const ghnAdapter = this.providers.ghnAdapter;
+
+    if (ghnAdapter.isCancelStatus(externalStatus)) {
+      if (f.shipmentStatus === ShipmentStatus.pending && !f.closedAt) {
+        const user = await this.systemUser();
+        await this.cancel(f.id, { reason: 'GHN cancel' }, user);
+      }
+      return { received: true };
+    }
+
+    const status = ghnAdapter.mapWebhookStatus(externalStatus);
     if (!status) {
       this.logger.log(
-        `Webhook GHN ${orderCode}: trạng thái "${dto.Status}" chưa map, bỏ qua`,
+        `Webhook GHN ${orderCode}: trạng thái "${externalStatus}" chưa map, bỏ qua`,
       );
       return { received: true };
     }
-    if (status === f.shipmentStatus) return { received: true };
+    if (status === f.shipmentStatus || !f.shipmentStatus) {
+      return { received: true };
+    }
+
+    const path = ghnAdapter.pathTo(f.shipmentStatus, status);
+    if (!path) {
+      this.logger.warn(
+        `Webhook GHN ${orderCode}: không tìm được đường ${f.shipmentStatus} -> ${status}`,
+      );
+      return { received: true };
+    }
 
     const user = await this.systemUser();
+    let current = f;
     try {
-      await this.applyShipmentStatus(f, status, user);
+      for (const step of path) {
+        await this.applyShipmentStatus(current, step, user);
+        const refreshed = await this.prisma.fulfillment.findUnique({
+          where: { id: f.id },
+          include: { order: { include: { items: true } } },
+        });
+        if (!refreshed) break;
+        current = refreshed;
+        if (refreshed.closedAt) break;
+      }
     } catch (e) {
       // Vòng đời nội bộ chặt hơn GHN (vd nhảy thẳng picked -> delivered). Ghi log để xử lý
       // tay thay vì để GHN retry mãi.
