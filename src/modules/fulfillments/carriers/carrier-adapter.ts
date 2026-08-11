@@ -79,6 +79,24 @@ export type CarrierShipmentResult = {
 };
 
 /**
+ * Ước tính phí từ biểu phí nội bộ `services_config` — dùng chung cho mọi adapter khi báo giá
+ * (trước khi tạo đơn thật). Phí THẬT do hãng trả về lúc `createShipment` sẽ ghi đè con số này.
+ */
+export function estimateQuote(
+  services: CarrierServiceConfig[],
+  weightGrams: number,
+): CarrierQuote[] {
+  return services.map((s) => ({
+    code: s.code,
+    name: s.name,
+    eta: s.eta,
+    fee:
+      s.base_fee +
+      Math.max(0, Math.ceil(weightGrams / 500) - 1) * s.extra_fee_per_500g,
+  }));
+}
+
+/**
  * Adapter cho từng hãng vận chuyển. `ManualAdapter` là mặc định (báo giá từ
  * services_config, trạng thái cập nhật thủ công); hãng có API thật (GHN) cài thêm
  * `createShipment`/`cancelShipment`.

@@ -28,6 +28,7 @@ import {
   ReplyCarrierTicketDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
+  VtpWebhookDto,
 } from './fulfillment.dto';
 import { FulfillmentService } from './fulfillment.service';
 
@@ -150,6 +151,24 @@ export class FulfillmentsController {
   @Post('webhook/ghn/ticket')
   webhookGhnTicket(@Body() dto: GhnTicketCallbackDto) {
     return this.tickets.handleCallback(dto);
+  }
+
+  /**
+   * Webhook trạng thái đơn của ViettelPost. VTP gửi header `Token` = giá trị "tham số bí mật"
+   * cấu hình trên web VTP khi duyệt webhook — bắt buộc set `VTP_WEBHOOK_SECRET` để xác thực
+   * (khác GHN, VTP không có cơ chế đối chiếu ShopID trong payload).
+   */
+  @Public()
+  @Post('webhook/vtp')
+  webhookVtp(
+    @Body() dto: VtpWebhookDto,
+    @Headers('token') webhookSecret?: string,
+  ) {
+    const expected = process.env.VTP_WEBHOOK_SECRET?.trim();
+    if (expected && webhookSecret !== expected) {
+      throw new UnauthorizedException('Invalid webhook secret');
+    }
+    return this.fulfillments.webhookVtp(dto);
   }
 
   /** Webhook mô phỏng cho hãng chưa tích hợp API thật (cần đăng nhập). */

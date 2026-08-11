@@ -3,6 +3,7 @@ import {
   CarrierAdapter,
   CarrierQuote,
   CarrierServiceConfig,
+  estimateQuote,
 } from './carrier-adapter';
 
 // Trạng thái webhook của ĐTVC → trạng thái vận đơn (đã trùng tên với Sapo)
@@ -21,16 +22,7 @@ export class ManualAdapter implements CarrierAdapter {
     services: CarrierServiceConfig[],
     weightGrams: number,
   ): Promise<CarrierQuote[]> {
-    return Promise.resolve(
-      services.map((s) => ({
-        code: s.code,
-        name: s.name,
-        eta: s.eta,
-        fee:
-          s.base_fee +
-          Math.max(0, Math.ceil(weightGrams / 500) - 1) * s.extra_fee_per_500g,
-      })),
-    );
+    return Promise.resolve(estimateQuote(services, weightGrams));
   }
 
   mapWebhookStatus(externalStatus: string): ShipmentStatus | null {
