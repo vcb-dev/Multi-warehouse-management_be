@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EFFECTIVE_QTY } from '../reports/reports/report-sql';
 
 /**
  * Bổ sung các cột Nhập-Xuất-Tồn cho màn tồn kho, mô phỏng bảng NXT vận hành
@@ -63,15 +64,25 @@ type MovementAgg = {
   location_id: bigint;
   sl_nhap: number;
   sl_xuat: number;
-  ban_15: number;
-  ban_30: number;
-  ban_90: number;
   nk_dang_ve: number;
   ck_dang_ve: number;
 };
 
+/** Bán 15/30/90 ngày tính từ đơn hàng thật (order_items/orders), KHÔNG từ
+ * inventory_movements — đơn đồng bộ Sapo không sinh movement 'order_ship'
+ * (chỉ set thẳng on_hand qua 'adjust' lúc import) nên ledger không phản ánh
+ * lịch sử bán hàng. Cùng quy ước "số lượng bán thật" với các báo cáo khác
+ * (report-sql.ts: EFFECTIVE_QTY, loại đơn cancelled, mốc created_on). */
+type SalesAgg = {
+  variant_id: bigint;
+  location_id: bigint;
+  ban_15: number;
+  ban_30: number;
+  ban_90: number;
+};
+
 /** Quy ước sheet PHÂN LOẠI: xếp loại theo bán 30 ngày × ISR (Tồn/Bán) */
-function classify(ban30: number, onHand: number) {
+export function classify(ban30: number, onHand: number) {
   if (ban30 <= 0) {
     return {
       isr: null,
@@ -148,7 +159,7 @@ export class InventoryNxtService {
     const variantIds = [...new Set(rows.map((r) => r.variantId))];
     const productIds = [...new Set(rows.map((r) => r.productId))];
 
-    const [aggs, suppliers, categoryLinks] = await Promise.all([
+    const [aggs, salesAggs, suppliers, categoryLinks] = await Promise.all([
       this.prisma.$queryRaw<MovementAgg[]>`
         SELECT
           variant_id,
@@ -159,15 +170,6 @@ export class InventoryNxtService {
           COALESCE(-SUM(change) FILTER (
             WHERE bucket = 'on_hand' AND created_at >= ${periodFrom} AND change < 0
           ), 0)::int AS sl_xuat,
-          COALESCE(-SUM(change) FILTER (
-            WHERE bucket = 'on_hand' AND type = 'order_ship' AND created_at >= ${d15}
-          ), 0)::int AS ban_15,
-          COALESCE(-SUM(change) FILTER (
-            WHERE bucket = 'on_hand' AND type = 'order_ship' AND created_at >= ${d30}
-          ), 0)::int AS ban_30,
-          COALESCE(-SUM(change) FILTER (
-            WHERE bucket = 'on_hand' AND type = 'order_ship' AND created_at >= ${d90}
-          ), 0)::int AS ban_90,
           COALESCE(SUM(change) FILTER (
             WHERE bucket = 'incoming'
               AND type IN ('incoming_po', 'incoming_receipt', 'incoming_cancel')
@@ -178,6 +180,20 @@ export class InventoryNxtService {
         FROM inventory_movements
         WHERE (variant_id, location_id) IN (${pairs})
         GROUP BY variant_id, location_id
+      `,
+      this.prisma.$queryRaw<SalesAgg[]>`
+        SELECT
+          oi.variant_id,
+          o.location_id,
+          COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d15}), 0)::int AS ban_15,
+          COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d30}), 0)::int AS ban_30,
+          COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d90}), 0)::int AS ban_90
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.status <> 'cancelled'
+          AND o.created_on >= ${d90}
+          AND (oi.variant_id, o.location_id) IN (${pairs})
+        GROUP BY oi.variant_id, o.location_id
       `,
       this.prisma.$queryRaw<{ variant_id: bigint; name: string }[]>`
         SELECT DISTINCT gri.variant_id, s.name
@@ -199,6 +215,9 @@ export class InventoryNxtService {
 
     const aggByKey = new Map(
       aggs.map((a) => [`${a.variant_id}:${a.location_id}`, a]),
+    );
+    const salesByKey = new Map(
+      salesAggs.map((a) => [`${a.variant_id}:${a.location_id}`, a]),
     );
 
     const nccByVariant = new Map<string, string[]>();
@@ -228,12 +247,13 @@ export class InventoryNxtService {
     for (const row of rows) {
       const key = `${row.variantId}:${row.locationId}`;
       const agg = aggByKey.get(key);
+      const sales = salesByKey.get(key);
 
       const slNhap = agg?.sl_nhap ?? 0;
       const slXuat = agg?.sl_xuat ?? 0;
-      const ban15 = agg?.ban_15 ?? 0;
-      const ban30 = agg?.ban_30 ?? 0;
-      const ban90 = agg?.ban_90 ?? 0;
+      const ban15 = sales?.ban_15 ?? 0;
+      const ban30 = sales?.ban_30 ?? 0;
+      const ban90 = sales?.ban_90 ?? 0;
       const nkDangVe = agg?.nk_dang_ve ?? 0;
       const ckDangVe = agg?.ck_dang_ve ?? 0;
 

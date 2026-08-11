@@ -217,13 +217,13 @@ async function syncCustomersWindow(query, label) {
 }
 
 async function syncCustomers() {
-  // Cửa sổ theo tháng từ lúc cửa hàng có khách đầu tiên tới nay.
-  const first = await prisma.customer.findFirst({
-    where: { createdOn: { not: undefined } },
-    orderBy: { createdOn: 'asc' },
-    select: { createdOn: true },
-  });
-  const start = new Date(first?.createdOn ?? '2020-01-01');
+  // KHÔNG lấy mốc bắt đầu từ created_on nhỏ nhất trong DB nội bộ: sau khi gộp
+  // sang project Supabase thứ 3, phần lớn khách cũ bị lệch created_on về một
+  // khoảng gần đây (không phải created_on thật của Sapo) — dùng mốc này làm
+  // "start" bỏ sót toàn bộ khách cũ. Đã kiểm chứng Sapo không có khách nào
+  // created_on trước 2022-01-01 (customers/count.json?created_on_max=...=0),
+  // nên cố định mốc quét từ đó cho chắc.
+  const start = new Date('2022-01-01');
   start.setDate(1);
   start.setHours(0, 0, 0, 0);
 

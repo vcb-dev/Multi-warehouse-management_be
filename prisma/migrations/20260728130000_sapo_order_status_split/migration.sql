@@ -58,13 +58,34 @@ ALTER TABLE "orders" ADD COLUMN "confirmed_on" TIMESTAMP(3);
 ALTER TABLE "orders" ADD COLUMN "completed_on" TIMESTAMP(3);
 ALTER TABLE "orders" ADD COLUMN "paid_on" TIMESTAMP(3);
 
-UPDATE "orders" SET
-  "cancelled_on" = CASE WHEN "status" = 'cancelled' THEN "updated_at" ELSE NULL END,
-  "closed_on" = CASE WHEN "status" = 'closed' THEN "updated_at" ELSE NULL END,
-  "completed_on" = CASE WHEN "status" = 'closed' THEN COALESCE("shipped_at", "updated_at") ELSE NULL END,
-  "confirmed_on" = CASE WHEN "status" <> 'cancelled' THEN "ordered_at" ELSE NULL END,
-  "fulfillment_status" = CASE WHEN "shipped_at" IS NOT NULL THEN 'fulfilled'::"OrderFulfillmentStatus" ELSE NULL END,
-  "paid_on" = CASE WHEN "financial_status" = 'paid' THEN "updated_at" ELSE NULL END;
+-- shipped_at có thể chưa tồn tại trên một số DB (migration thêm cột chưa apply /
+-- đã bị drift). Backfill an toàn: dùng shipped_at nếu có, không thì updated_at.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'orders'
+      AND column_name = 'shipped_at'
+  ) THEN
+    UPDATE "orders" SET
+      "cancelled_on" = CASE WHEN "status" = 'cancelled' THEN "updated_at" ELSE NULL END,
+      "closed_on" = CASE WHEN "status" = 'closed' THEN "updated_at" ELSE NULL END,
+      "completed_on" = CASE WHEN "status" = 'closed' THEN COALESCE("shipped_at", "updated_at") ELSE NULL END,
+      "confirmed_on" = CASE WHEN "status" <> 'cancelled' THEN "ordered_at" ELSE NULL END,
+      "fulfillment_status" = CASE WHEN "shipped_at" IS NOT NULL THEN 'fulfilled'::"OrderFulfillmentStatus" ELSE NULL END,
+      "paid_on" = CASE WHEN "financial_status" = 'paid' THEN "updated_at" ELSE NULL END;
+  ELSE
+    UPDATE "orders" SET
+      "cancelled_on" = CASE WHEN "status" = 'cancelled' THEN "updated_at" ELSE NULL END,
+      "closed_on" = CASE WHEN "status" = 'closed' THEN "updated_at" ELSE NULL END,
+      "completed_on" = CASE WHEN "status" = 'closed' THEN "updated_at" ELSE NULL END,
+      "confirmed_on" = CASE WHEN "status" <> 'cancelled' THEN "ordered_at" ELSE NULL END,
+      "fulfillment_status" = NULL,
+      "paid_on" = CASE WHEN "financial_status" = 'paid' THEN "updated_at" ELSE NULL END;
+  END IF;
+END $$;
 
 -- 6) source (enum) -> source_name (chuỗi tự do, khớp Sapo — kênh bán liên tục
 --    có thêm giá trị mới nên không hợp để làm Postgres enum cố định).

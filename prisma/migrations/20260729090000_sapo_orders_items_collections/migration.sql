@@ -43,7 +43,21 @@ ALTER TABLE "orders" DROP COLUMN "created_at";
 ALTER TABLE "orders" RENAME COLUMN "ordered_at" TO "created_on";
 ALTER TABLE "orders" RENAME COLUMN "updated_at" TO "modified_on";
 ALTER TABLE "orders" RENAME COLUMN "expected_delivery_at" TO "expected_delivery_date";
-ALTER TABLE "orders" RENAME COLUMN "shipped_at" TO "delivered_on";
+-- shipped_at có thể thiếu trên DB drift (migration add đã ghi applied nhưng cột không còn).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'shipped_at'
+  ) THEN
+    EXECUTE 'ALTER TABLE "orders" RENAME COLUMN "shipped_at" TO "delivered_on"';
+  ELSIF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'delivered_on'
+  ) THEN
+    EXECUTE 'ALTER TABLE "orders" ADD COLUMN "delivered_on" TIMESTAMP(3)';
+  END IF;
+END $$;
 ALTER TABLE "orders" ADD COLUMN "processed_on" TIMESTAMP(3);
 ALTER TABLE "orders" ADD COLUMN "settled_on" TIMESTAMP(3);
 ALTER TABLE "orders" ADD COLUMN "issued_on" TIMESTAMP(3);

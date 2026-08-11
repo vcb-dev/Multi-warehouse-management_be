@@ -53,12 +53,14 @@ jobs:
           fi
           echo "DB secrets OK"
 
-      # Schema vẫn khai báo directUrl — map cùng DATABASE_URL (không cần secret DIRECT_URL riêng)
+      # Dùng migrate-deploy.cjs: ép RW + tự resolve P3009 (migration failed đã biết) rồi deploy lại.
       - name: Migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DATABASE_URL }}
-        run: pnpm exec prisma migrate deploy
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          export DIRECT_URL="${DIRECT_URL:-$DATABASE_URL}"
+          node scripts/migrate-deploy.cjs
 
   build-and-push:
     name: Build & Push Docker Hub
