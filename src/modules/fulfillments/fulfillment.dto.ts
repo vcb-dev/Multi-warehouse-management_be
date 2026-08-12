@@ -368,6 +368,28 @@ export class ProviderQuotesQueryDto {
   weight_grams?: number;
 }
 
+export class ListProviderServicesQueryDto {
+  @IsOptional()
+  @IsString()
+  location_id?: string;
+
+  @IsString()
+  to_province!: string;
+
+  @IsOptional()
+  @IsString()
+  to_district?: string;
+
+  @IsOptional()
+  @IsString()
+  to_ward?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  weight_grams!: number;
+}
+
 export class CreateShippingPartnerDto {
   @IsString()
   @MinLength(1)

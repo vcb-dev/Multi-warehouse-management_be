@@ -335,6 +335,9 @@ export class FulfillmentService {
     const weight = dto.weight_grams ?? DEFAULT_WEIGHT_GRAMS;
     let shippingFee = dto.shipping_fee ?? 0;
     let serviceName: string | null = null;
+    const locationId = dto.location_id
+      ? BigInt(dto.location_id)
+      : order.locationId;
 
     if (dto.shipping_type === ShippingProviderType.tich_hop) {
       if (!provider.isConnected) {
@@ -351,13 +354,27 @@ export class FulfillmentService {
           422,
         );
       }
-      // Phí tính lại server-side từ cấu hình dịch vụ, bỏ qua phí client gửi lên
-      const quoted = await this.providers.quoteService(
-        provider.code,
-        provider.servicesConfig,
-        dto.service_code,
-        weight,
+      // Phí tính lại server-side theo dịch vụ THẬT của hãng cho đúng tuyến (giống danh sách
+      // hiển thị lúc chọn ở UI review) — bỏ qua phí client gửi lên. Hãng chưa tích hợp API thật
+      // (không có `listServices`) tự fallback về biểu phí ước tính `services_config`.
+      const { services } = await this.providers.listServiceOptions(
+        provider.id,
+        {
+          locationId,
+          toProvince: dto.to_province ?? '',
+          toDistrict: dto.to_district,
+          toWard: dto.to_ward,
+          weightGrams: weight,
+        },
       );
+      const quoted = services.find((s) => s.code === dto.service_code);
+      if (!quoted) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Dịch vụ vận chuyển không hợp lệ',
+          422,
+        );
+      }
       shippingFee = quoted.fee;
       serviceName = quoted.name;
     }
@@ -373,9 +390,6 @@ export class FulfillmentService {
       district: string | null;
       province: string | null;
     } | null = null;
-    const locationId = dto.location_id
-      ? BigInt(dto.location_id)
-      : order.locationId;
     const branch = await this.prisma.location.findUnique({
       where: { id: locationId },
     });

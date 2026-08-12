@@ -171,6 +171,85 @@ describe('VTP-3 tạo vận đơn', () => {
   });
 });
 
+describe('VTP-5 danh sách dịch vụ thật theo tuyến', () => {
+  it('trả về code/name/eta/fee từ getPriceAllNlp, không tạo đơn', async () => {
+    const client = {
+      loginVtp: jest.fn().mockResolvedValue({
+        token: 'session-token',
+        expired: Date.now() + 60_000,
+      }),
+      listProvincesNew: jest
+        .fn()
+        .mockResolvedValue([
+          { PROVINCE_ID: 1, PROVINCE_CODE: 'HNI', PROVINCE_NAME: 'Hà Nội' },
+        ]),
+      getPriceAllNlp: jest.fn().mockResolvedValue([
+        {
+          MA_DV_CHINH: 'PHS',
+          TEN_DICHVU: 'Nội tỉnh tiết kiệm',
+          GIA_CUOC: 16500,
+          THOI_GIAN: '24 giờ',
+        },
+        {
+          MA_DV_CHINH: 'VCN',
+          TEN_DICHVU: 'Chuyển phát nhanh',
+          GIA_CUOC: 30000,
+          THOI_GIAN: '12 giờ',
+        },
+      ]),
+      createOrderNlp: jest.fn(),
+    };
+    const adapter = new VtpAdapter(client as unknown as VtpClient);
+
+    const services = await adapter.listServices(
+      {
+        toAddress: '123 Test',
+        toWard: 'Phường 5',
+        toDistrict: 'Quận X',
+        toProvince: 'Hà Nội',
+        originName: 'Kho tổng',
+        originPhone: '0987654321',
+        originAddress: '39 Cầu Diễn',
+        originWard: null,
+        originDistrict: null,
+        originProvince: 'Hà Nội',
+        weightGrams: 500,
+      },
+      { token: 'secret-token' },
+    );
+
+    expect(services).toEqual([
+      { code: 'PHS', name: 'Nội tỉnh tiết kiệm', eta: '24 giờ', fee: 16500 },
+      { code: 'VCN', name: 'Chuyển phát nhanh', eta: '12 giờ', fee: 30000 },
+    ]);
+    expect(client.createOrderNlp).not.toHaveBeenCalled();
+  });
+
+  it('báo lỗi khi thiếu địa chỉ (không đủ Tỉnh/Huyện/Xã để tra dịch vụ)', async () => {
+    const adapter = new VtpAdapter({
+      loginVtp: jest.fn().mockResolvedValue({ token: 's', expired: Date.now() + 60_000 }),
+    } as unknown as VtpClient);
+    await expect(
+      adapter.listServices(
+        {
+          toAddress: null,
+          toWard: null,
+          toDistrict: null,
+          toProvince: null,
+          originName: null,
+          originPhone: null,
+          originAddress: null,
+          originWard: null,
+          originDistrict: null,
+          originProvince: null,
+          weightGrams: 500,
+        },
+        { token: 'secret-token' },
+      ),
+    ).rejects.toThrow('Địa chỉ giao/nhận hàng phải có đủ');
+  });
+});
+
 describe('VTP-4 hủy vận đơn', () => {
   it('gọi UpdateOrder với TYPE=4 và mã vận đơn', async () => {
     const client = {

@@ -192,3 +192,111 @@ describe('GHN-3 tạo vận đơn — payload create', () => {
     process.env.GHN_ENV = prevEnv;
   });
 });
+
+describe('GHN-4 danh sách dịch vụ thật theo tuyến', () => {
+  it('lấy service_id/short_name từ getAvailableServices rồi tính phí thật qua calculateFee', async () => {
+    const client = {
+      getShops: jest.fn().mockResolvedValue([
+        {
+          _id: 208660,
+          name: 'Kho test',
+          phone: '0964794541',
+          address: '39 Cầu Diễn',
+          district_id: 1482,
+          ward_code: '11007',
+        },
+      ]),
+      getAvailableServices: jest.fn().mockResolvedValue([
+        { service_id: 53320, short_name: 'Chuẩn', service_type_id: 2 },
+        { service_id: 53321, short_name: 'Nhanh', service_type_id: 5 },
+      ]),
+      calculateFee: jest
+        .fn()
+        .mockImplementation(({ serviceId }: { serviceId: number }) =>
+          Promise.resolve({ total: serviceId === 53320 ? 32000 : 45000 }),
+        ),
+    };
+    const resolver = new GhnLocationResolver(client as unknown as GhnClient);
+    jest.spyOn(resolver, 'resolve').mockResolvedValue({
+      districtId: 1556,
+      wardCode: '530106',
+      provinceName: 'Tiền Giang',
+      districtName: 'Thành phố Mỹ Tho',
+      wardName: 'Phường 5',
+    });
+    const adapter = new GhnAdapter(client as unknown as GhnClient, resolver);
+
+    const services = await adapter.listServices(
+      {
+        toAddress: '123 Test',
+        toWard: 'Phường 5',
+        toDistrict: 'Thành phố Mỹ Tho',
+        toProvince: 'Tiền Giang',
+        originName: null,
+        originPhone: null,
+        originAddress: null,
+        originWard: null,
+        originDistrict: null,
+        originProvince: null,
+        weightGrams: 500,
+      },
+      { token: 't', shop_id: '208660' },
+    );
+
+    expect(services).toEqual([
+      { code: '53320', name: 'Chuẩn', eta: null, fee: 32000 },
+      { code: '53321', name: 'Nhanh', eta: null, fee: 45000 },
+    ]);
+    expect(client.calculateFee).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceId: 53320, toDistrictId: 1556, toWardCode: '530106' }),
+      { token: 't', shopId: '208660' },
+    );
+  });
+
+  it('bỏ qua dịch vụ tính phí lỗi thay vì hỏng cả danh sách', async () => {
+    const client = {
+      getShops: jest.fn().mockResolvedValue([
+        { _id: 1, name: 'Kho', phone: 'p', address: 'a', district_id: 10, ward_code: 'w' },
+      ]),
+      getAvailableServices: jest.fn().mockResolvedValue([
+        { service_id: 1, short_name: 'Chuẩn', service_type_id: 2 },
+        { service_id: 2, short_name: 'Nhanh', service_type_id: 5 },
+      ]),
+      calculateFee: jest
+        .fn()
+        .mockImplementation(({ serviceId }: { serviceId: number }) =>
+          serviceId === 1
+            ? Promise.resolve({ total: 10000 })
+            : Promise.reject(new Error('boom')),
+        ),
+    };
+    const resolver = new GhnLocationResolver(client as unknown as GhnClient);
+    jest.spyOn(resolver, 'resolve').mockResolvedValue({
+      districtId: 20,
+      wardCode: 'w2',
+      provinceName: 'P',
+      districtName: 'D',
+      wardName: 'W',
+    });
+    const adapter = new GhnAdapter(client as unknown as GhnClient, resolver);
+
+    const services = await adapter.listServices(
+      {
+        toAddress: 'x',
+        toWard: 'w2',
+        toDistrict: 'D',
+        toProvince: 'P',
+        originName: null,
+        originPhone: null,
+        originAddress: null,
+        originWard: null,
+        originDistrict: null,
+        originProvince: null,
+        weightGrams: 500,
+      },
+      { token: 't', shop_id: '1' },
+    );
+
+    expect(services).toEqual([{ code: '1', name: 'Chuẩn', eta: null, fee: 10000 }]);
+  });
+});

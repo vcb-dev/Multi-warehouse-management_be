@@ -5,7 +5,9 @@ import {
   CarrierAdapter,
   CarrierConnectionConfig,
   CarrierQuote,
+  CarrierRouteInput,
   CarrierServiceConfig,
+  CarrierServiceOption,
   CarrierShipmentInput,
   CarrierShipmentResult,
   estimateQuote,
@@ -114,6 +116,84 @@ export class VtpAdapter implements CarrierAdapter {
     return WEBHOOK_STATUS_MAP[externalStatus.trim()] ?? null;
   }
 
+  async listServices(
+    route: CarrierRouteInput,
+    config: CarrierConnectionConfig,
+  ): Promise<CarrierServiceOption[]> {
+    const creds = await this.ensureSession(config);
+    const senderAddress = joinAddress(
+      route.originAddress,
+      route.originWard,
+      route.originDistrict,
+      route.originProvince,
+    );
+    const receiverAddress = joinAddress(
+      route.toAddress,
+      route.toWard,
+      route.toDistrict,
+      route.toProvince,
+    );
+    if (!senderAddress || !receiverAddress || !route.toProvince) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Địa chỉ giao/nhận hàng phải có đủ Tỉnh/Thành, Quận/Huyện, Phường/Xã để tra dịch vụ ViettelPost',
+        422,
+      );
+    }
+    const quotes = await this.quoteRoute(
+      {
+        senderAddress,
+        receiverAddress,
+        toProvince: route.toProvince,
+        weightGrams: route.weightGrams,
+      },
+      creds,
+    );
+    return quotes.map((q) => ({
+      code: q.MA_DV_CHINH,
+      name: q.TEN_DICHVU,
+      eta: q.THOI_GIAN || null,
+      fee: q.GIA_CUOC,
+    }));
+  }
+
+  /** Gọi `getPriceAllNlp` cho 1 tuyến — dùng chung cho `createShipment` (đủ COD/kích thước) và `listServices` (chỉ có khối lượng). */
+  private async quoteRoute(
+    params: {
+      senderAddress: string;
+      receiverAddress: string;
+      toProvince: string;
+      weightGrams: number;
+      insuranceValue?: number;
+      codAmount?: number;
+      lengthCm?: number | null;
+      widthCm?: number | null;
+      heightCm?: number | null;
+    },
+    creds: VtpCredentials,
+  ): Promise<VtpServiceQuote[]> {
+    const receiverProvinceId = await this.resolveProvinceId(
+      params.toProvince,
+      creds,
+    );
+    return this.client.getPriceAllNlp(
+      {
+        SENDER_ADDRESS: params.senderAddress,
+        RECEIVER_ADDRESS: params.receiverAddress,
+        RECEIVER_PROVINCE: receiverProvinceId,
+        PRODUCT_TYPE: 'HH',
+        PRODUCT_WEIGHT: Math.max(1, Math.round(params.weightGrams)),
+        PRODUCT_PRICE: Math.max(0, Math.round(params.insuranceValue ?? 0)),
+        MONEY_COLLECTION: Math.max(0, Math.round(params.codAmount ?? 0)),
+        PRODUCT_LENGTH: params.lengthCm ?? 0,
+        PRODUCT_WIDTH: params.widthCm ?? 0,
+        PRODUCT_HEIGHT: params.heightCm ?? 0,
+        TYPE: 1,
+      },
+      creds,
+    );
+  }
+
   async createShipment(
     input: CarrierShipmentInput,
     config: CarrierConnectionConfig,
@@ -140,27 +220,21 @@ export class VtpAdapter implements CarrierAdapter {
       );
     }
 
-    const receiverProvinceId = await this.resolveProvinceId(
-      input.toProvince,
-      creds,
-    );
     const weight = Math.max(1, Math.round(input.weightGrams));
     const insuranceValue = Math.max(0, Math.round(input.insuranceValue));
     const codAmount = Math.max(0, Math.round(input.codAmount));
 
-    const quotes = await this.client.getPriceAllNlp(
+    const quotes = await this.quoteRoute(
       {
-        SENDER_ADDRESS: senderAddress,
-        RECEIVER_ADDRESS: receiverAddress,
-        RECEIVER_PROVINCE: receiverProvinceId,
-        PRODUCT_TYPE: 'HH',
-        PRODUCT_WEIGHT: weight,
-        PRODUCT_PRICE: insuranceValue,
-        MONEY_COLLECTION: codAmount,
-        PRODUCT_LENGTH: input.lengthCm ?? 0,
-        PRODUCT_WIDTH: input.widthCm ?? 0,
-        PRODUCT_HEIGHT: input.heightCm ?? 0,
-        TYPE: 1,
+        senderAddress,
+        receiverAddress,
+        toProvince: input.toProvince,
+        weightGrams: weight,
+        insuranceValue,
+        codAmount,
+        lengthCm: input.lengthCm,
+        widthCm: input.widthCm,
+        heightCm: input.heightCm,
       },
       creds,
     );

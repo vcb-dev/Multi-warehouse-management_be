@@ -5,7 +5,9 @@ import {
   CarrierAdapter,
   CarrierConnectionConfig,
   CarrierQuote,
+  CarrierRouteInput,
   CarrierServiceConfig,
+  CarrierServiceOption,
   CarrierShipmentInput,
   CarrierShipmentResult,
   estimateQuote,
@@ -131,6 +133,68 @@ export class GhnAdapter implements CarrierAdapter {
 
   isCancelStatus(externalStatus: string): boolean {
     return externalStatus.trim().toLowerCase() === 'cancel';
+  }
+
+  /**
+   * Danh sách dịch vụ thật + phí thật cho 1 tuyến — dùng `getAvailableServices` (đã dùng sẵn
+   * trong `pickService`) rồi gọi `calculateFee` song song cho từng dịch vụ vì
+   * `getAvailableServices` không trả phí. Không tính được phí 1 dịch vụ nào đó thì bỏ dịch vụ
+   * đó khỏi kết quả thay vì làm hỏng cả danh sách.
+   */
+  async listServices(
+    route: CarrierRouteInput,
+    config: CarrierConnectionConfig,
+  ): Promise<CarrierServiceOption[]> {
+    const creds = this.credentials(config);
+    const shopId = Number(config.shop_id);
+    const pickup = await this.resolvePickupDistrict(config, creds);
+    const to = await this.locations.resolve(
+      {
+        province: route.toProvince,
+        district: route.toDistrict,
+        ward: route.toWard,
+      },
+      creds,
+    );
+    const services = await this.client.getAvailableServices(
+      { shopId, fromDistrict: pickup.districtId, toDistrict: to.districtId },
+      creds,
+    );
+    if (!services?.length) return [];
+
+    const weight = Math.max(1, Math.round(route.weightGrams));
+    const results = await Promise.all(
+      services.map(async (s) => {
+        try {
+          const fee = await this.client.calculateFee(
+            {
+              serviceId: s.service_id,
+              fromDistrictId: pickup.districtId,
+              toDistrictId: to.districtId,
+              toWardCode: to.wardCode,
+              weight,
+              length: MIN_DIMENSION_CM,
+              width: MIN_DIMENSION_CM,
+              height: MIN_DIMENSION_CM,
+            },
+            creds,
+          );
+          const option: CarrierServiceOption = {
+            code: String(s.service_id),
+            name: s.short_name,
+            eta: null,
+            fee: Number(fee?.total ?? 0),
+          };
+          return option;
+        } catch (e) {
+          this.logger.warn(
+            `Không tính được phí GHN cho service ${s.service_id}: ${String(e)}`,
+          );
+          return null;
+        }
+      }),
+    );
+    return results.filter((r): r is CarrierServiceOption => r !== null);
   }
 
   /**
@@ -314,7 +378,10 @@ export class GhnAdapter implements CarrierAdapter {
         REQUIRED_NOTE_MAP[input.deliveryRequirement ?? ''] ??
         DEFAULT_REQUIRED_NOTE,
       content:
-        input.items.map((i) => i.name).join(', ').slice(0, 200) || 'Hang hoa',
+        input.items
+          .map((i) => i.name)
+          .join(', ')
+          .slice(0, 200) || 'Hang hoa',
       ...(input.note ? { note: input.note } : {}),
       items: input.items.map((i) => ({
         name: i.name,
@@ -389,7 +456,8 @@ export class GhnAdapter implements CarrierAdapter {
   }
 
   /** Lấy địa chỉ kho lấy hàng live từ GHN — không tin config DB có thể cũ. */
-  private async resolvePickupShop(
+  /** Tìm Shop theo `shop_id` trong Token hiện tại — dùng chung cho `resolvePickupShop` và `resolvePickupDistrict`. */
+  private async findShop(
     config: CarrierConnectionConfig,
     creds: { token: string; shopId?: string | number | null },
   ) {
@@ -402,6 +470,40 @@ export class GhnAdapter implements CarrierAdapter {
         422,
       );
     }
+    return shop;
+  }
+
+  /**
+   * Chỉ lấy district/ward của Shop lấy hàng — dùng cho `listServices` (chỉ cần ID để hỏi
+   * `available-services`/`fee`, không cần tên Tỉnh/Huyện/Xã) để tránh gọi thừa
+   * `getWards`/`getProvinces`/`getDistricts` như `resolvePickupShop` (dành cho `createShipment`,
+   * cần tên hiển thị).
+   */
+  private async resolvePickupDistrict(
+    config: CarrierConnectionConfig,
+    creds: { token: string; shopId?: string | number | null },
+  ): Promise<{ districtId: number; wardCode: string }> {
+    const shop = await this.findShop(config, creds);
+    const districtId =
+      shop.district_id && shop.district_id > 0 ? shop.district_id : null;
+    const wardCode = shop.ward_code?.trim() || null;
+    if (!districtId || !wardCode) {
+      const portal = isGhnSandbox() ? '5sao.ghn.dev' : 'khachhang.ghn.vn';
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `Shop GHN "${shop.name}" (${shop._id}) chưa có Quận/Huyện hoặc Phường/Xã. ` +
+          `Vào ${portal} → Quản lý cửa hàng → cập nhật địa chỉ đầy đủ, rồi kết nối lại.`,
+        422,
+      );
+    }
+    return { districtId, wardCode };
+  }
+
+  private async resolvePickupShop(
+    config: CarrierConnectionConfig,
+    creds: { token: string; shopId?: string | number | null },
+  ) {
+    const shop = await this.findShop(config, creds);
     const districtId =
       shop.district_id && shop.district_id > 0 ? shop.district_id : null;
     const wardCode = shop.ward_code?.trim() || null;
@@ -417,8 +519,7 @@ export class GhnAdapter implements CarrierAdapter {
     const wards = await this.client.getWards(districtId, {
       token: creds.token,
     });
-    const wardName =
-      wards.find((w) => w.WardCode === wardCode)?.WardName ?? '';
+    const wardName = wards.find((w) => w.WardCode === wardCode)?.WardName ?? '';
 
     const provinces = await this.client.getProvinces({ token: creds.token });
     const addrHint = shop.address ?? '';

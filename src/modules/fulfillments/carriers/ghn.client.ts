@@ -65,6 +65,12 @@ export type GhnService = {
   service_type_id: number;
 };
 
+export type GhnFeeResult = {
+  total: number;
+  service_fee?: number;
+  insurance_fee?: number;
+};
+
 export type GhnCreateOrderPayload = {
   client_order_code?: string;
   to_name: string;
@@ -325,6 +331,46 @@ export class GhnClient {
         ...(input.fromDistrict && input.fromDistrict > 0
           ? { from_district: input.fromDistrict }
           : {}),
+      },
+      creds,
+    );
+  }
+
+  /**
+   * `v2/shipping-order/fee` — phí thật cho 1 `service_id` cụ thể theo tuyến. CHƯA gọi thử API
+   * thật (chưa có phiên dev rảnh để test) — payload dựng theo tài liệu GHN chuẩn (from/to
+   * district + to_ward_code + kích thước + service_id). Cần xác nhận lại bằng gọi thật trước khi
+   * tin tuyệt đối shape response, đúng bài học đã gặp với `getPriceAllNlp` của VTP.
+   */
+  calculateFee(
+    input: {
+      serviceId: number;
+      fromDistrictId?: number | null;
+      toDistrictId: number;
+      toWardCode: string;
+      weight: number;
+      length: number;
+      width: number;
+      height: number;
+      insuranceValue?: number;
+    },
+    creds: Credentials,
+  ) {
+    return this.post<GhnFeeResult>(
+      'v2/shipping-order/fee',
+      {
+        service_id: input.serviceId,
+        insurance_value: Math.max(0, Math.round(input.insuranceValue ?? 0)),
+        coupon: null,
+        ...(input.fromDistrictId && input.fromDistrictId > 0
+          ? { from_district_id: input.fromDistrictId }
+          : {}),
+        to_district_id: input.toDistrictId,
+        to_ward_code: input.toWardCode,
+        height: Math.max(1, Math.round(input.height)),
+        length: Math.max(1, Math.round(input.length)),
+        weight: Math.max(1, Math.round(input.weight)),
+        width: Math.max(1, Math.round(input.width)),
       },
       creds,
     );

@@ -15,6 +15,29 @@ export type CarrierQuote = {
   fee: number;
 };
 
+/** Dịch vụ thật lấy trực tiếp từ API hãng theo tuyến cụ thể (khác `CarrierQuote` ước tính từ `services_config`). */
+export type CarrierServiceOption = {
+  code: string;
+  name: string;
+  eta: string | null;
+  fee: number;
+};
+
+/** Tuyến (from/to) dùng để hỏi danh sách dịch vụ thật — tái dùng đúng tên field như `CarrierShipmentInput`. */
+export type CarrierRouteInput = {
+  toAddress: string | null;
+  toWard: string | null;
+  toDistrict: string | null;
+  toProvince: string | null;
+  originName: string | null;
+  originPhone: string | null;
+  originAddress: string | null;
+  originWard: string | null;
+  originDistrict: string | null;
+  originProvince: string | null;
+  weightGrams: number;
+};
+
 /** Cấu hình kết nối lưu ở `shipping_providers.connection_config`. */
 export type CarrierConnectionConfig = {
   token?: string | null;
@@ -110,6 +133,16 @@ export interface CarrierAdapter {
 
   /** Map trạng thái từ webhook của hãng → ShipmentStatus nội bộ. */
   mapWebhookStatus(externalStatus: string): ShipmentStatus | null;
+
+  /**
+   * Danh sách dịch vụ THẬT khả dụng cho 1 tuyến cụ thể, lấy trực tiếp từ API hãng (khác `quote`
+   * chỉ ước tính từ `services_config`). Chỉ hãng tích hợp API mới có; không có thì gọi nơi dùng
+   * tự fallback về `quote`.
+   */
+  listServices?(
+    route: CarrierRouteInput,
+    config: CarrierConnectionConfig,
+  ): Promise<CarrierServiceOption[]>;
 
   /** Tạo vận đơn thật ở hệ thống hãng. Chỉ hãng tích hợp API mới có. */
   createShipment?(

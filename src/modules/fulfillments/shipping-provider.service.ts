@@ -214,29 +214,59 @@ export class ShippingProviderService implements OnModuleInit {
   }
 
   /**
-   * Phí ước tính server-side cho một dịch vụ. Với hãng tích hợp API thật, đây chỉ là con số
-   * hiển thị trước khi submit — phí THẬT do hãng trả về lúc tạo vận đơn sẽ ghi đè.
+   * Danh sách dịch vụ THẬT cho 1 tuyến cụ thể (dùng cho màn review "Giao hàng hàng loạt" —
+   * chọn "Gói dịch vụ" theo đúng tuyến thay vì biểu phí ước tính tĩnh). Hãng chưa có
+   * `listServices` (chưa tích hợp API thật) thì fallback về `quote()` như `quotes()` ở trên.
    */
-  async quoteService(
-    providerCode: string,
-    servicesConfig: Prisma.JsonValue,
-    serviceCode: string,
-    weightGrams: number,
+  async listServiceOptions(
+    id: bigint,
+    params: {
+      locationId?: bigint;
+      toProvince: string;
+      toDistrict?: string;
+      toWard?: string;
+      weightGrams: number;
+    },
   ) {
-    const services = (servicesConfig ?? []) as CarrierServiceConfig[];
-    const quotes = await this.adapterFor(providerCode).quote(
-      services,
-      weightGrams,
-    );
-    const quoted = quotes.find((q) => q.code === serviceCode);
-    if (!quoted) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        'Dịch vụ vận chuyển không hợp lệ',
-        422,
-      );
+    const provider = await this.prisma.shippingProvider.findUnique({
+      where: { id },
+    });
+    if (!provider)
+      throw new NotFoundException('Không tìm thấy đối tác vận chuyển');
+
+    const adapter = this.adapterFor(provider.code);
+    if (!adapter.listServices) {
+      return {
+        services: await adapter.quote(
+          (provider.servicesConfig ?? []) as CarrierServiceConfig[],
+          params.weightGrams,
+        ),
+      };
     }
-    return quoted;
+
+    const location = params.locationId
+      ? await this.prisma.location.findUnique({
+          where: { id: params.locationId },
+        })
+      : null;
+
+    const services = await adapter.listServices(
+      {
+        toAddress: null,
+        toWard: params.toWard ?? null,
+        toDistrict: params.toDistrict ?? null,
+        toProvince: params.toProvince,
+        originName: location?.name ?? null,
+        originPhone: location?.phone ?? null,
+        originAddress: location?.address1 ?? null,
+        originWard: location?.ward ?? null,
+        originDistrict: location?.district ?? null,
+        originProvince: location?.province ?? null,
+        weightGrams: params.weightGrams,
+      },
+      provider.connectionConfig as CarrierConnectionConfig,
+    );
+    return { services };
   }
 
   async createPartner(dto: CreateShippingPartnerDto, _user: AuthUser) {

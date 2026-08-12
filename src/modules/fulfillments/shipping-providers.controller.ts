@@ -12,6 +12,7 @@ import {
   ConnectProviderDto,
   CreateShippingPartnerDto,
   ListProvidersQueryDto,
+  ListProviderServicesQueryDto,
   ProviderQuotesQueryDto,
   UpdateShippingProviderDto,
 } from './fulfillment.dto';
@@ -33,6 +34,22 @@ export class ShippingProvidersController {
   @RequirePermission('order:pack')
   quotes(@Query() query: ProviderQuotesQueryDto) {
     return this.providers.quotes(query.weight_grams);
+  }
+
+  /** Danh sách dịch vụ THẬT theo tuyến — dùng cho màn review "Giao hàng hàng loạt". */
+  @Get(':id/services')
+  @RequirePermission('order:pack')
+  listServices(
+    @Param('id') id: string,
+    @Query() query: ListProviderServicesQueryDto,
+  ) {
+    return this.providers.listServiceOptions(BigInt(id), {
+      locationId: query.location_id ? BigInt(query.location_id) : undefined,
+      toProvince: query.to_province,
+      toDistrict: query.to_district,
+      toWard: query.to_ward,
+      weightGrams: query.weight_grams,
+    });
   }
 
   @Post()
