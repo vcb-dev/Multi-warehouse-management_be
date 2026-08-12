@@ -17,6 +17,12 @@ import { GhnLocationResolver } from './carriers/ghn-location-resolver';
 import { assertGhnPickupReady, GhnAdapter } from './carriers/ghn.adapter';
 import { GhnClient, isGhnSandbox } from './carriers/ghn.client';
 import { ManualAdapter } from './carriers/manual.adapter';
+import { VtpAdapter } from './carriers/vtp.adapter';
+import {
+  VtpClient,
+  isVtpSandbox,
+  isVtpSessionToken,
+} from './carriers/vtp.client';
 import {
   ConnectProviderDto,
   CreateShippingPartnerDto,
@@ -28,6 +34,7 @@ const DEFAULT_WEIGHT_GRAMS = 500;
 
 /** `shipping_providers.code` của hãng đã tích hợp API thật. */
 export const GHN_PROVIDER_CODE = 'ghn';
+export const VTP_PROVIDER_CODE = 'viettel_post';
 
 /** Danh mục hãng mặc định — migration chỉ tạo bảng, không INSERT. */
 const DEFAULT_CARRIERS: {
@@ -121,6 +128,7 @@ export class ShippingProviderService implements OnModuleInit {
   private readonly logger = new Logger(ShippingProviderService.name);
   private readonly manualAdapter = new ManualAdapter();
   private readonly ghnClient = new GhnClient();
+  private readonly vtpClient = new VtpClient();
   private readonly adapters: Record<string, CarrierAdapter>;
 
   constructor(private prisma: PrismaService) {
@@ -129,6 +137,7 @@ export class ShippingProviderService implements OnModuleInit {
         this.ghnClient,
         new GhnLocationResolver(this.ghnClient),
       ),
+      [VTP_PROVIDER_CODE]: new VtpAdapter(this.vtpClient),
     };
   }
 
@@ -296,6 +305,8 @@ export class ShippingProviderService implements OnModuleInit {
     // nếu provider là GHN thì verify GHN
     if (provider.code === GHN_PROVIDER_CODE) {
       Object.assign(config, await this.verifyGhn(dto.token, dto.shop_id));
+    } else if (provider.code === VTP_PROVIDER_CODE) {
+      await this.verifyVtp(dto.token);
     }
 
     // cập nhật provider đã kết nối
@@ -377,6 +388,44 @@ export class ShippingProviderService implements OnModuleInit {
     assertGhnPickupReady({ shop_id: shopId, token, ...pickup });
     // trả về config
     return pickup;
+  }
+
+  /**
+   * Xác thực Token ViettelPost — không cần Shop ID (khác GHN). Hỗ trợ 2 dạng: "tham số bí mật"
+   * (đổi thử sang token phiên qua LoginVTP) hoặc session JWT có sẵn (tài khoản đối tác có thể
+   * được cấp thẳng JWT hạn dùng dài — xác nhận thực tế: tài khoản 8501446 tới 2029; JWT không
+   * đổi lại được qua LoginVTP nên xác thực bằng gọi thử API khác cần Token).
+   */
+  private async verifyVtp(token?: string): Promise<void> {
+    if (!token) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Kết nối ViettelPost cần Token',
+        422,
+      );
+    }
+    const envHint = isVtpSandbox()
+      ? 'sandbox → partnerdev.viettelpost.vn'
+      : 'production → partner.viettelpost.vn';
+    if (isVtpSessionToken(token)) {
+      const provinces = await this.vtpClient.listProvincesNew({ token });
+      if (!provinces.length) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Token ViettelPost không xác thực được. Kiểm tra Token và VTP_ENV backend (${envHint}).`,
+          422,
+        );
+      }
+      return;
+    }
+    const login = await this.vtpClient.loginVtp(token);
+    if (!login?.token) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        `Token ViettelPost không xác thực được. Kiểm tra Token và VTP_ENV backend (${envHint}).`,
+        422,
+      );
+    }
   }
 
   async disconnect(id: bigint) {
