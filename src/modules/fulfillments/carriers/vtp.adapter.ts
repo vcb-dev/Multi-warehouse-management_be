@@ -238,41 +238,56 @@ export class VtpAdapter implements CarrierAdapter {
       },
       creds,
     );
-    const service = this.pickService(input.serviceCode, quotes);
+    const candidates = this.rankServices(input.serviceCode, quotes);
 
     const qty = totalQuantity(input.items);
-    const created = await this.client.createOrderNlp(
-      {
-        ORDER_NUMBER: input.clientOrderCode,
-        SENDER_FULLNAME: input.originName ?? '',
-        SENDER_ADDRESS: senderAddress,
-        SENDER_PHONE: input.originPhone ?? '',
-        RECEIVER_FULLNAME: input.toName,
-        RECEIVER_ADDRESS: receiverAddress,
-        RECEIVER_PHONE: input.toPhone,
-        PRODUCT_NAME: input.items[0]?.name ?? 'Hàng hóa',
-        ...(input.note ? { PRODUCT_DESCRIPTION: input.note } : {}),
-        PRODUCT_QUANTITY: qty,
-        PRODUCT_PRICE: insuranceValue,
-        PRODUCT_WEIGHT: weight,
-        PRODUCT_LENGTH: input.lengthCm ?? 0,
-        PRODUCT_WIDTH: input.widthCm ?? 0,
-        PRODUCT_HEIGHT: input.heightCm ?? 0,
-        ORDER_PAYMENT: pickOrderPayment(input.feePayer, codAmount),
-        ORDER_SERVICE: service.code,
-        PRODUCT_TYPE: 'HH',
-        ...(input.note ? { ORDER_NOTE: input.note } : {}),
-        MONEY_COLLECTION: codAmount,
-        CHECK_UNIQUE: true,
-        PRODUCT_DETAIL: input.items.map((i) => ({
-          PRODUCT_NAME: i.name,
-          PRODUCT_QUANTITY: i.quantity,
-          PRODUCT_PRICE: Math.max(0, Math.round(i.price)),
-          PRODUCT_WEIGHT: Math.max(1, Math.round(weight / Math.max(1, qty))),
-        })),
-      },
-      creds,
-    );
+    let created: Awaited<ReturnType<VtpClient['createOrderNlp']>> | null = null;
+    let lastError: unknown;
+    for (const service of candidates) {
+      try {
+        created = await this.client.createOrderNlp(
+          {
+            ORDER_NUMBER: input.clientOrderCode,
+            SENDER_FULLNAME: input.originName ?? '',
+            SENDER_ADDRESS: senderAddress,
+            SENDER_PHONE: input.originPhone ?? '',
+            RECEIVER_FULLNAME: input.toName,
+            RECEIVER_ADDRESS: receiverAddress,
+            RECEIVER_PHONE: input.toPhone,
+            PRODUCT_NAME: input.items[0]?.name ?? 'Hàng hóa',
+            ...(input.note ? { PRODUCT_DESCRIPTION: input.note } : {}),
+            PRODUCT_QUANTITY: qty,
+            PRODUCT_PRICE: insuranceValue,
+            PRODUCT_WEIGHT: weight,
+            PRODUCT_LENGTH: input.lengthCm ?? 0,
+            PRODUCT_WIDTH: input.widthCm ?? 0,
+            PRODUCT_HEIGHT: input.heightCm ?? 0,
+            ORDER_PAYMENT: pickOrderPayment(input.feePayer, codAmount),
+            ORDER_SERVICE: service.code,
+            PRODUCT_TYPE: 'HH',
+            ...(input.note ? { ORDER_NOTE: input.note } : {}),
+            MONEY_COLLECTION: codAmount,
+            CHECK_UNIQUE: true,
+            PRODUCT_DETAIL: input.items.map((i) => ({
+              PRODUCT_NAME: i.name,
+              PRODUCT_QUANTITY: i.quantity,
+              PRODUCT_PRICE: Math.max(0, Math.round(i.price)),
+              PRODUCT_WEIGHT: Math.max(
+                1,
+                Math.round(weight / Math.max(1, qty)),
+              ),
+            })),
+          },
+          creds,
+        );
+        break;
+      } catch (e) {
+        if (!this.isItineraryPriceError(e)) throw e;
+        lastError = e;
+      }
+    }
+
+    if (!created) throw lastError;
 
     if (!created?.ORDER_NUMBER) {
       throw new BusinessException(
@@ -311,15 +326,18 @@ export class VtpAdapter implements CarrierAdapter {
   }
 
   /**
-   * Chọn `MA_DV_CHINH` cho tuyến. Không có quy ước tên dịch vụ cố định giữa các hợp đồng VTP
-   * (khác GHN luôn có "Chuẩn"/"Nhanh") nên dùng heuristic theo giá: `serviceCode==='fast'` lấy
-   * dịch vụ đắt nhất (thường là hỏa tốc), mặc định lấy rẻ nhất. Cần đối chiếu lại với danh sách
-   * dịch vụ thật của tài khoản dev khi test (Phase E).
+   * Xếp hạng `MA_DV_CHINH` cho tuyến, ứng viên đầu tiên trả về trước. Không có quy ước tên dịch
+   * vụ cố định giữa các hợp đồng VTP (khác GHN luôn có "Chuẩn"/"Nhanh") nên dùng heuristic theo
+   * giá: `serviceCode==='fast'` ưu tiên dịch vụ đắt nhất (thường là hỏa tốc), mặc định ưu tiên rẻ
+   * nhất. Trả về cả danh sách (không chỉ 1 dịch vụ) vì `getPriceAllNlp` có thể liệt kê dịch vụ mà
+   * `createOrderNlp` lại từ chối — xác nhận thực tế: BCN "Hàng nặng nhanh" được báo giá cho tuyến
+   * Hà Nội → Thanh Hóa nhưng tạo đơn báo lỗi "Price does not apply to this itinerary!" — gọi nơi
+   * dùng cần thử lần lượt các ứng viên còn lại thay vì fail cứng ở dịch vụ đầu tiên.
    */
-  private pickService(
+  private rankServices(
     serviceCode: string | null,
     quotes: VtpServiceQuote[],
-  ): { code: string; feeVnd: number } {
+  ): { code: string; feeVnd: number }[] {
     if (!quotes?.length) {
       throw new BusinessException(
         'CARRIER_ERROR',
@@ -328,8 +346,17 @@ export class VtpAdapter implements CarrierAdapter {
       );
     }
     const sorted = [...quotes].sort((a, b) => a.GIA_CUOC - b.GIA_CUOC);
-    const matched = serviceCode === 'fast' ? sorted[sorted.length - 1] : sorted[0];
-    return { code: matched.MA_DV_CHINH, feeVnd: matched.GIA_CUOC };
+    const ordered = serviceCode === 'fast' ? sorted.reverse() : sorted;
+    return ordered.map((q) => ({ code: q.MA_DV_CHINH, feeVnd: q.GIA_CUOC }));
+  }
+
+  /** VTP báo lỗi này khi dịch vụ được báo giá nhưng thực ra không áp dụng được cho tuyến lúc tạo đơn. */
+  private isItineraryPriceError(e: unknown): boolean {
+    return (
+      e instanceof BusinessException &&
+      e.code === 'CARRIER_ERROR' &&
+      e.message.includes('Price does not apply to this itinerary')
+    );
   }
 
   /** Đổi tên Tỉnh/TP nội bộ sang `PROVINCE_ID` của VTP (danh mục mới V3) — cache 24h, dùng chung cho mọi kết nối. */
