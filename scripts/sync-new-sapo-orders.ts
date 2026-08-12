@@ -1,13 +1,28 @@
+#!/usr/bin/env ts-node
 /**
  * Đồng bộ những đơn Sapo phát sinh SAU lần sync cuối (chưa có trong DB).
  *
- * Chạy: node scripts/sync-new-sapo-orders.js [--apply]
+ * Chạy: npx ts-node --compiler-options '{"module":"CommonJS"}' scripts/sync-new-sapo-orders.ts [--apply] [--from=ISO]
  *
- * KHÔNG sinh inventory_movements — giống cách 87.911 đơn lịch sử đã được nạp
- * (tồn kho lấy thẳng từ Sapo, không dựng lại lịch sử xuất/nhập).
+ * Với đơn còn mở (status=open, fulfillment_status khác 'fulfilled'), sinh kèm
+ * bút toán order_reserve (+committed) cho từng dòng hàng — dùng lại đúng
+ * InventoryService.applyMovement (qua Nest DI, giống scripts/reconcile-run.ts)
+ * để không viết lại logic tính tồn kho lần nữa. Đơn closed/fulfilled thì
+ * KHÔNG reserve (hàng đã rời kho từ trước khi biết tới đơn, reserve lúc này
+ * sẽ tạo giữ chỗ "ma" vĩnh viễn vì không có bước ĐTVC lấy hàng nào chạy lại
+ * để giải phóng).
  */
-require('dotenv').config({ quiet: true });
-const { PrismaClient } = require('@prisma/client');
+import 'dotenv/config';
+import { NestFactory } from '@nestjs/core';
+import {
+  PrismaClient,
+  InventoryBucket,
+  MovementType,
+  Prisma,
+} from '@prisma/client';
+import { AppModule } from '../src/app.module';
+import { InventoryService } from '../src/modules/inventory/inventory.service';
+import { sortForLocking } from '../src/modules/inventory/inventory.types';
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
@@ -16,7 +31,10 @@ const AUTH = Buffer.from(
   `${process.env.SAPO_API_KEY}:${process.env.SAPO_API_SECRET}`,
 ).toString('base64');
 
-async function api(path, tries = 5) {
+/** Mirror của MOVEMENT_TX_OPTIONS trong inventory.service.ts (không export). */
+const MOVEMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
+
+async function api(path: string, tries = 5): Promise<any> {
   for (let i = 1; i <= tries; i++) {
     try {
       const res = await fetch(`https://${STORE}.mysapo.net${path}`, {
@@ -31,20 +49,22 @@ async function api(path, tries = 5) {
   }
 }
 
-async function db(fn, tries = 5) {
+async function db<T>(fn: () => Promise<T>, tries = 5): Promise<T> {
   for (let i = 1; i <= tries; i++) {
     try {
       return await fn();
-    } catch (e) {
+    } catch (e: any) {
       if (!['P1017', 'P1001', 'P2024'].includes(e.code) || i === tries) throw e;
       console.warn(`  ⚠ mất kết nối (${e.code}), thử lại lần ${i}...`);
       await new Promise((r) => setTimeout(r, 2000 * i));
     }
   }
+  throw new Error('unreachable');
 }
 
-const toDate = (v) => (v ? new Date(v) : null);
-const enumOr = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
+const toDate = (v: any) => (v ? new Date(v) : null);
+const enumOr = (v: any, allowed: string[], fallback: string) =>
+  allowed.includes(v) ? v : fallback;
 
 const STATUS = ['open', 'closed', 'cancelled'];
 const FIN = ['pending', 'partially_paid', 'paid', 'refunded', 'partially_refunded'];
@@ -53,7 +73,17 @@ const RET = ['no_return', 'in_progress', 'returned'];
 const REF = ['no_refund', 'refunded', 'partial'];
 const RESTOCK = ['no_restock', 'restocked', 'partial'];
 
-(async () => {
+/** Đơn nào được phép giữ chỗ committed — hàng chưa/chỉ mới một phần rời kho. */
+function shouldReserve(status: string, fulfillmentStatus: string | null) {
+  return status === 'open' && fulfillmentStatus !== 'fulfilled';
+}
+
+async function main() {
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    logger: ['error', 'warn'],
+  });
+  const inventory = app.get(InventoryService);
+
   const [locations, variants, customers, fallbackUser, defaultLoc] = await Promise.all([
     prisma.location.findMany({ where: { sapoId: { not: null } }, select: { id: true, sapoId: true } }),
     prisma.productVariant.findMany({ where: { sapoId: { not: null } }, select: { id: true, sapoId: true } }),
@@ -61,6 +91,7 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
     prisma.user.findFirst({ select: { id: true } }),
     prisma.location.findFirst({ orderBy: { id: 'asc' }, select: { id: true } }),
   ]);
+  if (!fallbackUser || !defaultLoc) throw new Error('Thiếu user hoặc location mặc định trong DB');
   const locBySapo = new Map(locations.map((l) => [String(l.sapoId), l.id]));
   const varBySapo = new Map(variants.map((v) => [String(v.sapoId), v.id]));
   const cusBySapo = new Map(customers.map((c) => [String(c.sapoId), c.id]));
@@ -73,7 +104,7 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
     orderBy: { createdOn: 'desc' },
     select: { createdOn: true },
   });
-  const since = argFrom ? argFrom.slice('--from='.length) : last.createdOn.toISOString();
+  const since = argFrom ? argFrom.slice('--from='.length) : last!.createdOn!.toISOString();
   console.log(`Lấy đơn Sapo tạo từ ${since}`);
 
   const existing = new Set(
@@ -87,6 +118,7 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
   let page = 1;
   let created = 0;
   let lines = 0;
+  let reserved = 0;
   let skipExisting = 0;
   let skipNoVariantLine = 0;
   let failed = 0;
@@ -105,7 +137,7 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
       let name = String(o.name ?? o.id);
       if (usedNames.has(name)) name = `${name}-${o.id}`;
 
-      const items = [];
+      const items: any[] = [];
       for (const l of o.line_items ?? []) {
         const variantId = varBySapo.get(String(l.variant_id));
         if (!variantId) {
@@ -137,18 +169,21 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
       if (!items.length) continue;
 
       const sa = o.shipping_address ?? {};
-      const data = {
+      const status = enumOr(o.status, STATUS, 'open');
+      const fulfillmentStatus = FUL.includes(o.fulfillment_status) ? o.fulfillment_status : null;
+      const locationId = locBySapo.get(String(o.location_id)) ?? defaultLoc.id;
+      const data: any = {
         sapoId: BigInt(o.id),
         name,
         number: o.number ?? null,
         orderNumber: o.order_number ?? null,
-        locationId: locBySapo.get(String(o.location_id)) ?? defaultLoc.id,
+        locationId,
         customerId: cusBySapo.get(String(o.customer?.id)) ?? null,
         createdById: fallbackUser.id,
         sourceName: o.source_name || null,
-        status: enumOr(o.status, STATUS, 'open'),
+        status,
         financialStatus: enumOr(o.financial_status, FIN, 'pending'),
-        fulfillmentStatus: FUL.includes(o.fulfillment_status) ? o.fulfillment_status : null,
+        fulfillmentStatus,
         returnStatus: enumOr(o.return_status, RET, 'no_return'),
         refundStatus: enumOr(o.refund_status, REF, 'no_refund'),
         restockStatus: RESTOCK.includes(o.restock_status) ? o.restock_status : null,
@@ -169,7 +204,7 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
         totalOutstanding: o.total_outstanding != null ? String(o.total_outstanding) : null,
         totalRefunded: o.total_refunded != null ? String(o.total_refunded) : null,
         note: o.note || null,
-        tags: o.tags ? o.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+        tags: o.tags ? o.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
         createdOn: toDate(o.created_on) ?? new Date(),
         cancelledOn: toDate(o.cancelled_on),
         cancelReason: o.cancel_reason || null,
@@ -201,18 +236,54 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
       if (!APPLY) {
         created += 1;
         lines += items.length;
+        if (shouldReserve(status, fulfillmentStatus)) reserved += 1;
         usedNames.add(name);
         existing.add(String(o.id));
         continue;
       }
       try {
-        await db(() => prisma.order.create({ data }));
+        await db(() =>
+          prisma.$transaction(async (tx) => {
+            const record = await tx.order.create({ data });
+            if (shouldReserve(status, fulfillmentStatus)) {
+              const partial = items.filter(
+                (i) => i.fulfillableQuantity != null && i.fulfillableQuantity !== i.quantity,
+              );
+              if (partial.length) {
+                console.warn(
+                  `  ⚠ ${name}: ${partial.length} dòng fulfillable_quantity ≠ quantity ` +
+                    `(${partial.map((i) => `${i.sku}: fq=${i.fulfillableQuantity}/q=${i.quantity}`).join(', ')}) ` +
+                    `— vẫn reserve theo quantity gốc để khớp fulfillment.service.ts`,
+                );
+              }
+              for (const item of sortForLocking(
+                items.filter((i) => i.quantity > 0).map((i) => ({ ...i, locationId })),
+              )) {
+                await inventory.applyMovement(
+                  {
+                    variantId: item.variantId,
+                    locationId,
+                    bucket: InventoryBucket.committed,
+                    change: item.quantity,
+                    type: MovementType.order_reserve,
+                    referenceType: 'order',
+                    referenceId: record.id,
+                    createdById: fallbackUser!.id,
+                  },
+                  tx,
+                );
+              }
+            }
+            return record;
+          }, MOVEMENT_TX_OPTIONS),
+        );
         created += 1;
         lines += items.length;
+        if (shouldReserve(status, fulfillmentStatus)) reserved += 1;
         usedNames.add(name);
         existing.add(String(o.id));
         if (created % 100 === 0) console.log(`  ...${created} đơn, ${lines} dòng`);
-      } catch (e) {
+      } catch (e: any) {
         failed += 1;
         console.warn(`  ⚠ ${o.name}: ${e.message.split('\n')[0]}`);
       }
@@ -223,9 +294,15 @@ const RESTOCK = ['no_restock', 'restocked', 'partial'];
   }
 
   console.log('\n=== KẾT QUẢ ===');
-  console.log(`đơn tạo mới: ${created} | dòng hàng: ${lines}`);
+  console.log(`đơn tạo mới: ${created} | dòng hàng: ${lines} | đơn đã reserve committed: ${reserved}`);
   console.log(`bỏ qua: ${skipExisting} đã có, ${skipNoVariantLine} dòng thiếu phiên bản, ${failed} lỗi`);
   if (!APPLY) console.log('\n(chạy lại với --apply để ghi)');
 
+  await app.close();
   await prisma.$disconnect();
-})();
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
