@@ -31,6 +31,7 @@ import {
   PushShipmentDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
+  VtpWebhookDto,
 } from './fulfillment.dto';
 import {
   fulfillmentInclude,
@@ -39,6 +40,7 @@ import {
 import {
   GHN_PROVIDER_CODE,
   ShippingProviderService,
+  VTP_PROVIDER_CODE,
 } from './shipping-provider.service';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
@@ -1026,6 +1028,100 @@ export class FulfillmentService {
     }
     if (Object.keys(data).length === 0) return;
     await this.prisma.fulfillment.update({ where: { id }, data });
+  }
+
+  /**
+   * Webhook thật của ViettelPost. Payload bọc trong `DATA` (khác GHN phẳng), `ORDER_STATUS` là
+   * số (mục 8 tài liệu). Luôn trả `{ received: true }` cho mọi tình huống "không có gì để làm"
+   * — VTP đẩy hành trình tuần tự và chỉ dừng khi nhận HTTP 200, kể cả hành trình trùng/thừa/sai
+   * thứ tự/đơn lạ sẽ gây bão request nếu trả khác 200 (cùng lý do với `webhookGhn`).
+   */
+  async webhookVtp(dto: VtpWebhookDto) {
+    const provider = await this.prisma.shippingProvider.findUnique({
+      where: { code: VTP_PROVIDER_CODE },
+    });
+    if (!provider) {
+      this.logger.warn(
+        'Webhook VTP: chưa có shipping_provider code=viettel_post',
+      );
+      return { received: true };
+    }
+
+    const orderNumber =
+      typeof dto.DATA?.ORDER_NUMBER === 'string'
+        ? dto.DATA.ORDER_NUMBER.trim()
+        : undefined;
+    const orderReference =
+      typeof dto.DATA?.ORDER_REFERENCE === 'string'
+        ? dto.DATA.ORDER_REFERENCE.trim()
+        : undefined;
+    if (!orderNumber) return { received: true };
+
+    let f = await this.prisma.fulfillment.findFirst({
+      where: { providerId: provider.id, trackingNumber: orderNumber },
+      include: { order: { include: { items: true } } },
+      orderBy: { id: 'desc' },
+    });
+
+    // Tạo đơn bị lỗi mạng/timeout phía mình nhưng VTP đã tạo thành công bên họ (mục "Lưu ý"
+    // mục 7 tài liệu) → chưa kịp lưu trackingNumber nên tra theo mã vận đơn không ra. Fallback
+    // qua ORDER_REFERENCE (= order.name, chính là ORDER_NUMBER mình gửi lúc tạo đơn) để backfill.
+    if (!f && orderReference) {
+      const fallback = await this.prisma.fulfillment.findFirst({
+        where: {
+          providerId: provider.id,
+          closedAt: null,
+          order: { name: orderReference },
+        },
+        include: { order: { include: { items: true } } },
+        orderBy: { id: 'desc' },
+      });
+      if (fallback) {
+        f = await this.prisma.fulfillment.update({
+          where: { id: fallback.id },
+          data: { trackingNumber: orderNumber, trackingNumbers: [orderNumber] },
+          include: { order: { include: { items: true } } },
+        });
+        this.logger.warn(
+          `Webhook VTP: backfill trackingNumber ${orderNumber} cho đơn ${orderReference} qua ORDER_REFERENCE`,
+        );
+      }
+    }
+
+    if (!f) {
+      this.logger.warn(
+        `Webhook VTP: không tìm thấy vận đơn ${orderNumber}` +
+          (orderReference ? ` (ref ${orderReference})` : ''),
+      );
+      return { received: true };
+    }
+
+    const rawStatus = dto.DATA?.ORDER_STATUS;
+    const status = this.providers
+      .adapterFor(VTP_PROVIDER_CODE)
+      .mapWebhookStatus(rawStatus != null ? String(rawStatus) : '');
+    if (!status) {
+      this.logger.log(
+        `Webhook VTP ${orderNumber}: trạng thái "${rawStatus}" chưa map, bỏ qua`,
+      );
+      return { received: true };
+    }
+    if (status === f.shipmentStatus) return { received: true };
+
+    const user = await this.systemUser();
+    try {
+      await this.applyShipmentStatus(f, status, user);
+    } catch (e) {
+      // Vòng đời nội bộ chặt hơn VTP — ghi log để xử lý tay thay vì để VTP retry mãi.
+      if (e instanceof BusinessException) {
+        this.logger.warn(
+          `Webhook VTP ${orderNumber}: ${f.shipmentStatus} -> ${status} bị chặn (${e.message})`,
+        );
+        return { received: true };
+      }
+      throw e;
+    }
+    return { received: true };
   }
 
   /**
