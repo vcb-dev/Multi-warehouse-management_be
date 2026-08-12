@@ -158,12 +158,15 @@ export class InventoryService {
 
       const available = computeAvailable(level);
 
-      // Bucket on_hand kéo available lên khi tăng; các bucket còn lại (giữ
-      // chỗ) kéo available xuống khi tăng — dùng để biết đúng chiều tác động.
+      // Bucket on_hand kéo available lên khi tăng; committed/packed (giữ chỗ)
+      // kéo available xuống khi tăng — dùng để biết đúng chiều tác động.
+      // incoming không nằm trong computeAvailable() nên không bao giờ "làm
+      // xấu thêm" available — loại trừ để duyệt PO nhập hàng không bị chặn
+      // nhầm khi available đã âm sẵn vì lý do khác (đơn bán backorder...).
       const worsensAvailable =
         input.bucket === InventoryBucket.on_hand
           ? input.change < 0
-          : input.change > 0;
+          : input.bucket !== InventoryBucket.incoming && input.change > 0;
 
       if (
         available < 0 &&
