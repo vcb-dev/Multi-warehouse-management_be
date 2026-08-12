@@ -1,5 +1,5 @@
 /**
- * E2E cho dashboard "Sản phẩm — Vận hành theo tháng" (GET /reports/san-pham-van-hanh-theo-thang).
+ * E2E cho dashboard "Sản phẩm — Vận hành theo tháng" (GET /reports/product-monthly-ops).
  * Endpoint chỉ SELECT nên chạy thẳng trên DB thật, không cần dọn dữ liệu sau test — xem
  * scripts-tmp/smoke-product-monthly-ops.ts cho cách chạy tay khi cần soi output đầy đủ.
  *
