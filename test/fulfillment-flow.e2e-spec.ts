@@ -35,7 +35,12 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
   let productId: bigint;
   let providerId: bigint;
   let userId: bigint;
-  let authUser: { userId: bigint; email: string; roles: string[]; locationIds: bigint[] };
+  let authUser: {
+    userId: bigint;
+    email: string;
+    roles: string[];
+    locationIds: bigint[];
+  };
 
   async function level() {
     return prisma.inventoryLevel.findUniqueOrThrow({
@@ -58,7 +63,11 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       },
       authUser as never,
     );
-    await orders.transition(BigInt(created.id), { action: 'processing' }, authUser as never);
+    await orders.transition(
+      BigInt(created.id),
+      { action: 'processing' },
+      authUser as never,
+    );
     return BigInt(created.id);
   }
 
@@ -85,7 +94,14 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     });
     variantId = variant.id;
     await prisma.inventoryLevel.create({
-      data: { variantId, locationId, onHand: 100, available: 100, price: 1000, cost: 500 },
+      data: {
+        variantId,
+        locationId,
+        onHand: 100,
+        available: 100,
+        price: 1000,
+        cost: 500,
+      },
     });
 
     const provider = await prisma.shippingProvider.create({
@@ -95,7 +111,13 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
         type: 'tich_hop',
         isConnected: true,
         servicesConfig: [
-          { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 40000, extra_fee_per_500g: 5000 },
+          {
+            code: 'standard',
+            name: 'Chuẩn',
+            eta: '2-3 ngày',
+            base_fee: 40000,
+            extra_fee_per_500g: 5000,
+          },
         ],
       },
     });
@@ -105,9 +127,14 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
   afterAll(async () => {
     // Dọn dẹp theo thứ tự FK
     const orderIds = (
-      await prisma.orderItem.findMany({ where: { variantId }, select: { orderId: true } })
+      await prisma.orderItem.findMany({
+        where: { variantId },
+        select: { orderId: true },
+      })
     ).map((i) => i.orderId);
-    await prisma.fulfillment.deleteMany({ where: { orderId: { in: orderIds } } });
+    await prisma.fulfillment.deleteMany({
+      where: { orderId: { in: orderIds } },
+    });
     await prisma.activityLog.deleteMany({
       where: { entityType: 'order', entityId: { in: orderIds } },
     });
@@ -163,6 +190,12 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       } as never,
       authUser as never,
     );
+    const list = await fulfillments.listShipments(
+      { page: 1, page_size: 20 },
+      authUser,
+    );
+    expect(list.total).toBeGreaterThanOrEqual(1);
+    expect(list.data.some((r) => r.tracking_number)).toBe(true);
     expect(pushed.shipment_status).toBe('pending');
     // 1200g = 3 nấc 500g → base + 2 * extra
     expect(pushed.shipping_fee).toBe(40000 + 2 * 5000);
@@ -176,7 +209,9 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     lv = await level();
     expect(lv.onHand).toBe(before.onHand - 2);
     expect(lv.packed).toBe(before.packed);
-    const shipped = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const shipped = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+    });
     expect(shipped.deliveredOn).not.toBeNull();
 
     // Bắt đầu giao → không đụng tồn kho
@@ -192,9 +227,13 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       { status: 'delivered' } as never,
       authUser as never,
     );
-    const done = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const done = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+    });
     expect(done.status).toBe('closed');
-    const closed = await prisma.fulfillment.findUniqueOrThrow({ where: { id: BigInt(f.id) } });
+    const closed = await prisma.fulfillment.findUniqueOrThrow({
+      where: { id: BigInt(f.id) },
+    });
     expect(closed.closedAt).not.toBeNull();
   });
 
@@ -214,16 +253,37 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       } as never,
       authUser as never,
     );
+    const list = await fulfillments.listShipments(
+      { page: 1, page_size: 20 },
+      authUser,
+    );
+    expect(list.total).toBeGreaterThanOrEqual(1);
+    expect(list.data.some((r) => r.tracking_number)).toBe(true);
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'picked_up' } as never, authUser as never);
+      BigInt(pushed.id),
+      { status: 'picked_up' } as never,
+      authUser as never,
+    );
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'delivering' } as never, authUser as never);
+      BigInt(pushed.id),
+      { status: 'delivering' } as never,
+      authUser as never,
+    );
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'retry_delivery' } as never, authUser as never);
+      BigInt(pushed.id),
+      { status: 'retry_delivery' } as never,
+      authUser as never,
+    );
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'returning' } as never, authUser as never);
+      BigInt(pushed.id),
+      { status: 'returning' } as never,
+      authUser as never,
+    );
     await fulfillments.updateShipmentStatus(
-      BigInt(pushed.id), { status: 'returned' } as never, authUser as never);
+      BigInt(pushed.id),
+      { status: 'returned' } as never,
+      authUser as never,
+    );
 
     // Tồn về như trước khi lấy hàng (on_hand +1 trả lại, committed giữ chỗ lại)
     const lv = await level();
@@ -247,9 +307,14 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
     const before = await level();
 
     const f = await fulfillments.createPackingRequest(
-      { order_id: orderId.toString() }, authUser as never);
+      { order_id: orderId.toString() },
+      authUser as never,
+    );
     await fulfillments.updatePackingStatus(
-      BigInt(f.id), { status: 'packed' } as never, authUser as never);
+      BigInt(f.id),
+      { status: 'packed' } as never,
+      authUser as never,
+    );
 
     await fulfillments.cancel(BigInt(f.id), {}, authUser as never);
     const lv = await level();
@@ -276,8 +341,15 @@ describeIfDb('fulfillment drives order status & inventory buckets', () => {
       authUser as never,
     );
     await expect(
-      fulfillments.createPackingRequest({ order_id: created.id }, authUser as never),
+      fulfillments.createPackingRequest(
+        { order_id: created.id },
+        authUser as never,
+      ),
     ).rejects.toThrow(BusinessException);
-    await orders.transition(BigInt(created.id), { action: 'cancel' }, authUser as never);
+    await orders.transition(
+      BigInt(created.id),
+      { action: 'cancel' },
+      authUser as never,
+    );
   });
 });
