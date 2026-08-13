@@ -1,14 +1,22 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
   IsEmail,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
   ValidateNested,
 } from 'class-validator';
+
+function toBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
+  return undefined;
+}
 
 /** Sapo `customer.addresses[]` */
 export class CustomerAddressDto {
@@ -77,6 +85,20 @@ export class ListCustomersQueryDto {
   @IsOptional() @IsString() order_filter?: string;
   /** total_spent | orders_count | created_on */
   @IsOptional() @IsString() sort?: string;
+
+  /** Khớp `default_address.province` (contains, không phân biệt hoa/thường) */
+  @IsOptional() @IsString() province?: string;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) min_spent?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) max_spent?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) min_age?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) max_age?: number;
+  /** Đã từng mua sản phẩm thuộc category này (join order_items → variant → product) */
+  @IsOptional() @IsString() product_category_id?: string;
+  /** true = chỉ khách mua lại (nhiều đơn cùng SĐT sau khi chuẩn hoá) */
+  @IsOptional()
+  @Transform(({ value }) => toBoolean(value))
+  @IsBoolean()
+  repeat_only?: boolean;
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number;
