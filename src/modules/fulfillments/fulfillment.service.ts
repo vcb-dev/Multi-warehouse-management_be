@@ -11,7 +11,10 @@ import {
   ShippingProviderType,
   UserRole,
 } from '@prisma/client';
-import { assertLocationPermission } from '../../common/auth/access';
+import {
+  assertLocationPermission,
+  locationScopeFilter,
+} from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { userDisplayName } from '../../common/utils/user-display-name';
@@ -28,6 +31,7 @@ import {
   CarrierWebhookDto,
   CreatePackingDto,
   GhnWebhookDto,
+  ListShipmentsQueryDto,
   PushShipmentDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
@@ -40,6 +44,10 @@ import {
   GHN_PROVIDER_CODE,
   ShippingProviderService,
 } from './shipping-provider.service';
+import {
+  serializeShipmentListItem,
+  shipmentListInclude,
+} from './shipment-list.serializer';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
 
@@ -139,6 +147,91 @@ export class FulfillmentService {
     return client.fulfillment.findFirst({
       where: { orderId, closedAt: null },
     });
+  }
+
+  /** Danh sách vận đơn — chỉ bản ghi đã đẩy ship (có shipment_status). */
+  async listShipments(query: ListShipmentsQueryDto, user: AuthUser) {
+    const page = query.page ?? 1;
+    const pageSize = query.page_size ?? 20;
+
+    const where: Prisma.FulfillmentWhereInput = {
+      // Chỉ lấy phiếu đã có vận đơn, không lấy phiếu đóng gói thuần
+      shipmentStatus: { not: null },
+    };
+
+    // Phân quyền theo kho — giống order.list, dùng order:view (khớp ROUTE_PERMISSIONS)
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'order:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'order:view');
+    }
+
+    // Tab nhanh (ưu tiên tab hơn shipment_status đơn lẻ nếu cả hai có)
+    const tab = query.tab?.trim();
+    if (tab === 'delivering') {
+      where.shipmentStatus = ShipmentStatus.delivering;
+    } else if (tab === 'retry_delivery') {
+      where.shipmentStatus = ShipmentStatus.retry_delivery;
+    } else if (tab === 'returning') {
+      where.shipmentStatus = ShipmentStatus.returning;
+    } else if (tab === 'delivered') {
+      where.shipmentStatus = ShipmentStatus.delivered;
+    } else if (tab === 'returned') {
+      where.shipmentStatus = ShipmentStatus.returned;
+    } else if (tab === 'overdue_10d') {
+      // đơn hàng đã được chọn lấy vào kho 10 ngày trước
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+      where.shipmentStatus = {
+        in: [
+          ShipmentStatus.picked_up,
+          ShipmentStatus.delivering,
+          ShipmentStatus.retry_delivery,
+        ],
+      };
+      where.shipmentCreatedOn = { lte: tenDaysAgo };
+    } else if (query.shipment_status) {
+      where.shipmentStatus = query.shipment_status as ShipmentStatus;
+    }
+
+    if (query.provider_id) {
+      where.providerId = BigInt(query.provider_id);
+    }
+
+    const q = query.q?.trim();
+
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { trackingNumber: { contains: q, mode: 'insensitive' } },
+        { toName: { contains: q, mode: 'insensitive' } },
+        { order: { name: { contains: q, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.fulfillment.findMany({
+        where,
+        // sắp xếp theo shipmentCreatedOn, nếu null thì sắp xếp theo createdOn
+        // orderBy: { shipmentCreatedOn: 'desc' },
+        orderBy: [
+          { shipmentCreatedOn: { sort: 'desc', nulls: 'last' } },
+          { createdOn: 'desc' },
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: shipmentListInclude,
+      }),
+      this.prisma.fulfillment.count({ where }),
+    ]);
+
+    return {
+      data: rows.map(serializeShipmentListItem),
+      total,
+      page,
+      page_size: pageSize,
+    };
   }
 
   /** Đơn có fulfillment đang mở thì các thao tác thủ công cũ bị chặn. */
