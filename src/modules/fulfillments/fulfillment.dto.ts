@@ -3,11 +3,13 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -134,9 +136,11 @@ export class PushShipmentDto {
 
 export class UpdateShipmentStatusDto {
   @IsIn([
+    ShipmentStatus.picked_up,
     ShipmentStatus.delivering,
     ShipmentStatus.delivered,
     ShipmentStatus.retry_delivery,
+    ShipmentStatus.returning,
     ShipmentStatus.returned,
   ])
   status!: ShipmentStatus;
@@ -234,6 +238,29 @@ export class GhnWebhookDto {
   @IsOptional()
   @IsString()
   Time?: string;
+}
+
+/**
+ * Payload webhook trạng thái đơn của ViettelPost — bọc trong `{ DATA, TOKEN }`, khác payload
+ * phẳng của GHN. `ORDER_STATUS` là mã số (mục 8 tài liệu, 101–550), không phải chuỗi như GHN.
+ */
+/**
+ * `DATA` cố tình để dạng object mở (không whitelist field con) thay vì class riêng như trước:
+ * payload thật của VTP (theo tài liệu `partner2.viettelpost.vn/document/webhook`) có ~25 field
+ * tuỳ trạng thái đơn (ORDER_STATUSDATE, MONEY_FEECOD, EMPLOYEE_NAME, POD, DETAIL[], v.v.), nhiều
+ * hơn hẳn số field service này thực sự đọc — và tài liệu còn lẫn cả field lỗi chính tả
+ * (`LOCALION_CURRENTLY` cạnh `LOCATION_CURRENTLY`). Dùng class liệt kê hết dễ vỡ mỗi khi VTP đổi
+ * field; ValidationPipe toàn cục bật `whitelist + forbidNonWhitelisted` nên nếu vẫn dùng class
+ * cũ, mọi request webhook thật sẽ bị 400 vì các field chưa khai (đã xác nhận bằng curl thật).
+ */
+export class VtpWebhookDto {
+  @IsOptional()
+  @IsObject()
+  DATA?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  TOKEN?: string;
 }
 
 /** Callback ticket của GHN — snake_case (khác webhook đơn hàng, vốn PascalCase). */
@@ -378,15 +405,15 @@ export class UpdateShippingProviderDto {
 }
 
 export class ConnectProviderDto {
-  /** Token API của hãng (GHN: Token) */
+  /** Token API của hãng (GHN: Token API; ViettelPost: tham số bí mật lấy từ web VTP) */
   @IsString()
   @MinLength(1)
   token!: string;
 
-  /** ShopId GHN (bắt buộc với provider code=ghn) */
+  /** ShopId — chỉ GHN cần (validate riêng ở `verifyGhn`); ViettelPost không dùng field này. */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  shop_id!: string;
+  shop_id?: string;
 }
 
 export class ListShipmentsQueryDto {

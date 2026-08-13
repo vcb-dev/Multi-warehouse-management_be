@@ -44,7 +44,7 @@ export class ReportsController {
   }
 
   /** Dashboard "Sản phẩm — Vận hành theo tháng" — không nằm trong khung ReportDef chung. */
-  @Get('san-pham-van-hanh-theo-thang')
+  @Get('product-monthly-ops')
   @RequirePermission('report:view')
   productMonthlyOps(
     @Query() query: ProductMonthlyOpsQueryDto,

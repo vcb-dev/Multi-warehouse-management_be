@@ -8,6 +8,7 @@ import {
   CarrierServiceConfig,
   CarrierShipmentInput,
   CarrierShipmentResult,
+  estimateQuote,
 } from './carrier-adapter';
 import { GhnLocationResolver } from './ghn-location-resolver';
 import { GHN_TRACKING_URL, GhnClient, isGhnSandbox } from './ghn.client';
@@ -120,16 +121,7 @@ export class GhnAdapter implements CarrierAdapter {
     services: CarrierServiceConfig[],
     weightGrams: number,
   ): Promise<CarrierQuote[]> {
-    return Promise.resolve(
-      services.map((s) => ({
-        code: s.code,
-        name: s.name,
-        eta: s.eta,
-        fee:
-          s.base_fee +
-          Math.max(0, Math.ceil(weightGrams / 500) - 1) * s.extra_fee_per_500g,
-      })),
-    );
+    return Promise.resolve(estimateQuote(services, weightGrams));
   }
 
   mapWebhookStatus(externalStatus: string): ShipmentStatus | null {

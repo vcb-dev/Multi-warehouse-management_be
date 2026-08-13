@@ -22,7 +22,7 @@ const describeIfDb =
     ? describe
     : describe.skip;
 
-const REPORT_ROUTE = '/api/reports/san-pham-van-hanh-theo-thang';
+const REPORT_ROUTE = '/api/reports/product-monthly-ops';
 const PRODUCTS_ROUTE = '/api/products';
 const API_KEYS_ROUTE = '/api/api-keys';
 

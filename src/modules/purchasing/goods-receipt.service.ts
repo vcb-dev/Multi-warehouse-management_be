@@ -425,8 +425,10 @@ export class GoodsReceiptService {
           depositApplied = Math.min(Math.max(available, 0), amountDue);
         }
       }
+      // amountDue <= 0 (đơn 0đ, hoặc chiết khấu vượt tổng tiền hàng) ⇒ không
+      // nợ gì NCC, coi như đã thanh toán ngay — không cần gọi pay().
       const paymentStatus =
-        depositApplied >= amountDue && amountDue > 0
+        amountDue <= 0 || depositApplied >= amountDue
           ? PaymentStatus.da_thanh_toan
           : depositApplied > 0
             ? PaymentStatus.mot_phan
@@ -521,6 +523,21 @@ export class GoodsReceiptService {
     assertLocationPermission(user, REI_PAY, rei.locationId);
 
     const remaining = Number(rei.amountDue) - Number(rei.paidAmount);
+
+    // Không còn nợ (đơn 0đ, hoặc phiếu cũ lỡ bị kẹt trạng thái trước khi có
+    // fix ở confirm()) ⇒ chốt đã thanh toán, không tạo phiếu chi 0đ.
+    if (remaining <= 0) {
+      await this.prisma.goodsReceipt.update({
+        where: { id },
+        data: { paymentStatus: PaymentStatus.da_thanh_toan },
+      });
+      return {
+        id: rei.id.toString(),
+        payment_status: PaymentStatus.da_thanh_toan,
+        paid_amount: rei.paidAmount.toString(),
+      };
+    }
+
     const payAmount = amount ?? remaining;
 
     if (payAmount <= 0) {
