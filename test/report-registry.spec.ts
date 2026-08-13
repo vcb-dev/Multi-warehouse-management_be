@@ -58,12 +58,13 @@ describe('BC-1 metadata registry báo cáo', () => {
     }
   });
 
-  it('catalog gom đủ 3 nhóm và không bỏ sót báo cáo nào', () => {
+  it('catalog gom đủ 4 nhóm và không bỏ sót báo cáo nào', () => {
     const catalog = reportCatalog();
     expect(catalog.map((g) => g.group)).toEqual([
       'ban_hang',
       'kho',
       'loi_nhuan',
+      'khach_hang',
     ]);
     const inCatalog = catalog.flatMap((g) => g.reports).length;
     expect(inCatalog).toBe(reports.length);
