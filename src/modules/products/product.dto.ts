@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -234,4 +235,22 @@ export class ProductInventoryQueryDto {
   @IsOptional()
   @IsString()
   location_id?: string;
+}
+
+export class VariantPriceHistoryQueryDto {
+  @IsOptional()
+  @IsIn(['price', 'cost'])
+  field?: 'price' | 'cost';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number = 1;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page_size?: number = 20;
 }

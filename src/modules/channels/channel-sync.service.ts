@@ -17,6 +17,25 @@ export class ChannelSyncService {
     private orders: OrderService,
   ) {}
 
+  /** Danh sách shop đã ủy quyền kết nối trực tiếp (TikTok Shop, Shopee...). Không trả token. */
+  async listConnections() {
+    const rows = await this.prisma.channelConnection.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { location: { select: { id: true, name: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id.toString(),
+      channel: r.channel,
+      shop_id: r.shopId,
+      shop_name: r.shopName,
+      connected_at: r.createdAt,
+      access_token_expires_at: r.accessTokenExpiresAt,
+      refresh_token_expires_at: r.refreshTokenExpiresAt,
+      granted_scopes_count: r.grantedScopes.length,
+      location: r.location ? { id: r.location.id.toString(), name: r.location.name } : null,
+    }));
+  }
+
   async handleWebhook(dto: ChannelWebhookDto, user: AuthUser) {
     let customerId: bigint | undefined;
     if (dto.customer_phone) {

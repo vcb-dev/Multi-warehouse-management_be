@@ -27,6 +27,7 @@ import {
   ListProductsQueryDto,
   ProductInventoryQueryDto,
   UpdateProductDto,
+  VariantPriceHistoryQueryDto,
 } from './product.dto';
 import {
   ProductExportService,
@@ -107,5 +108,19 @@ export class ProductsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.products.update(BigInt(id), dto, user);
+  }
+
+  @Get(':id/variants/:variantId/price-history')
+  @RequirePermission('product:view')
+  getVariantPriceHistory(
+    @Param('id') id: string,
+    @Param('variantId') variantId: string,
+    @Query() query: VariantPriceHistoryQueryDto,
+  ) {
+    return this.products.getVariantPriceHistory(
+      BigInt(id),
+      BigInt(variantId),
+      query,
+    );
   }
 }
