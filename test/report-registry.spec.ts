@@ -48,8 +48,8 @@ describe('BC-1 metadata registry báo cáo', () => {
   });
 
   it('tồn kho không nhận bộ lọc thời gian — đó là ảnh chụp hiện tại', () => {
-    expect(getReport('ton-kho')!.filters).not.toContain('date_range');
-    expect(getReport('so-kho')!.filters).toContain('date_range');
+    expect(getReport('inventory-stock')!.filters).not.toContain('date_range');
+    expect(getReport('inventory-ledger')!.filters).toContain('date_range');
   });
 
   it('báo cáo lợi nhuận phải cảnh báo về nguồn giá vốn', () => {
@@ -58,13 +58,14 @@ describe('BC-1 metadata registry báo cáo', () => {
     }
   });
 
-  it('catalog gom đủ 4 nhóm và không bỏ sót báo cáo nào', () => {
+  it('catalog gom đủ 5 nhóm và không bỏ sót báo cáo nào', () => {
     const catalog = reportCatalog();
     expect(catalog.map((g) => g.group)).toEqual([
       'ban_hang',
       'kho',
       'loi_nhuan',
       'khach_hang',
+      'nhan_vien',
     ]);
     const inCatalog = catalog.flatMap((g) => g.reports).length;
     expect(inCatalog).toBe(reports.length);
