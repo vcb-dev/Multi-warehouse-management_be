@@ -30,6 +30,7 @@ import {
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
   ListShipmentsQueryDto,
+  ShipmentOverviewQueryDto,
   VtpWebhookDto,
 } from './fulfillment.dto';
 import { FulfillmentService } from './fulfillment.service';
@@ -191,6 +192,15 @@ export class FulfillmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.fulfillments.webhook(providerCode, dto, user);
+  }
+
+  @Get('shipments/overview')
+  @RequirePermission('order:view')
+  getShipmentOverview(
+    @Query() query: ShipmentOverviewQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.fulfillments.getShipmentOverview(query, user);
   }
 
   @Get('shipments')

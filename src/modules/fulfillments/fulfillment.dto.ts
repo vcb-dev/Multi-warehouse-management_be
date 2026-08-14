@@ -9,7 +9,6 @@ import {
   MaxLength,
   Min,
   MinLength,
-  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -432,4 +431,19 @@ export class ListShipmentsQueryDto {
   @IsInt()
   @Min(1)
   page_size?: number;
+}
+
+export class ShipmentOverviewQueryDto {
+  /** YYYY-MM-DD */
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @IsOptional()
+  @IsString()
+  to?: string;
+
+  @IsOptional()
+  @IsString()
+  location_id?: string;
 }
