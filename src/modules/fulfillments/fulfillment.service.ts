@@ -33,6 +33,7 @@ import {
   GhnWebhookDto,
   ListShipmentsQueryDto,
   PushShipmentDto,
+  ShipmentOverviewQueryDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
   VtpWebhookDto,
@@ -610,6 +611,208 @@ export class FulfillmentService {
       return record;
     });
     return this.serializeById(created.id);
+  }
+
+  /** Tổng quan vận chuyển — dashboard /van-chuyen/tong-quan */
+  async getShipmentOverview(query: ShipmentOverviewQueryDto, user: AuthUser) {
+    // 1. Base where — chỉ vận đơn đã đẩy ship
+    const where: Prisma.FulfillmentWhereInput = {
+      shipmentStatus: { not: null },
+    };
+
+    // 2. Phân quyền kho (copy từ listShipments)
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'order:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'order:view');
+    }
+
+    // 3. Khoảng ngày
+    const from = query.from
+      ? new Date(`${query.from}T00:00:00.000Z`)
+      : new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+    const to = query.to ? new Date(`${query.to}T23:59:59.999Z`) : new Date();
+
+    where.shipmentCreatedOn = { gte: from, lte: to };
+
+    // 4. Thẻ trạng thái — groupBy status
+    const statusGroups = await this.prisma.fulfillment.groupBy({
+      by: ['shipmentStatus'],
+      where,
+      _count: { _all: true },
+      _sum: { codAmount: true },
+    });
+
+    const STATUS_LABELS: Record<string, string> = {
+      pending: 'Chờ lấy hàng',
+      picked_up: 'Đã lấy hàng',
+      delivering: 'Đang giao hàng',
+      retry_delivery: 'Chờ giao lại',
+      returning: 'Đang hoàn hàng',
+      returned: 'Đã hoàn hàng',
+      cancelled: 'Đã hủy',
+      delivered: 'Đã giao hàng', // không hiện trên dashboard nhưng có thể có
+    };
+
+    const statusMap = new Map(
+      statusGroups.map((g) => [
+        g.shipmentStatus!,
+        {
+          count: g._count._all,
+          cod: Number(g._sum.codAmount ?? 0),
+        },
+      ]),
+    );
+
+    const statusCards = [
+      'pending',
+      'picked_up',
+      'delivering',
+      'retry_delivery',
+      'returning',
+      { key: 'return_pending', label: 'Chờ xác nhận hoàn hàng' }, // tạm 0
+      'returned',
+    ].map((item) => {
+      if (typeof item === 'string') {
+        const row = statusMap.get(item as ShipmentStatus);
+        return {
+          key: item,
+          label: STATUS_LABELS[item] ?? item,
+          count: row?.count ?? 0,
+          cod: row?.cod ?? 0,
+          alert: item === 'retry_delivery',
+        };
+      }
+      return {
+        key: item.key,
+        label: item.label,
+        count: 0,
+        cod: 0,
+      };
+    });
+
+    // 5. Tỉ trọng theo provider
+    const providerGroups = await this.prisma.fulfillment.groupBy({
+      by: ['providerId'],
+      where,
+      _count: { _all: true },
+    });
+
+    const providerIds = providerGroups
+      .map((g) => g.providerId)
+      .filter((id): id is bigint => id !== null);
+
+    const providers = providerIds.length
+      ? await this.prisma.shippingProvider.findMany({
+          where: { id: { in: providerIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+
+    const providerName = new Map(
+      providers.map((p) => [p.id.toString(), p.name]),
+    );
+
+    const proportions = providerGroups.map((g) => ({
+      provider_id: g.providerId?.toString() ?? null,
+      name: g.providerId
+        ? (providerName.get(g.providerId.toString()) ?? 'Không rõ')
+        : 'Shipper ngoài',
+      count: g._count._all,
+    }));
+
+    const totalOrders = proportions.reduce((s, p) => s + p.count, 0);
+
+    // 6. Metrics theo provider — raw SQL cho avg thời gian + success rate
+    // ponytail: Prisma groupBy không avg datetime diff dễ; 1 query raw hoặc load subset
+    const rows = await this.prisma.fulfillment.findMany({
+      where: {
+        ...where,
+        providerId: { not: null },
+      },
+      select: {
+        providerId: true,
+        shipmentStatus: true,
+        shipmentCreatedOn: true,
+        pickedUpAt: true,
+        deliveredOn: true,
+        provider: { select: { name: true } },
+      },
+    });
+
+    type Bucket = {
+      name: string;
+      pickupMs: number[];
+      deliveryMs: number[];
+      delivered: number;
+      failed: number;
+    };
+
+    const buckets = new Map<string, Bucket>();
+
+    for (const r of rows) {
+      const pid = r.providerId!.toString();
+      const name = r.provider?.name ?? 'Không rõ';
+      const b = buckets.get(pid) ?? {
+        name,
+        pickupMs: [],
+        deliveryMs: [],
+        delivered: 0,
+        failed: 0,
+      };
+
+      if (r.pickedUpAt && r.shipmentCreatedOn) {
+        b.pickupMs.push(r.pickedUpAt.getTime() - r.shipmentCreatedOn.getTime());
+      }
+      if (r.deliveredOn && r.pickedUpAt) {
+        b.deliveryMs.push(r.deliveredOn.getTime() - r.pickedUpAt.getTime());
+      }
+      if (r.shipmentStatus === ShipmentStatus.delivered) b.delivered += 1;
+      if (
+        r.shipmentStatus === ShipmentStatus.returned ||
+        r.shipmentStatus === ShipmentStatus.cancelled
+      ) {
+        b.failed += 1;
+      }
+      buckets.set(pid, b);
+    }
+
+    const avg = (arr: number[]) =>
+      arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+
+    const avgPickupTimes = [...buckets.values()].map((b) => ({
+      provider_id: null,
+      name: b.name,
+      hours: avg(b.pickupMs) ? avg(b.pickupMs)! / (1000 * 60 * 60) : null,
+    }));
+
+    const avgDeliveryTimes = [...buckets.values()].map((b) => ({
+      provider_id: null,
+      name: b.name,
+      days: avg(b.deliveryMs)
+        ? avg(b.deliveryMs)! / (1000 * 60 * 60 * 24)
+        : null,
+    }));
+
+    const successRates = [...buckets.values()].map((b) => {
+      const total = b.delivered + b.failed;
+      return {
+        provider_id: null,
+        name: b.name,
+        rate: total > 0 ? (b.delivered / total) * 100 : 0,
+      };
+    });
+
+    return {
+      status_cards: statusCards,
+      avg_pickup_times: avgPickupTimes,
+      avg_delivery_times: avgDeliveryTimes,
+      success_rates: successRates,
+      proportions,
+      total_orders: totalOrders,
+    };
   }
 
   /**
