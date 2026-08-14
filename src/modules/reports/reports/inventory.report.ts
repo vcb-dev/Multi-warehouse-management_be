@@ -160,7 +160,7 @@ async function runLedger(ctx: ReportContext): Promise<ReportResult> {
 
 export const INVENTORY_REPORTS: ReportDef[] = [
   {
-    id: 'ton-kho',
+    id: 'inventory-stock',
     group: 'kho',
     name: 'Tồn kho',
     description: 'Số lượng và giá trị tồn hiện tại theo từng kho.',
@@ -191,7 +191,7 @@ export const INVENTORY_REPORTS: ReportDef[] = [
     run: runStock,
   },
   {
-    id: 'so-kho',
+    id: 'inventory-ledger',
     group: 'kho',
     name: 'Sổ kho',
     description: 'Tồn đầu kỳ, nhập, xuất và tồn cuối kỳ theo từng sản phẩm.',

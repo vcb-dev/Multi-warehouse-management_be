@@ -125,7 +125,7 @@ const METRIC_COLUMNS = [
 
 export const PROFIT_REPORTS: ReportDef[] = [
   {
-    id: 'loi-nhuan-tong-hop',
+    id: 'profit-summary',
     group: 'loi_nhuan',
     name: 'Lợi nhuận tổng hợp',
     description: 'Doanh thu, giá vốn và lãi gộp theo ngày/tuần/tháng.',
@@ -139,7 +139,7 @@ export const PROFIT_REPORTS: ReportDef[] = [
     run: (ctx) => runProfit(ctx, 'time'),
   },
   {
-    id: 'loi-nhuan-theo-san-pham',
+    id: 'profit-by-product',
     group: 'loi_nhuan',
     name: 'Lợi nhuận theo sản phẩm',
     description: 'Sản phẩm nào thực sự sinh lãi, xếp theo lãi gộp.',

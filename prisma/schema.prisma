@@ -308,7 +308,6 @@ model User {
   vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
   supplierLedgerEntries  SupplierLedgerEntry[]       @relation("SupplierLedgerCreatedBy")
   customerLedgerEntries  CustomerLedgerEntry[]       @relation("CustomerLedgerCreatedBy")
-  variantPriceChanges    VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
   conversationsAssigned  Conversation[]              @relation("ConversationAssignedTo")
   conversationMessages   ConversationMessage[]       @relation("ConversationMessageAuthor")
   chatAudits             ChatAudit[]
@@ -320,6 +319,7 @@ model User {
   savedReports           SavedReport[]               @relation("SavedReportUser")
   apiKeysCreated         ApiKey[]                    @relation("ApiKeyCreatedBy")
   apiKeysActingAs        ApiKey[]                    @relation("ApiKeyActingUser")
+  variantPriceHistories  VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
 
   @@map("users")
 }
@@ -476,9 +476,36 @@ model Location {
   draftOrders         DraftOrder[]
   vouchers            Voucher[]
   fulfillments        Fulfillment[]
+  channelConnections  ChannelConnection[]
 
   @@index([status])
   @@map("locations")
+}
+
+/// Kết nối OAuth trực tiếp tới kênh bán (Shopee/TikTok Shop), bypass Sapo.
+/// Mỗi gian hàng (shop) trên kênh ứng với 1 dòng riêng — 1 tài khoản có thể có nhiều shop.
+model ChannelConnection {
+  id       BigInt      @id @default(autoincrement())
+  channel  OrderSource @map("channel")
+  /// Định danh shop trên kênh — TikTok Shop gọi là `open_id`, Shopee gọi là `shop_id`.
+  shopId   String      @map("shop_id")
+  shopName String?     @map("shop_name")
+
+  accessToken           String   @map("access_token") @db.Text
+  accessTokenExpiresAt  DateTime @map("access_token_expires_at")
+  refreshToken          String   @map("refresh_token") @db.Text
+  refreshTokenExpiresAt DateTime @map("refresh_token_expires_at")
+  grantedScopes         String[] @default([]) @map("granted_scopes")
+
+  /// Kho đại diện cho tồn kho/đơn hàng của shop này (giống WOO_LOCATION_ID) — để trống nếu chưa gán.
+  locationId BigInt?   @map("location_id")
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([channel, shopId])
+  @@map("channel_connections")
 }
 
 // --- Module Sản phẩm (005) ---
@@ -636,21 +663,19 @@ model ProductVariant {
   draftOrderItems  DraftOrderItem[]
   refundLineItems  OrderRefundLineItem[]
   fulfillmentItems FulfillmentLineItem[]
-  priceHistory     VariantPriceHistory[]
+  priceHistories   VariantPriceHistory[]
 
   @@index([productId])
   @@map("product_variants")
 }
 
-/// Tái tạo từ DB thật (20260806120000_add_variant_price_history) — migration
-/// gốc bị áp thẳng vào DB dùng chung mà chưa từng commit vào git.
 model VariantPriceHistory {
   id          BigInt   @id @default(autoincrement())
   variantId   BigInt   @map("variant_id")
-  field       String
+  field       String   // "price" | "cost"
   oldValue    Decimal? @map("old_value") @db.Decimal(18, 2)
   newValue    Decimal  @map("new_value") @db.Decimal(18, 2)
-  source      String   @default("manual")
+  source      String   @default("manual") // "manual" | "import" | "create"
   changedById BigInt?  @map("changed_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -1825,7 +1850,7 @@ model Voucher {
 model SavedReport {
   id        BigInt   @id @default(autoincrement())
   userId    BigInt   @map("user_id")
-  /// Id báo cáo trong `report-registry.ts` (vd `doanh-thu-theo-thoi-gian`)
+  /// Id báo cáo trong `report-registry.ts` (vd `sales-revenue-by-time`)
   reportKey String   @map("report_key")
   /// Bộ lọc đã lưu kèm (khoảng thời gian, kho, kênh...) — dạng snake_case như query API
   filters   Json?

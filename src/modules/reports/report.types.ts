@@ -1,14 +1,20 @@
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 
-/** Nhóm báo cáo — đặt theo catalog của Sapo (help.sapo.vn). */
-export type ReportGroup = 'ban_hang' | 'kho' | 'loi_nhuan' | 'khach_hang';
+/** Nhóm báo cáo — đặt theo catalog của Sapo (help.sapo.vn), riêng `nhan_vien` là nhóm tự thêm. */
+export type ReportGroup =
+  | 'ban_hang'
+  | 'kho'
+  | 'loi_nhuan'
+  | 'khach_hang'
+  | 'nhan_vien';
 
 export const REPORT_GROUP_LABEL: Record<ReportGroup, string> = {
   ban_hang: 'Bán hàng',
   kho: 'Kho',
   loi_nhuan: 'Lợi nhuận',
   khach_hang: 'Customers',
+  nhan_vien: 'Nhân viên',
 };
 
 /** Bộ lọc một báo cáo chấp nhận — frontend dựng form từ danh sách này. */

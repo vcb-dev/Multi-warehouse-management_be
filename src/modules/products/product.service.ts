@@ -14,6 +14,7 @@ import {
   ProductInventoryQueryDto,
   ProductVariantDto,
   UpdateProductDto,
+  VariantPriceHistoryQueryDto,
 } from './product.dto';
 import { ProductRepository } from './product.repository';
 import {
@@ -22,6 +23,8 @@ import {
   slugify,
 } from './product.serializer';
 import { VariantService } from './variant.service';
+import { VariantPriceHistoryService } from './variant-price-history.service';
+import { serializeVariantPriceHistory } from './variant-price-history.serializer';
 
 /** SP nhiều variant + DB remote — syncVariants có thể > 5s mặc định của Prisma */
 const PRODUCT_TX_TIMEOUT_MS = 30_000;
@@ -32,6 +35,7 @@ export class ProductService {
     private repo: ProductRepository,
     private variants: VariantService,
     private categories: CategoryService,
+    private priceHistory: VariantPriceHistoryService,
   ) {}
 
   async buildListWhere(
@@ -104,7 +108,9 @@ export class ProductService {
   async create(dto: CreateProductDto, user: AuthUser) {
     await this.validateSkus(dto.variants?.map((v) => v.sku) ?? []);
 
-    const alias = await this.uniqueAlias(dto.alias?.trim() || slugify(dto.name));
+    const alias = await this.uniqueAlias(
+      dto.alias?.trim() || slugify(dto.name),
+    );
     const options = dto.options ?? [];
     if (options.length > 3) {
       throw new BusinessException(
@@ -196,6 +202,26 @@ export class ProductService {
             },
           });
 
+          // await this.priceHistory.logIfChanged({
+          //   tx,
+          //   variantId: variant.id,
+          //   field: 'price',
+          //   oldValue: null,
+          //   newValue: vr.price,
+          //   changedById: user.userId,
+          //   source: 'create',
+          // });
+
+          // await this.priceHistory.logIfChanged({
+          //   tx,
+          //   variantId: variant.id,
+          //   field: 'cost',
+          //   oldValue: null,
+          //   newValue: vr.cost ?? 0,
+          //   changedById: user.userId,
+          //   source: 'create',
+          // });
+
           if (optionRecords.length) {
             for (let i = 0; i < optionRecords.length; i++) {
               await tx.variantOptionValue.create({
@@ -275,7 +301,9 @@ export class ProductService {
               ? { metaDescription: dto.meta_description?.trim() || null }
               : {}),
             ...(dto.vat_pit_category_code !== undefined
-              ? { vatPitCategoryCode: dto.vat_pit_category_code?.trim() || null }
+              ? {
+                  vatPitCategoryCode: dto.vat_pit_category_code?.trim() || null,
+                }
               : {}),
           },
         });
@@ -293,7 +321,9 @@ export class ProductService {
           await tx.productVariant.updateMany({
             where: { productId: id },
             data: {
-              ...(dto.unit !== undefined ? { unit: dto.unit?.trim() || null } : {}),
+              ...(dto.unit !== undefined
+                ? { unit: dto.unit?.trim() || null }
+                : {}),
               ...(dto.taxable !== undefined ? { taxable: dto.taxable } : {}),
               ...(dto.requires_shipping !== undefined
                 ? { requiresShipping: dto.requires_shipping }
@@ -357,7 +387,10 @@ export class ProductService {
         }
 
         if (dto.options && dto.variants) {
-          await this.syncVariants(tx, id, existing.alias, dto.options, dto);
+          await this.syncVariants(tx, id, existing.alias, dto.options, dto, {
+            userId: user.userId,
+            source: 'manual',
+          });
         }
 
         await this.categories.evaluateAutoForProduct(tx, id);
@@ -420,11 +453,64 @@ export class ProductService {
     };
   }
 
+  /**
+   * Lấy lịch sử giá/vốn của một phiên bản sản phẩm.
+   */
+  async getVariantPriceHistory(
+    productId: bigint,
+    variantId: bigint,
+    query: VariantPriceHistoryQueryDto,
+  ) {
+    // variantId phải thuộc productId, nếu không thì throw lỗi
+    const variant = await this.repo.client.productVariant.findFirst({
+      where: { id: variantId, productId },
+      select: { id: true },
+    });
+    if (!variant) throw new NotFoundException('Không tìm thấy phiên bản');
+
+    const page = query.page ?? 1;
+    const pageSize = query.page_size ?? 20;
+
+    const where: Prisma.VariantPriceHistoryWhereInput = {
+      variantId,
+      ...(query.field ? { field: query.field } : {}),
+    };
+
+    // promise all để lấy lịch sử giá/vốn và tổng số lượng lịch sử
+    const [rows, total] = await Promise.all([
+      this.repo.client.variantPriceHistory.findMany({
+        where,
+        include: {
+          changedBy: {
+            select: { firstName: true, lastName: true, email: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.repo.client.variantPriceHistory.count({ where }),
+    ]);
+
+    return {
+      data: rows.map(serializeVariantPriceHistory),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
   /** Cờ requires_shipping/taxable/inventory_management/inventory_policy/unit sống ở
    *  ProductVariant theo Sapo — variant tự ghi đè nếu có, không thì dùng giá trị
    *  chung của sản phẩm (dto cấp trên). */
   private resolveVariantFlags(
-    dto: { unit?: string; taxable?: boolean; requires_shipping?: boolean; track_inventory?: boolean; allow_backorder?: boolean },
+    dto: {
+      unit?: string;
+      taxable?: boolean;
+      requires_shipping?: boolean;
+      track_inventory?: boolean;
+      allow_backorder?: boolean;
+    },
     v?: ProductVariantDto,
   ) {
     // Không gửi thì trả `undefined` chứ không tự bịa mặc định: lúc create Prisma
@@ -438,7 +524,11 @@ export class ProductService {
       taxable: v?.taxable ?? dto.taxable,
       requiresShipping: v?.requires_shipping ?? dto.requires_shipping,
       inventoryManagement:
-        trackInventory === undefined ? undefined : trackInventory ? 'bizweb' : '',
+        trackInventory === undefined
+          ? undefined
+          : trackInventory
+            ? 'bizweb'
+            : '',
       inventoryPolicy:
         allowBackorder === undefined
           ? undefined
@@ -453,7 +543,12 @@ export class ProductService {
     options: CreateProductDto['options'],
     dto: Pick<
       CreateProductDto,
-      'variants' | 'unit' | 'taxable' | 'requires_shipping' | 'track_inventory' | 'allow_backorder'
+      | 'variants'
+      | 'unit'
+      | 'taxable'
+      | 'requires_shipping'
+      | 'track_inventory'
+      | 'allow_backorder'
     >,
   ) {
     const variants = dto.variants;
@@ -520,8 +615,14 @@ export class ProductService {
     options: NonNullable<CreateProductDto['options']>,
     dto: Pick<
       CreateProductDto,
-      'variants' | 'unit' | 'taxable' | 'requires_shipping' | 'track_inventory' | 'allow_backorder'
+      | 'variants'
+      | 'unit'
+      | 'taxable'
+      | 'requires_shipping'
+      | 'track_inventory'
+      | 'allow_backorder'
     >,
+    ctx: { userId?: bigint; source?: 'manual' | 'import' | 'create' },
   ) {
     const existingVariants = await tx.productVariant.findMany({
       where: { productId },
@@ -577,6 +678,25 @@ export class ProductService {
       const desiredSku = d.skuExplicit ? d.sku : (match?.sku ?? d.sku);
 
       if (match && match.sku === desiredSku) {
+        const nextCost = d.cost ?? match.cost;
+        await this.priceHistory.logIfChanged({
+          tx,
+          variantId: match.id,
+          field: 'price',
+          oldValue: match.price,
+          newValue: d.price,
+          changedById: ctx.userId,
+          source: ctx.source,
+        });
+        await this.priceHistory.logIfChanged({
+          tx,
+          variantId: match.id,
+          field: 'cost',
+          oldValue: match.cost,
+          newValue: nextCost,
+          changedById: ctx.userId,
+          source: ctx.source,
+        });
         await tx.productVariant.update({
           where: { id: match.id },
           data: {
