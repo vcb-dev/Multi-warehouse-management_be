@@ -36,6 +36,14 @@ export class ChannelsController {
     return this.sync.syncConnectedChannels(user);
   }
 
+  /** Danh sách shop đã ủy quyền kết nối trực tiếp (TikTok Shop, Shopee...), để hiển thị lên UI. */
+  @Get('connections')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  listConnections() {
+    return this.sync.listConnections();
+  }
+
   /**
    * Redirect URL khai báo trên TikTok Shop Partner Center — TikTok gọi lại đây (GET, từ trình
    * duyệt của seller) sau khi seller đồng ý ủy quyền, kèm `code`. `@Public` vì đây không phải
