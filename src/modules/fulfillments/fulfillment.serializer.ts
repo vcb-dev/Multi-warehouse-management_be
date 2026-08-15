@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import { carrierDisplayName } from './carrier-display';
 
 const fulfillmentInclude = {
   packer: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -36,7 +37,7 @@ export function serializeFulfillment(f: FulfillmentWithRelations) {
     package_category: f.packageCategory,
     shipping_type: f.shippingType,
     provider_id: f.providerId?.toString() ?? null,
-    provider_name: f.provider?.name ?? null,
+    provider_name: carrierDisplayName(f),
     provider_code: f.provider?.code ?? null,
     service_code: f.serviceCode,
     service_name: f.serviceName,

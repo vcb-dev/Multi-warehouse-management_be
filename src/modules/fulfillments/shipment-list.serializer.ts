@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { carrierDisplayName } from './carrier-display';
 
 export const shipmentListInclude = {
   provider: { select: { id: true, code: true, name: true } },
@@ -29,7 +30,7 @@ export function serializeShipmentListItem(f: ShipmentListRow) {
     to_ward: f.toWard,
     to_district: f.toDistrict,
     to_province: f.toProvince,
-    provider_name: f.provider?.name ?? null,
+    provider_name: carrierDisplayName(f),
     cod_amount: dec(f.codAmount),
     shipping_fee: dec(f.shippingFee),
     location_name: f.location?.name ?? null,

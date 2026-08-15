@@ -157,6 +157,10 @@ export class OrderService {
           packedStatus: true,
           shipmentStatus: true,
           provider: { select: { name: true } },
+          // Đơn đồng bộ từ sàn không có provider tích hợp — tên hãng nằm ở đây
+          carrierName: true,
+          trackingCompany: true,
+          carrier: true,
         },
       },
     } as const;
