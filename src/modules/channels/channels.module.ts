@@ -5,6 +5,8 @@ import { ChannelSyncScheduler } from './channel-sync.scheduler';
 import { ChannelSyncService } from './channel-sync.service';
 import { ChannelsController } from './channels.controller';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
+import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
+import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
 
 @Module({
   imports: [OrdersModule],
@@ -13,6 +15,8 @@ import { TiktokAuthService } from './tiktok/tiktok-auth.service';
     ChannelSyncService,
     ChannelSyncScheduler,
     TiktokAuthService,
+    TiktokOrderSyncService,
+    TiktokWebhookService,
     ChannelOverviewService,
   ],
 })
