@@ -102,8 +102,11 @@ export type TiktokOrder = {
   is_cod?: boolean;
   payment_method_name?: string;
   delivery_option_name?: string;
+  /** Tên hãng vận chuyển do TikTok chỉ định — quan sát thực tế: 'J&T Express', 'GHN'. */
   shipping_provider?: string;
   tracking_number?: string;
+  /** Kiện hàng. Đo 2026-08-15: 0/100 đơn có nhiều hơn 1 kiện, nhưng TikTok vẫn trả mảng. */
+  packages?: { id?: string }[];
   payment?: {
     currency?: string;
     total_amount?: string;

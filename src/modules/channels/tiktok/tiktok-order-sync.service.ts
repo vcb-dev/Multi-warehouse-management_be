@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  FulfillmentDeliveryMethod,
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
+  PackingStatus,
   Prisma,
+  ShipmentStatus,
 } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -317,6 +320,8 @@ export class TiktokOrderSyncService {
       select: { id: true },
     });
 
+    const fulfillment = mapFulfillmentRecord(order, locationId, createdById);
+
     await this.prisma.$transaction(async (tx) => {
       let orderId: bigint;
       if (existing) {
@@ -336,6 +341,49 @@ export class TiktokOrderSyncService {
         await tx.orderItem.createMany({
           data: items.map((i) => ({ ...i, orderId })),
         });
+      }
+
+      // Vận đơn: chỉ có khi TikTok đã tạo kiện và giao cho hãng.
+      //
+      // KHÔNG dùng `upsert` theo `name` được: DB có partial unique index
+      // `fulfillments_one_open_per_order` (order_id WHERE closed_at IS NULL) — mỗi đơn chỉ
+      // được một vận đơn đang mở. Ràng buộc này KHÔNG có trong schema.prisma nên `tsc` không
+      // thấy; tạo thêm dòng mới cho đơn đã có vận đơn Sapo (mã FUN...) sẽ vỡ ở tầng DB.
+      // Vì vậy: ưu tiên khớp theo `name` của mình, không có thì ghi đè lên vận đơn đang mở
+      // sẵn của đơn đó (cùng một kiện hàng thật, chỉ khác nguồn tạo), cuối cùng mới tạo mới.
+      if (fulfillment) {
+        const { name, ...rest } = fulfillment;
+        // Chỉ những trường TikTok là nguồn thật; giữ nguyên `name`/`createdById`/`createdOn`
+        // của bản ghi cũ để không xoá dấu vết ai tạo nó lần đầu.
+        const shippingFields = {
+          status: rest.status,
+          shipmentStatus: rest.shipmentStatus,
+          packedStatus: rest.packedStatus,
+          deliveryMethod: rest.deliveryMethod,
+          trackingNumber: rest.trackingNumber,
+          carrierName: rest.carrierName,
+          trackingCompany: rest.trackingCompany,
+          shipmentCreatedOn: rest.shipmentCreatedOn,
+          pickedUpAt: rest.pickedUpAt,
+          deliveredOn: rest.deliveredOn,
+          cancelledOn: rest.cancelledOn,
+          codAmount: rest.codAmount,
+          totalQuantity: rest.totalQuantity,
+        };
+
+        const target = await tx.fulfillment.findFirst({
+          where: { OR: [{ name }, { orderId, closedAt: null }] },
+          select: { id: true },
+        });
+
+        if (target) {
+          await tx.fulfillment.update({
+            where: { id: target.id },
+            data: shippingFields,
+          });
+        } else {
+          await tx.fulfillment.create({ data: { ...rest, name, orderId } });
+        }
       }
     });
 
@@ -540,6 +588,81 @@ function mapFulfillment(status?: string): OrderFulfillmentStatus | null {
     return OrderFulfillmentStatus.fulfilled;
   }
   return null;
+}
+
+/**
+ * Vận đơn cho đơn sàn. TikTok tự chỉ định hãng và tự sinh mã vận đơn, mình chỉ chép lại —
+ * khác hẳn đơn tự đẩy sang GHN/ViettelPost (ở đó mình gọi API tạo vận đơn và có
+ * `provider_id`).
+ *
+ * Theo quy ước sẵn có của dự án cho đơn sàn: `delivery_method = 'ecommerce'`,
+ * `provider_id` để NULL (hãng không phải đối tác tích hợp trong app), tên hãng thật nằm ở
+ * `carrier_name` để `carrierDisplayName()` đọc được.
+ *
+ * Trả null khi TikTok chưa tạo kiện — đơn mới đặt chưa có mã vận đơn thì không nên dựng
+ * sẵn một vận đơn rỗng, vì màn Vận chuyển sẽ hiện đầy dòng trắng không thao tác được.
+ */
+function mapFulfillmentRecord(
+  order: TiktokOrder,
+  locationId: bigint,
+  createdById: bigint,
+) {
+  const packageId = order.packages?.[0]?.id;
+  // `|| null` chứ không `?? null`: đơn huỷ trả `tracking_number` là chuỗi RỖNG chứ không
+  // phải thiếu trường, `??` sẽ để nguyên '' và cột mã vận đơn hiện ô trắng khó hiểu.
+  const tracking = order.tracking_number?.trim() || null;
+  if (!packageId && !tracking) return null;
+
+  const shipmentStatus = mapShipmentStatus(order.status);
+  const at = (unix?: number) => (unix ? new Date(unix * 1000) : null);
+
+  return {
+    // Tiền tố để không đụng dải mã vận đơn nội bộ (FUN...) lẫn của Sapo
+    name: `TTS-${packageId ?? tracking}`,
+    status: order.status === 'CANCELLED' ? 'cancelled' : 'success',
+    shipmentStatus,
+    deliveryMethod: FulfillmentDeliveryMethod.ecommerce,
+    // Sàn đã đóng gói xong mới sinh được mã vận đơn
+    packedStatus: PackingStatus.packed,
+    trackingNumber: tracking,
+    carrierName: order.shipping_provider?.trim() || null,
+    trackingCompany: order.delivery_option_name?.trim() || null,
+    locationId,
+    createdById,
+    // `rts_time` = sẵn sàng giao, `collection_time` = hãng đã lấy hàng
+    shipmentCreatedOn: at(order.rts_time),
+    pickedUpAt: at(order.collection_time),
+    deliveredOn: at(order.delivery_time),
+    cancelledOn: order.status === 'CANCELLED' ? at(order.update_time) : null,
+    codAmount: order.is_cod
+      ? toDecimal(order.payment?.total_amount)
+      : new Prisma.Decimal(0),
+    // Đếm theo `line_items` của TikTok (mỗi phần tử là 1 đơn vị hàng), KHÔNG theo dòng đã
+    // ghi được vào đơn: kiện hàng thật vẫn chứa cả món có SKU chưa khớp, đếm theo dòng khớp
+    // sẽ ra 0 ở những đơn toàn SKU lạ và làm vận đơn trông như rỗng hàng.
+    totalQuantity: order.line_items?.length ?? 0,
+  };
+}
+
+/**
+ * Trạng thái TikTok → `shipment_status` nội bộ. `AWAITING_SHIPMENT` và
+ * `AWAITING_COLLECTION` đều là "hãng chưa cầm hàng" nên cùng về `pending` ("Chờ lấy hàng").
+ */
+function mapShipmentStatus(status?: string): ShipmentStatus | null {
+  switch (status) {
+    case 'AWAITING_SHIPMENT':
+    case 'AWAITING_COLLECTION':
+      return ShipmentStatus.pending;
+    case 'IN_TRANSIT':
+      return ShipmentStatus.delivering;
+    case 'DELIVERED':
+    case 'COMPLETED':
+      return ShipmentStatus.delivered;
+    case 'CANCELLED':
+      return ShipmentStatus.cancelled;
+    default:
+      return null;
+  }
 }
 
 function toDecimal(v?: string | null): Prisma.Decimal {
