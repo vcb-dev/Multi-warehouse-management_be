@@ -895,19 +895,31 @@ export class FulfillmentService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
     }
     // Vòng đời vận đơn theo đúng Sapo: pending → picked_up → delivering →
-    // delivered, nhánh lỗi retry_delivery → returning → returned.
+    // delivered, nhánh lỗi retry_delivery → returning → returned. `cancelled` có thể đến từ
+    // webhook đối tác vận chuyển (VD VTP hủy đơn bên họ) ở bất kỳ trạng thái nào chưa đóng.
     const allowed: Partial<Record<ShipmentStatus, ShipmentStatus[]>> = {
-      [ShipmentStatus.pending]: [ShipmentStatus.picked_up],
-      [ShipmentStatus.picked_up]: [ShipmentStatus.delivering],
+      [ShipmentStatus.pending]: [
+        ShipmentStatus.picked_up,
+        ShipmentStatus.cancelled,
+      ],
+      [ShipmentStatus.picked_up]: [
+        ShipmentStatus.delivering,
+        ShipmentStatus.cancelled,
+      ],
       [ShipmentStatus.delivering]: [
         ShipmentStatus.delivered,
         ShipmentStatus.retry_delivery,
+        ShipmentStatus.cancelled,
       ],
       [ShipmentStatus.retry_delivery]: [
         ShipmentStatus.delivering,
         ShipmentStatus.returning,
+        ShipmentStatus.cancelled,
       ],
-      [ShipmentStatus.returning]: [ShipmentStatus.returned],
+      [ShipmentStatus.returning]: [
+        ShipmentStatus.returned,
+        ShipmentStatus.cancelled,
+      ],
     };
     if (!f.shipmentStatus || !allowed[f.shipmentStatus]?.includes(status)) {
       throw new BusinessException(
@@ -1008,6 +1020,83 @@ export class FulfillmentService {
           data: { shipmentStatus: status },
         });
         await this.logShipment(tx, f, 'fulfillment.returning', user);
+        return;
+      }
+
+      if (status === ShipmentStatus.cancelled) {
+        // Hủy do đối tác vận chuyển báo qua webhook (không phải staff bấm hủy trên UI —
+        // đường đó đi qua method `cancel()` riêng, đã gọi API hủy bên hãng trước).
+        if (f.shipmentStatus === ShipmentStatus.pending) {
+          // Chưa xuất kho — trả hàng từ khu đóng gói về giữ chỗ, giống logic `cancel()` thủ công.
+          if (f.packedOn) {
+            for (const item of sortForLocking(f.order.items)) {
+              await this.inventory.applyMovements(
+                [
+                  {
+                    variantId: item.variantId,
+                    locationId: f.order.locationId,
+                    bucket: InventoryBucket.packed,
+                    change: -item.quantity,
+                    type: MovementType.packing_cancel,
+                    referenceType: 'order',
+                    referenceId: f.orderId,
+                    createdById: user.userId,
+                  },
+                  {
+                    variantId: item.variantId,
+                    locationId: f.order.locationId,
+                    bucket: InventoryBucket.committed,
+                    change: item.quantity,
+                    type: MovementType.packing_cancel,
+                    referenceType: 'order',
+                    referenceId: f.orderId,
+                    createdById: user.userId,
+                  },
+                ],
+                tx,
+              );
+            }
+          }
+        } else {
+          // Đã xuất kho (qua picked_up) trước khi bị hủy — hoàn on_hand + committed như "returned"
+          for (const item of sortForLocking(f.order.items)) {
+            await this.inventory.applyMovements(
+              [
+                {
+                  variantId: item.variantId,
+                  locationId: f.order.locationId,
+                  bucket: InventoryBucket.on_hand,
+                  change: item.quantity,
+                  type: MovementType.return_in,
+                  referenceType: 'order',
+                  referenceId: f.orderId,
+                  createdById: user.userId,
+                },
+                {
+                  variantId: item.variantId,
+                  locationId: f.order.locationId,
+                  bucket: InventoryBucket.committed,
+                  change: item.quantity,
+                  type: MovementType.order_reserve,
+                  referenceType: 'order',
+                  referenceId: f.orderId,
+                  createdById: user.userId,
+                },
+              ],
+              tx,
+            );
+          }
+        }
+        await tx.fulfillment.update({
+          where: { id: f.id },
+          data: {
+            shipmentStatus: status,
+            cancelledOn: now,
+            closedAt: now,
+            cancelReason: 'Hủy bởi đối tác vận chuyển (webhook)',
+          },
+        });
+        await this.logShipment(tx, f, 'fulfillment.cancel', user);
         return;
       }
 

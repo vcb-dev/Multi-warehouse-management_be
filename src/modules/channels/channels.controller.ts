@@ -10,8 +10,10 @@ import {
 } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/roles.decorator';
 import { ChannelWebhookDto } from '../orders/order.dto';
+import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
+import { ChannelOverviewQueryDto } from './channel.dto';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 
 @ApiTags('channels')
@@ -22,6 +24,7 @@ export class ChannelsController {
     private sync: ChannelSyncService,
     private shopeeAuth: ShopeeAuthService,
     private tiktokAuth: TiktokAuthService,
+    private overview: ChannelOverviewService,
   ) {}
 
   @Post('webhook')
@@ -36,6 +39,20 @@ export class ChannelsController {
   @LocationOptional()
   syncConnected(@CurrentUser() user: AuthUser) {
     return this.sync.syncConnectedChannels(user);
+  }
+
+  /**
+   * Số liệu bán hàng theo kênh (doanh số, số đơn, đơn huỷ, trạng thái đơn) — nguồn cho
+   * màn Tổng quan kênh bán. Đọc từ `orders` nên dùng quyền xem đơn, không phải `order:create`.
+   */
+  @Get('overview')
+  @RequirePermission('order:view')
+  @LocationOptional()
+  getOverview(
+    @Query() query: ChannelOverviewQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.overview.getOverview(query, user);
   }
 
   /** Danh sách shop đã ủy quyền kết nối trực tiếp (TikTok Shop, Shopee...), để hiển thị lên UI. */

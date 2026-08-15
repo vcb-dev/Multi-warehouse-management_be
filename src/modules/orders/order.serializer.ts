@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { carrierDisplayName } from '../fulfillments/carrier-display';
 import { serializeFulfillment } from '../fulfillments/fulfillment.serializer';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import { OrderWithRelations } from './order.repository';
@@ -46,6 +47,9 @@ export function serializeOrderListItem(
       packedStatus: string | null;
       shipmentStatus: string | null;
       provider: { name: string } | null;
+      carrierName?: string | null;
+      trackingCompany?: string | null;
+      carrier?: string | null;
     }[];
   },
   stockReady = true,
@@ -82,7 +86,7 @@ export function serializeOrderListItem(
     shipping_method: o.shippingMethod,
     packed_status: openFulfillment?.packedStatus ?? null,
     shipment_status: openFulfillment?.shipmentStatus ?? null,
-    provider_name: openFulfillment?.provider?.name ?? null,
+    provider_name: openFulfillment ? carrierDisplayName(openFulfillment) : null,
     location_name: o.location.name,
     created_by_name: userDisplayName(o.createdBy) ?? o.createdBy.email,
     total_price: dec(o.totalPrice),
