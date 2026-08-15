@@ -11,6 +11,7 @@ import {
 import { Public } from '../../common/decorators/roles.decorator';
 import { ChannelWebhookDto } from '../orders/order.dto';
 import { ChannelSyncService } from './channel-sync.service';
+import { ShopeeAuthService } from './shopee/shopee-auth.service';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 
 @ApiTags('channels')
@@ -19,6 +20,7 @@ import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 export class ChannelsController {
   constructor(
     private sync: ChannelSyncService,
+    private shopeeAuth: ShopeeAuthService,
     private tiktokAuth: TiktokAuthService,
   ) {}
 
@@ -49,6 +51,42 @@ export class ChannelsController {
    * duyệt của seller) sau khi seller đồng ý ủy quyền, kèm `code`. `@Public` vì đây không phải
    * lời gọi API có JWT của hệ thống này.
    */
+  /** Link ủy quyền shop Shopee — mở trong trình duyệt (seller đăng nhập & đồng ý). */
+  @Get('shopee/authorize-url')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  getShopeeAuthorizeUrl() {
+    return { url: this.shopeeAuth.getAuthorizeUrl() };
+  }
+
+  /**
+   * Redirect URL khai báo trên Shopee Open Platform — Shopee gọi lại (GET) sau khi seller
+   * ủy quyền, kèm `code` và `shop_id`.
+   */
+  @Public()
+  @Get('shopee/callback')
+  async shopeeCallback(
+    @Query('code') code?: string,
+    @Query('shop_id') shopId?: string,
+    @Query('error') error?: string,
+  ) {
+    if (error || !code || !shopId) {
+      return {
+        ok: false,
+        message: 'Ủy quyền Shopee thất bại hoặc thiếu code/shop_id',
+      };
+    }
+    const conn = await this.shopeeAuth.handleAuthorizationCallback(
+      code,
+      shopId,
+    );
+    return {
+      ok: true,
+      shop_id: conn.shopId,
+      shop_name: conn.shopName,
+    };
+  }
+
   @Public()
   @Get('tiktok/callback')
   async tiktokCallback(
