@@ -25,8 +25,9 @@ import { ChannelWebhookDto } from '../orders/order.dto';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
-import { ChannelOverviewQueryDto, TiktokSyncDto } from './channel.dto';
+import { ChannelOverviewQueryDto } from './channel.dto';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
+import { TiktokSyncDto } from './tiktok/tiktok.dto';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
 import {
   TiktokWebhookService,
