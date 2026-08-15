@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Post,
   Query,
   Req,
@@ -44,15 +45,32 @@ export class ChannelsController {
   ) {}
 
   /**
+   * TikTok gọi thử URL trước khi cho lưu ở Partner Center, và một số lần thử dùng GET.
+   * Không có route GET thì Nest trả 404, Partner Center báo lại bằng đúng một chữ
+   * "internal error" (`code: 98001001`) chẳng nói gì về nguyên nhân. Route này chỉ để
+   * bước xác thực URL đi qua — không xử lý nghiệp vụ gì.
+   */
+  @Public()
+  @Get('tiktok/webhook')
+  @HttpCode(200)
+  tiktokWebhookProbe() {
+    return { ok: true };
+  }
+
+  /**
    * Nhận thông báo đẩy của TikTok Shop (khai URL này ở Partner Center, mục Webhooks).
    * `@Public` vì TikTok gọi tới, không mang JWT của hệ thống.
    *
    * Payload chỉ được dùng để lấy `order_id`; nội dung đơn luôn lấy lại từ API bằng token
    * của mình — xem `TiktokWebhookService`. Luôn trả 200 kể cả khi bỏ qua, vì TikTok coi
    * mã lỗi là "gửi hụt" và sẽ gửi lại nhiều lần.
+   *
+   * `@HttpCode(200)`: mặc định của Nest cho POST là 201, mà nhiều bộ kiểm tra webhook chỉ
+   * chấp nhận đúng 200 — không đáng mạo hiểm để 201 rồi ngồi đoán vì sao TikTok từ chối.
    */
   @Public()
   @Post('tiktok/webhook')
+  @HttpCode(200)
   async tiktokWebhookNotify(
     @Req() req: RawBodyRequest<Request>,
     @Body() payload: TiktokWebhookPayload,
