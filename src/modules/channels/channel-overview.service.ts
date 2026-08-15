@@ -45,19 +45,30 @@ export class ChannelOverviewService {
 
     const scope = scopeSql(from, toExclusive, locationIds, selected?.key);
 
-    const [byChannel, quantities, series, statuses, connections] =
-      await Promise.all([
-        this.aggregateByChannel(scope),
-        this.quantityByChannel(scope),
-        this.dailySeries(scope),
-        this.statusBreakdown(scope),
-        this.prisma.channelConnection.findMany({
-          orderBy: { createdAt: 'desc' },
-          include: { location: { select: { id: true, name: true } } },
-        }),
-      ]);
+    const [
+      byChannel,
+      quantities,
+      series,
+      statuses,
+      connections,
+      topProducts,
+      skuGaps,
+    ] = await Promise.all([
+      this.aggregateByChannel(scope),
+      this.quantityByChannel(scope),
+      this.dailySeries(scope),
+      this.statusBreakdown(scope),
+      this.prisma.channelConnection.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: { location: { select: { id: true, name: true } } },
+      }),
+      this.topProducts(scope),
+      this.skuGaps(selected?.key),
+    ]);
 
-    const qtyByChannel = new Map(quantities.map((q) => [q.channel, Number(q.quantity)]));
+    const qtyByChannel = new Map(
+      quantities.map((q) => [q.channel, Number(q.quantity)]),
+    );
     const shopsByChannel = new Map<string, typeof connections>();
     for (const conn of connections) {
       const list = shopsByChannel.get(conn.channel) ?? [];
@@ -97,7 +108,8 @@ export class ChannelOverviewService {
       })
       // Kênh không có đơn lẫn không kết nối được thì ẩn cho đỡ rác, trừ khi user chọn đích danh
       .filter(
-        (c) => selected || c.order_count > 0 || c.connectable || c.shops.length > 0,
+        (c) =>
+          selected || c.order_count > 0 || c.connectable || c.shops.length > 0,
       );
 
     const totals = channels.reduce(
@@ -131,12 +143,82 @@ export class ChannelOverviewService {
         label: STATUS_LABELS[s.status_key] ?? s.status_key,
         count: Number(s.count),
       })),
+      top_products: topProducts.map((p) => ({
+        variant_id: p.variant_id.toString(),
+        sku: p.sku,
+        name: p.name,
+        variant_title: p.variant_title,
+        quantity: Number(p.quantity),
+        revenue: Number(p.revenue ?? 0),
+        order_count: Number(p.order_count),
+      })),
+      sku_gaps: skuGaps.map((g) => ({
+        sku: g.sku,
+        product_name: g.productName,
+        variant_name: g.variantName,
+        line_count: g.lineCount,
+        quantity: g.quantity,
+        amount: Number(g.amount),
+        last_seen_at: g.lastSeenAt,
+      })),
     };
+  }
+
+  /**
+   * Sản phẩm bán chạy của kênh. Gom theo `variant_id` chứ không theo `sku` để hai biến thể
+   * khác nhau không bị nhập một dòng; tên lấy từ `order_items` (tên tại thời điểm bán) nên
+   * đổi tên sản phẩm về sau không làm sai lệch báo cáo kỳ cũ.
+   */
+  private topProducts(scope: Prisma.Sql) {
+    return this.prisma.$queryRaw<
+      {
+        variant_id: bigint;
+        sku: string;
+        name: string;
+        variant_title: string | null;
+        quantity: bigint;
+        revenue: Prisma.Decimal | null;
+        order_count: bigint;
+      }[]
+    >`
+      SELECT oi."variant_id"                                      AS variant_id,
+             MIN(oi."sku")                                        AS sku,
+             MIN(oi."name")                                       AS name,
+             MIN(oi."variant_title")                              AS variant_title,
+             SUM(COALESCE(oi."current_quantity", oi."quantity"))  AS quantity,
+             SUM(oi."discounted_total")                           AS revenue,
+             COUNT(DISTINCT o."id")                               AS order_count
+      FROM "orders" o
+      JOIN "order_items" oi ON oi."order_id" = o."id"
+      WHERE ${scope} AND o."status" <> 'cancelled'
+      GROUP BY oi."variant_id"
+      ORDER BY quantity DESC
+      LIMIT 20
+    `;
+  }
+
+  /**
+   * SKU của kênh chưa khớp sản phẩm trong hệ thống — dòng hàng tương ứng đã bị bỏ khi đồng
+   * bộ nên không xuất hiện ở `top_products`. Hiển thị để người dùng biết đang hụt phần nào.
+   */
+  private skuGaps(channel?: ChannelKey) {
+    if (channel !== 'tiktok' && channel !== 'shopee')
+      return Promise.resolve([]);
+    return this.prisma.channelSkuGap.findMany({
+      where: { channel },
+      orderBy: { quantity: 'desc' },
+      take: 50,
+    });
   }
 
   private aggregateByChannel(scope: Prisma.Sql) {
     return this.prisma.$queryRaw<
-      { channel: ChannelKey; order_count: bigint; cancelled_count: bigint; revenue: Prisma.Decimal | null }[]
+      {
+        channel: ChannelKey;
+        order_count: bigint;
+        cancelled_count: bigint;
+        revenue: Prisma.Decimal | null;
+      }[]
     >`
       SELECT ${CHANNEL_EXPR} AS channel,
              COUNT(*)                                                          AS order_count,
@@ -150,7 +232,9 @@ export class ChannelOverviewService {
 
   /** Số sản phẩm bán ra — phải xuống dòng hàng nên tách khỏi query đếm đơn. */
   private quantityByChannel(scope: Prisma.Sql) {
-    return this.prisma.$queryRaw<{ channel: ChannelKey; quantity: bigint | null }[]>`
+    return this.prisma.$queryRaw<
+      { channel: ChannelKey; quantity: bigint | null }[]
+    >`
       SELECT ${CHANNEL_EXPR} AS channel,
              SUM(COALESCE(oi."current_quantity", oi."quantity")) AS quantity
       FROM "orders" o

@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Post,
+  Query,
+  Req,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -13,8 +25,13 @@ import { ChannelWebhookDto } from '../orders/order.dto';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
-import { ChannelOverviewQueryDto } from './channel.dto';
+import { ChannelOverviewQueryDto, TiktokSyncDto } from './channel.dto';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
+import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
+import {
+  TiktokWebhookService,
+  type TiktokWebhookPayload,
+} from './tiktok/tiktok-webhook.service';
 
 @ApiTags('channels')
 @ApiBearerAuth()
@@ -24,8 +41,66 @@ export class ChannelsController {
     private sync: ChannelSyncService,
     private shopeeAuth: ShopeeAuthService,
     private tiktokAuth: TiktokAuthService,
+    private tiktokOrders: TiktokOrderSyncService,
+    private tiktokWebhook: TiktokWebhookService,
     private overview: ChannelOverviewService,
   ) {}
+
+  /**
+   * TikTok gọi thử URL trước khi cho lưu ở Partner Center, và một số lần thử dùng GET.
+   * Không có route GET thì Nest trả 404, Partner Center báo lại bằng đúng một chữ
+   * "internal error" (`code: 98001001`) chẳng nói gì về nguyên nhân. Route này chỉ để
+   * bước xác thực URL đi qua — không xử lý nghiệp vụ gì.
+   */
+  @Public()
+  @Get('tiktok/webhook')
+  @HttpCode(200)
+  tiktokWebhookProbe() {
+    return { ok: true };
+  }
+
+  /**
+   * Nhận thông báo đẩy của TikTok Shop (khai URL này ở Partner Center, mục Webhooks).
+   * `@Public` vì TikTok gọi tới, không mang JWT của hệ thống.
+   *
+   * Payload chỉ được dùng để lấy `order_id`; nội dung đơn luôn lấy lại từ API bằng token
+   * của mình — xem `TiktokWebhookService`. Luôn trả 200 kể cả khi bỏ qua, vì TikTok coi
+   * mã lỗi là "gửi hụt" và sẽ gửi lại nhiều lần.
+   *
+   * `@HttpCode(200)`: mặc định của Nest cho POST là 201, mà nhiều bộ kiểm tra webhook chỉ
+   * chấp nhận đúng 200 — không đáng mạo hiểm để 201 rồi ngồi đoán vì sao TikTok từ chối.
+   */
+  @Public()
+  @Post('tiktok/webhook')
+  @HttpCode(200)
+  async tiktokWebhookNotify(
+    @Req() req: RawBodyRequest<Request>,
+    @Body() payload: TiktokWebhookPayload,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const raw = req.rawBody?.toString('utf8') ?? '';
+    const valid = this.tiktokWebhook.verifySignature(raw, authorization);
+    if (!valid && this.tiktokWebhook.isStrict()) {
+      throw new UnauthorizedException('Chữ ký webhook TikTok không hợp lệ');
+    }
+    return this.tiktokWebhook.handleNotification(payload, valid);
+  }
+
+  /**
+   * Kéo đơn thẳng từ TikTok Shop Open API vào `orders` (không qua Sapo). Chạy đồng bộ nên
+   * khoảng thời gian mặc định để ngắn (7 ngày); muốn lấy bù cả tháng thì truyền `from`/`to`.
+   */
+  @Post('tiktok/sync')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  syncTiktok(@Body() dto: TiktokSyncDto, @CurrentUser() user: AuthUser) {
+    return this.tiktokOrders.syncOrders({
+      from: dto.from,
+      to: dto.to,
+      filterBy: dto.filter_by,
+      createdById: user.userId,
+    });
+  }
 
   @Post('webhook')
   @RequirePermission('order:create')
@@ -63,11 +138,6 @@ export class ChannelsController {
     return this.sync.listConnections();
   }
 
-  /**
-   * Redirect URL khai báo trên TikTok Shop Partner Center — TikTok gọi lại đây (GET, từ trình
-   * duyệt của seller) sau khi seller đồng ý ủy quyền, kèm `code`. `@Public` vì đây không phải
-   * lời gọi API có JWT của hệ thống này.
-   */
   /** Link ủy quyền shop Shopee — mở trong trình duyệt (seller đăng nhập & đồng ý). */
   @Get('shopee/authorize-url')
   @RequirePermission('order:create')
@@ -104,6 +174,11 @@ export class ChannelsController {
     };
   }
 
+  /**
+   * Redirect URL khai báo trên TikTok Shop Partner Center — TikTok gọi lại đây (GET, từ trình
+   * duyệt của seller) sau khi seller đồng ý ủy quyền, kèm `code`. `@Public` vì đây không phải
+   * lời gọi API có JWT của hệ thống này.
+   */
   @Public()
   @Get('tiktok/callback')
   async tiktokCallback(

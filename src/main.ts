@@ -7,7 +7,11 @@ import * as compression from 'compression';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // `rawBody` cần cho webhook TikTok Shop: chữ ký ký trên đúng chuỗi JSON gốc, nên
+  // `JSON.stringify(req.body)` không dùng thay được (khác thứ tự key/khoảng trắng).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   app.use(compression());
 
@@ -16,12 +20,11 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin:
-      process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:3002',
-      ],
+    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+    ],
     credentials: true,
   });
   app.useGlobalPipes(
