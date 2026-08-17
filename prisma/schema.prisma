@@ -1560,6 +1560,11 @@ model Fulfillment {
   items          FulfillmentLineItem[]
   carrierTickets CarrierTicket[]
 
+  // CẢNH BÁO: DB còn một partial unique index mà Prisma KHÔNG mô tả được nên không có ở
+  // đây — `fulfillments_one_open_per_order` trên (order_id) WHERE closed_at IS NULL: mỗi
+  // đơn chỉ được có MỘT vận đơn đang mở. Vì Prisma không thấy nó, `tsc` cũng không thấy;
+  // code tạo vận đơn phải tự kiểm tra vận đơn đang mở của đơn trước khi `create`, nếu không
+  // sẽ vỡ ở tầng DB lúc chạy thật (đã gặp khi đồng bộ TikTok 2026-08-15).
   @@index([orderId])
   @@index([shipmentStatus])
   @@map("fulfillments")
