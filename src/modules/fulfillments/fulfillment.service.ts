@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   InventoryBucket,
   MovementType,
+  NotificationTopic,
   OrderFulfillmentStatus,
   OrderStatus,
   PackingStatus,
@@ -20,6 +21,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CarrierConnectionConfig,
@@ -68,7 +70,41 @@ export class FulfillmentService {
     private prisma: PrismaService,
     private inventory: InventoryService,
     private providers: ShippingProviderService,
+    private notifications: NotificationService,
   ) {}
+
+  /**
+   * Thông báo cho một vận đơn. Gọi SAU khi tx commit, KHÔNG await (emit tự nuốt lỗi).
+   * `tracking_code` trong payload là thứ frontend dùng để lọc danh sách vận đơn khi
+   * người dùng bấm vào thông báo — xem `resolveLink` ở notification.serializer.ts.
+   */
+  private notifyFulfillment(
+    topic: NotificationTopic,
+    f: {
+      id: bigint;
+      name: string;
+      locationId: bigint | null;
+      orderId: bigint;
+      trackingNumber?: string | null;
+      carrierName?: string | null;
+    },
+    orderName: string,
+    title: string,
+  ) {
+    void this.notifications.emit(topic, {
+      subjectType: 'fulfillment',
+      subjectId: f.id,
+      locationId: f.locationId,
+      title,
+      payload: {
+        code: f.name,
+        order_id: f.orderId.toString(),
+        order_code: orderName,
+        tracking_code: f.trackingNumber ?? f.name,
+        carrier_name: f.carrierName ?? null,
+      },
+    });
+  }
 
   private async loadOrder(
     orderId: bigint,
@@ -610,6 +646,14 @@ export class FulfillmentService {
       });
       return record;
     });
+
+    this.notifyFulfillment(
+      NotificationTopic.fulfillments_create,
+      created,
+      order.name,
+      `Vận đơn ${created.name} đã đẩy sang ${provider.name} (đơn ${order.name})`,
+    );
+
     return this.serializeById(created.id);
   }
 
@@ -1138,6 +1182,28 @@ export class FulfillmentService {
       });
       await this.logShipment(tx, f, 'fulfillment.returned', user);
     });
+
+    // Đặt ở `applyShipmentStatus` (private) chứ không ở `updateShipmentStatus`: webhook
+    // của hãng vận chuyển (webhookGhn/webhookVtp/webhook) cũng đổ về đây, nên gắn một
+    // chỗ là phủ được cả trạng thái do hãng tự báo về, không phải rải ra 3 nơi.
+    //
+    // Chỉ báo 3 mốc đáng quan tâm. picked_up/delivering là diễn biến bình thường của
+    // mọi đơn — báo hết thì chuông thành log vận chuyển, không ai đọc nữa.
+    const NOTABLE: Partial<Record<ShipmentStatus, string>> = {
+      [ShipmentStatus.delivered]: 'giao thành công',
+      [ShipmentStatus.returned]: 'đã chuyển hoàn về kho',
+      [ShipmentStatus.cancelled]: 'bị hủy',
+    };
+    const label = NOTABLE[status];
+    if (label) {
+      this.notifyFulfillment(
+        NotificationTopic.fulfillments_update,
+        f,
+        f.order.name,
+        `Vận đơn ${f.name} ${label} (đơn ${f.order.name})`,
+      );
+    }
+
     return this.serializeById(f.id);
   }
 
@@ -1236,6 +1302,17 @@ export class FulfillmentService {
         },
       });
     });
+
+    // `cancel()` chạy transaction riêng, KHÔNG đi qua `applyShipmentStatus` — nên trước
+    // đây hủy vận đơn bằng tay thì im lặng, còn hãng hủy qua webhook lại có thông báo.
+    // Cùng một kết cục với người dùng, phải báo như nhau.
+    this.notifyFulfillment(
+      NotificationTopic.fulfillments_update,
+      f,
+      f.order.name,
+      `Vận đơn ${f.name} bị hủy (đơn ${f.order.name})`,
+    );
+
     return this.serializeById(id);
   }
 

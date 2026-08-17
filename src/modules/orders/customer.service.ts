@@ -3,8 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { NotificationTopic, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { userDisplayName } from '../../common/utils/user-display-name';
+import { NotificationService } from '../notifications/notification.service';
 import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
 import { findRepeatCustomerIds } from '../../common/search/repeat-customer-search';
 import { BusinessException } from '../../common/exceptions/business.exception';
@@ -57,6 +59,7 @@ export class CustomerService {
   constructor(
     private prisma: PrismaService,
     private groups: CustomerGroupService,
+    private notifications: NotificationService,
   ) {}
 
   private addressData(a: CustomerAddressDto) {
@@ -352,6 +355,17 @@ export class CustomerService {
     await this.syncGroupCounts(
       (dto.customer_group_ids ?? []).map((gid) => BigInt(gid)),
     );
+
+    // Khách hàng không thuộc kho nào ⇒ locationId null: gửi cho mọi người có
+    // `customer:view` ở bất kỳ kho nào.
+    const name = userDisplayName(created) ?? created.phone ?? 'không tên';
+    void this.notifications.emit(NotificationTopic.customers_create, {
+      subjectType: 'customer',
+      subjectId: created.id,
+      locationId: null,
+      title: `Khách hàng mới: ${name}`,
+      payload: { name, phone: created.phone },
+    });
 
     return this.findOne(created.id);
   }

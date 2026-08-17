@@ -18,11 +18,13 @@ import {
   PrismaClient,
   InventoryBucket,
   MovementType,
+  NotificationTopic,
   Prisma,
 } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { sortForLocking } from '../src/modules/inventory/inventory.types';
+import { NotificationService } from '../src/modules/notifications/notification.service';
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
@@ -33,6 +35,18 @@ const AUTH = Buffer.from(
 
 /** Mirror của MOVEMENT_TX_OPTIONS trong inventory.service.ts (không export). */
 const MOVEMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
+
+/**
+ * Cùng biến môi trường với tiktok-order-sync.service.ts — một ngưỡng dùng chung cho
+ * mọi đường sync/backfill đơn. Đơn đặt cách đây quá số giờ này thì tạo vẫn tạo bình
+ * thường, chỉ KHÔNG kèm thông báo — script này chạy tay để vớt đơn Sapo phát sinh sau
+ * lần sync cuối, nhưng `--from=` cho phép chỉ định mốc rất xa trong quá khứ (backfill
+ * hàng nghìn đơn cũ một lượt); không chặn thì mỗi nhân viên nhận hàng nghìn thông báo
+ * về đơn từ nhiều tháng trước.
+ */
+const SYNC_NOTIFY_MAX_AGE_HOURS = Number(
+  process.env.SYNC_NOTIFY_MAX_AGE_HOURS ?? 24,
+);
 
 async function api(path: string, tries = 5): Promise<any> {
   for (let i = 1; i <= tries; i++) {
@@ -83,6 +97,7 @@ async function main() {
     logger: ['error', 'warn'],
   });
   const inventory = app.get(InventoryService);
+  const notifications = app.get(NotificationService);
 
   const [locations, variants, customers, fallbackUser, defaultLoc] = await Promise.all([
     prisma.location.findMany({ where: { sapoId: { not: null } }, select: { id: true, sapoId: true } }),
@@ -242,7 +257,7 @@ async function main() {
         continue;
       }
       try {
-        await db(() =>
+        const record = await db(() =>
           prisma.$transaction(async (tx) => {
             const record = await tx.order.create({ data });
             if (shouldReserve(status, fulfillmentStatus)) {
@@ -282,6 +297,26 @@ async function main() {
         if (shouldReserve(status, fulfillmentStatus)) reserved += 1;
         usedNames.add(name);
         existing.add(String(o.id));
+
+        // Gọi NGOÀI transaction — không giữ lock đơn hàng, và tx rollback (bắt ở
+        // catch dưới) sẽ không để lại thông báo ma. Chỉ báo đơn đặt gần đây, không
+        // báo khi --from= chỉ định mốc xa (backfill hàng loạt đơn cũ).
+        const placedAt: Date = data.createdOn;
+        const ageHours = (Date.now() - placedAt.getTime()) / 3_600_000;
+        if (ageHours <= SYNC_NOTIFY_MAX_AGE_HOURS) {
+          void notifications.emit(NotificationTopic.orders_create, {
+            subjectType: 'order',
+            subjectId: record.id,
+            locationId,
+            title: `Đơn hàng mới ${name}`,
+            payload: {
+              code: name,
+              total_price: Number(data.totalPrice),
+              source_name: data.sourceName,
+            },
+          });
+        }
+
         if (created % 100 === 0) console.log(`  ...${created} đơn, ${lines} dòng`);
       } catch (e: any) {
         failed += 1;
