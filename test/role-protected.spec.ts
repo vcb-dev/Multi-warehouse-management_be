@@ -25,14 +25,22 @@ describe('RoleService protected permissions', () => {
   it('PROTECTED_PERMISSION khi gán role:manage', async () => {
     const { svc } = serviceWithNoExistingRole();
     await expect(
-      svc.create({ name: 'X', code: 'x_role', permission_keys: ['role:manage'] }),
+      svc.create({
+        name: 'X',
+        code: 'x_role',
+        permission_keys: ['role:manage'],
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('PROTECTED_PERMISSION khi gán staff:manage', async () => {
     const { svc } = serviceWithNoExistingRole();
     await expect(
-      svc.create({ name: 'X', code: 'x_role2', permission_keys: ['staff:manage'] }),
+      svc.create({
+        name: 'X',
+        code: 'x_role2',
+        permission_keys: ['staff:manage'],
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

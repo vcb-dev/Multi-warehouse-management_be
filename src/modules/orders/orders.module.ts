@@ -20,7 +20,11 @@ import { OrderReconcileService } from './reconcile.service';
     ActivityLogModule,
     NotificationsModule,
   ],
-  controllers: [OrdersController, CustomersController, CustomerGroupsController],
+  controllers: [
+    OrdersController,
+    CustomersController,
+    CustomerGroupsController,
+  ],
   providers: [
     CustomerService,
     CustomerGroupService,

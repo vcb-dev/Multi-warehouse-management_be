@@ -39,7 +39,12 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
   let productId: bigint;
   let providerId: bigint;
   let userId: bigint;
-  let authUser: { userId: bigint; email: string; roles: string[]; locationIds: bigint[] };
+  let authUser: {
+    userId: bigint;
+    email: string;
+    roles: string[];
+    locationIds: bigint[];
+  };
 
   async function level() {
     return prisma.inventoryLevel.findUniqueOrThrow({
@@ -85,11 +90,20 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     variantId = variant.id;
     // Tồn thực tế chỉ có 2, sẽ đặt 5 (vượt 3)
     await prisma.inventoryLevel.create({
-      data: { variantId, locationId, onHand: 2, available: 2, price: 1000, cost: 500 },
+      data: {
+        variantId,
+        locationId,
+        onHand: 2,
+        available: 2,
+        price: 1000,
+        cost: 500,
+      },
     });
     if (otherWarehouseId !== locationId) {
       await prisma.inventoryLevel.upsert({
-        where: { variantId_locationId: { variantId, locationId: otherWarehouseId } },
+        where: {
+          variantId_locationId: { variantId, locationId: otherWarehouseId },
+        },
         update: { onHand: 0, available: 0 },
         create: {
           variantId,
@@ -109,7 +123,13 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
         type: 'tich_hop',
         isConnected: true,
         servicesConfig: [
-          { code: 'standard', name: 'Chuẩn', eta: '2-3 ngày', base_fee: 20000, extra_fee_per_500g: 0 },
+          {
+            code: 'standard',
+            name: 'Chuẩn',
+            eta: '2-3 ngày',
+            base_fee: 20000,
+            extra_fee_per_500g: 0,
+          },
         ],
       },
     });
@@ -118,9 +138,14 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
 
   afterAll(async () => {
     const orderIds = (
-      await prisma.orderItem.findMany({ where: { variantId }, select: { orderId: true } })
+      await prisma.orderItem.findMany({
+        where: { variantId },
+        select: { orderId: true },
+      })
     ).map((i) => i.orderId);
-    await prisma.fulfillment.deleteMany({ where: { orderId: { in: orderIds } } });
+    await prisma.fulfillment.deleteMany({
+      where: { orderId: { in: orderIds } },
+    });
     await prisma.activityLog.deleteMany({
       where: { entityType: { in: ['order', 'stock_transfer'] } },
     });
@@ -161,7 +186,11 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
     expect(lv.available).toBe(2 - 5); // -3, không bị chặn
 
     const orderId = BigInt(created.id);
-    await orders.transition(orderId, { action: 'processing' }, authUser as never);
+    await orders.transition(
+      orderId,
+      { action: 'processing' },
+      authUser as never,
+    );
 
     // 2. stock_ready phải là false + liệt kê đúng SKU thiếu, ở cả chi tiết lẫn danh sách
     const detailBefore = await orders.findOne(orderId, authUser as never);
@@ -173,7 +202,9 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
       { page: 1, page_size: 50 } as never,
       authUser as never,
     );
-    expect(listBefore.data.find((o) => o.id === created.id)?.stock_ready).toBe(false);
+    expect(listBefore.data.find((o) => o.id === created.id)?.stock_ready).toBe(
+      false,
+    );
 
     // 2b. Tab "Thiếu hàng"/"Đủ hàng" phải lọc đúng đơn này
     const thieuHang = await orders.list(
@@ -189,7 +220,10 @@ describeIfDb('bán âm (backorder) — chặn chuyển sang lúc đẩy vận ch
 
     // 3. Yêu cầu đóng gói — phải bị CHẶN vì tồn thực tế (2) < số lượng cần (5)
     await expect(
-      fulfillments.createPackingRequest({ order_id: created.id }, authUser as never),
+      fulfillments.createPackingRequest(
+        { order_id: created.id },
+        authUser as never,
+      ),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
 
     // 4. Nhập thêm hàng (receipt) dù available đang âm — KHÔNG được bị chặn

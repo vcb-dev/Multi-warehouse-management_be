@@ -3,7 +3,11 @@
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/stock-transfer.e2e-spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { InventoryBucket, MovementType, StockTransferStatus } from '@prisma/client';
+import {
+  InventoryBucket,
+  MovementType,
+  StockTransferStatus,
+} from '@prisma/client';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { TransfersModule } from '../src/modules/transfers/transfers.module';
@@ -37,7 +41,10 @@ describeIfDb('US3 stock transfer (integration)', () => {
     inventoryService = module.get(InventoryService);
     prisma = module.get(PrismaService);
 
-    const warehouses = await prisma.location.findMany({ take: 2, orderBy: { id: 'asc' } });
+    const warehouses = await prisma.location.findMany({
+      take: 2,
+      orderBy: { id: 'asc' },
+    });
     const user = await prisma.user.findFirst();
     if (warehouses.length < 2 || !user) {
       throw new Error('Run prisma db seed before integration tests');
@@ -61,7 +68,9 @@ describeIfDb('US3 stock transfer (integration)', () => {
     variantId = product.variants[0].id;
 
     const levelBeforeSeed = await prisma.inventoryLevel.findUnique({
-      where: { variantId_locationId: { variantId, locationId: fromLocationId } },
+      where: {
+        variantId_locationId: { variantId, locationId: fromLocationId },
+      },
     });
     await inventoryService.applyMovement({
       variantId,
@@ -129,7 +138,9 @@ describeIfDb('US3 stock transfer (integration)', () => {
     expect(shipped.status).toBe(StockTransferStatus.dang_chuyen);
 
     const fromAfterCreate = await prisma.inventoryLevel.findUnique({
-      where: { variantId_locationId: { variantId, locationId: fromLocationId } },
+      where: {
+        variantId_locationId: { variantId, locationId: fromLocationId },
+      },
     });
     expect(fromAfterCreate?.onHand).toBe(15);
 
@@ -161,7 +172,9 @@ describeIfDb('US3 stock transfer (integration)', () => {
     });
 
     const fromBefore = await prisma.inventoryLevel.findUnique({
-      where: { variantId_locationId: { variantId, locationId: fromLocationId } },
+      where: {
+        variantId_locationId: { variantId, locationId: fromLocationId },
+      },
     });
     const toBefore = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId: toLocationId } },
@@ -188,7 +201,9 @@ describeIfDb('US3 stock transfer (integration)', () => {
     await transferService.cancel(BigInt(stn.id), authUser);
 
     const fromAfter = await prisma.inventoryLevel.findUnique({
-      where: { variantId_locationId: { variantId, locationId: fromLocationId } },
+      where: {
+        variantId_locationId: { variantId, locationId: fromLocationId },
+      },
     });
     const toAfter = await prisma.inventoryLevel.findUnique({
       where: { variantId_locationId: { variantId, locationId: toLocationId } },

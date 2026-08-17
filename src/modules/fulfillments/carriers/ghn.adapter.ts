@@ -314,7 +314,10 @@ export class GhnAdapter implements CarrierAdapter {
         REQUIRED_NOTE_MAP[input.deliveryRequirement ?? ''] ??
         DEFAULT_REQUIRED_NOTE,
       content:
-        input.items.map((i) => i.name).join(', ').slice(0, 200) || 'Hang hoa',
+        input.items
+          .map((i) => i.name)
+          .join(', ')
+          .slice(0, 200) || 'Hang hoa',
       ...(input.note ? { note: input.note } : {}),
       items: input.items.map((i) => ({
         name: i.name,
@@ -417,8 +420,7 @@ export class GhnAdapter implements CarrierAdapter {
     const wards = await this.client.getWards(districtId, {
       token: creds.token,
     });
-    const wardName =
-      wards.find((w) => w.WardCode === wardCode)?.WardName ?? '';
+    const wardName = wards.find((w) => w.WardCode === wardCode)?.WardName ?? '';
 
     const provinces = await this.client.getProvinces({ token: creds.token });
     const addrHint = shop.address ?? '';

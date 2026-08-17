@@ -76,11 +76,17 @@ export class TiktokClient {
       );
     }
 
-    const raw = (await res.json().catch(() => null)) as TiktokTokenEnvelope | null;
+    const raw = (await res
+      .json()
+      .catch(() => null)) as TiktokTokenEnvelope | null;
     if (!res.ok || !raw || raw.code !== 0 || !raw.data) {
       const msg = raw?.message ?? `TikTok trả về HTTP ${res.status}`;
       this.logger.warn(`TikTok token/${action} lỗi: ${msg}`);
-      throw new BusinessException('CHANNEL_AUTH_ERROR', `TikTok Shop: ${msg}`, 422);
+      throw new BusinessException(
+        'CHANNEL_AUTH_ERROR',
+        `TikTok Shop: ${msg}`,
+        422,
+      );
     }
     return raw.data;
   }

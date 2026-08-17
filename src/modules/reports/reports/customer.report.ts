@@ -54,7 +54,10 @@ function summarizeLabelRows(rows: ReportRow[]): ReportRow {
 }
 
 /** Gom nhóm xong chỉ còn vài chục dòng (số nhóm tuổi/vùng/...) nên phân trang trong bộ nhớ. */
-function paginateLabelRows(rows: ReportRow[], ctx: ReportContext): ReportResult {
+function paginateLabelRows(
+  rows: ReportRow[],
+  ctx: ReportContext,
+): ReportResult {
   const summary = summarizeLabelRows(rows);
   const paged = ctx.all
     ? rows
@@ -305,9 +308,13 @@ export const CUSTOMER_REPORTS: ReportDef[] = [
     id: 'customers-by-age',
     group: 'khach_hang',
     name: 'Customers by age',
-    description: 'Customer count, order count and revenue by age group (from date of birth).',
+    description:
+      'Customer count, order count and revenue by age group (from date of birth).',
     filters: [...FILTERS],
-    columns: [{ key: 'label', label: 'Age group', type: 'text' }, ...METRIC_COLUMNS],
+    columns: [
+      { key: 'label', label: 'Age group', type: 'text' },
+      ...METRIC_COLUMNS,
+    ],
     chart: { type: 'bar', x: 'label', y: ['customer_count'] },
     note: 'Customers without a date of birth are grouped under "Unknown". Age is calculated as of today, not the order date.',
     run: runByAge,
@@ -316,11 +323,15 @@ export const CUSTOMER_REPORTS: ReportDef[] = [
     id: 'customers-by-region',
     group: 'khach_hang',
     name: 'Customers by region',
-    description: 'Customer count, order count and revenue by shipping province/city.',
+    description:
+      'Customer count, order count and revenue by shipping province/city.',
     filters: [...FILTERS],
-    columns: [{ key: 'label', label: 'Province/City', type: 'text' }, ...METRIC_COLUMNS],
+    columns: [
+      { key: 'label', label: 'Province/City', type: 'text' },
+      ...METRIC_COLUMNS,
+    ],
     chart: { type: 'bar', x: 'label', y: ['total_spent'] },
-    note: 'Grouped by each order\'s shipping province, not the customer profile\'s default address — a customer may ship to different places across orders.',
+    note: "Grouped by each order's shipping province, not the customer profile's default address — a customer may ship to different places across orders.",
     run: runByRegion,
   },
   {
@@ -329,7 +340,10 @@ export const CUSTOMER_REPORTS: ReportDef[] = [
     name: 'Customers by gender',
     description: 'Customer count, order count and revenue by gender.',
     filters: [...FILTERS],
-    columns: [{ key: 'label', label: 'Gender', type: 'text' }, ...METRIC_COLUMNS],
+    columns: [
+      { key: 'label', label: 'Gender', type: 'text' },
+      ...METRIC_COLUMNS,
+    ],
     chart: { type: 'bar', x: 'label', y: ['customer_count'] },
     run: runByGender,
   },
@@ -339,7 +353,10 @@ export const CUSTOMER_REPORTS: ReportDef[] = [
     name: 'Customers by spending',
     description: 'Customer segments by total spend within the selected period.',
     filters: [...FILTERS],
-    columns: [{ key: 'label', label: 'Spending tier', type: 'text' }, ...METRIC_COLUMNS],
+    columns: [
+      { key: 'label', label: 'Spending tier', type: 'text' },
+      ...METRIC_COLUMNS,
+    ],
     chart: { type: 'bar', x: 'label', y: ['customer_count'] },
     note: 'Only counts orders linked to a customer profile (customer_id) — walk-in orders with no profile are excluded here, see "Repeat customers by phone" to cover that group.',
     run: runBySpending,
@@ -348,9 +365,13 @@ export const CUSTOMER_REPORTS: ReportDef[] = [
     id: 'customers-by-product-type',
     group: 'khach_hang',
     name: 'Customers by product type',
-    description: 'Customer count, order count and revenue by product type purchased.',
+    description:
+      'Customer count, order count and revenue by product type purchased.',
     filters: [...FILTERS],
-    columns: [{ key: 'label', label: 'Product type', type: 'text' }, ...METRIC_COLUMNS],
+    columns: [
+      { key: 'label', label: 'Product type', type: 'text' },
+      ...METRIC_COLUMNS,
+    ],
     chart: { type: 'bar', x: 'label', y: ['total_spent'] },
     note: 'A customer who buys multiple product types is counted under each type, so the total customer count across rows can exceed the actual number of distinct customers.',
     run: runByProductType,

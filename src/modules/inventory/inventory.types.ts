@@ -1,8 +1,4 @@
-import {
-  InventoryBucket,
-  MovementType,
-  Prisma,
-} from '@prisma/client';
+import { InventoryBucket, MovementType, Prisma } from '@prisma/client';
 
 export type ApplyMovementInput = {
   variantId: bigint;
@@ -92,7 +88,10 @@ export function setBucketValue(
   }
 }
 
-export function getBucketValue(level: LevelState, bucket: InventoryBucket): number {
+export function getBucketValue(
+  level: LevelState,
+  bucket: InventoryBucket,
+): number {
   switch (bucket) {
     case InventoryBucket.on_hand:
       return level.onHand;

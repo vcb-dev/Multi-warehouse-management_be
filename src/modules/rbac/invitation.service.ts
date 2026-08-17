@@ -41,7 +41,9 @@ export class InvitationService {
   }
 
   async invite(dto: InviteUserDto) {
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
     if (existing) throw new ConflictException('EMAIL_EXISTS');
 
     const user = await this.prisma.user.create({
@@ -70,7 +72,9 @@ export class InvitationService {
   }
 
   async resend(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: BigInt(userId) } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: BigInt(userId) },
+    });
     if (!user) throw new NotFoundException('USER_NOT_FOUND');
     if (user.status === 'active') throw new ConflictException('ALREADY_ACTIVE');
     const token = await this.issueToken(user.id);

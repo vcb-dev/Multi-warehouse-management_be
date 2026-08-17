@@ -31,7 +31,10 @@ describeIfDb('invitation flow (integration)', () => {
       imports: [
         PrismaModule,
         RbacModule,
-        JwtModule.register({ secret: 'test-secret', signOptions: { expiresIn: '1h' } }),
+        JwtModule.register({
+          secret: 'test-secret',
+          signOptions: { expiresIn: '1h' },
+        }),
       ],
       providers: [AuthService],
     }).compile();
@@ -42,8 +45,12 @@ describeIfDb('invitation flow (integration)', () => {
 
   afterAll(async () => {
     if (userId) {
-      await prisma.userInvitation.deleteMany({ where: { userId: BigInt(userId) } });
-      await prisma.userLocationRole.deleteMany({ where: { userId: BigInt(userId) } });
+      await prisma.userInvitation.deleteMany({
+        where: { userId: BigInt(userId) },
+      });
+      await prisma.userLocationRole.deleteMany({
+        where: { userId: BigInt(userId) },
+      });
       await prisma.user.deleteMany({ where: { id: BigInt(userId) } });
     }
     await prisma.$disconnect();
@@ -74,7 +81,9 @@ describeIfDb('invitation flow (integration)', () => {
     expect(res.invite_link).toBeDefined();
     const match = res.invite_link!.match(/token=([a-f0-9]+)/);
     token = match![1];
-    await expect(invitations.checkToken(oldToken)).rejects.toBeInstanceOf(GoneException);
+    await expect(invitations.checkToken(oldToken)).rejects.toBeInstanceOf(
+      GoneException,
+    );
   });
 
   it('accept → kích hoạt và cho phép login', async () => {

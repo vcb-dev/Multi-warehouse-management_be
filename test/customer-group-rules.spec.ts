@@ -30,7 +30,11 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
     const where = await build(
       [
         { column: 'orders_count', relation: 'greater_than', condition: '2' },
-        { column: 'total_spent', relation: 'greater_than', condition: '1000000' },
+        {
+          column: 'total_spent',
+          relation: 'greater_than',
+          condition: '1000000',
+        },
       ],
       true,
     );
@@ -41,7 +45,9 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
 
   it('so sánh số: greater_than / less_than / equals', async () => {
     await expect(
-      build([{ column: 'total_spent', relation: 'less_than', condition: '500' }]),
+      build([
+        { column: 'total_spent', relation: 'less_than', condition: '500' },
+      ]),
     ).resolves.toEqual({ AND: [{ totalSpent: { lt: 500 } }] });
 
     await expect(
@@ -52,13 +58,21 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
   it('hỗ trợ *_or_equal — dạng Sapo dùng trong rule nhóm tự động', async () => {
     await expect(
       build([
-        { column: 'orders_count', relation: 'greater_than_or_equal', condition: '2' },
+        {
+          column: 'orders_count',
+          relation: 'greater_than_or_equal',
+          condition: '2',
+        },
       ]),
     ).resolves.toEqual({ AND: [{ ordersCount: { gte: 2 } }] });
 
     await expect(
       build([
-        { column: 'total_spent', relation: 'less_than_or_equal', condition: '2000000' },
+        {
+          column: 'total_spent',
+          relation: 'less_than_or_equal',
+          condition: '2000000',
+        },
       ]),
     ).resolves.toEqual({ AND: [{ totalSpent: { lte: 2000000 } }] });
   });
@@ -67,7 +81,11 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
     // Sapo mã hoá tỉnh bằng số: {"province":"1"} = Hà Nội, khớp province_code
     await expect(
       build([
-        { column: 'address', relation: 'equals', condition: '{"province":"1"}' },
+        {
+          column: 'address',
+          relation: 'equals',
+          condition: '{"province":"1"}',
+        },
       ]),
     ).resolves.toEqual({
       AND: [{ addresses: { some: { provinceCode: '1' } } }],
@@ -94,7 +112,11 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
 
     await expect(
       build([
-        { column: 'address', relation: 'equals', condition: '{"country":"VN"}' },
+        {
+          column: 'address',
+          relation: 'equals',
+          condition: '{"country":"VN"}',
+        },
       ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -103,13 +125,29 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
     // Sao chép nguyên văn từ GET /admin/customer_groups.json
     const real = [
       [{ column: 'accepts_marketing', relation: 'equals', condition: 'true' }],
-      [{ column: 'address', relation: 'equals', condition: '{"province":"1"}' }],
+      [
+        {
+          column: 'address',
+          relation: 'equals',
+          condition: '{"province":"1"}',
+        },
+      ],
       [{ column: 'total_spent', relation: 'less_than', condition: '2000000' }],
       [
-        { column: 'orders_count', relation: 'greater_than_or_equal', condition: '2000000' },
+        {
+          column: 'orders_count',
+          relation: 'greater_than_or_equal',
+          condition: '2000000',
+        },
         { column: 'orders_count', relation: 'less_than', condition: '5000000' },
       ],
-      [{ column: 'orders_count', relation: 'greater_than_or_equal', condition: '2' }],
+      [
+        {
+          column: 'orders_count',
+          relation: 'greater_than_or_equal',
+          condition: '2',
+        },
+      ],
     ];
     for (const rules of real) {
       await expect(build(rules)).resolves.toBeDefined();
@@ -125,7 +163,9 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
 
     // Khách chưa có email cũng phải tính là "không chứa gmail"
     await expect(
-      build([{ column: 'email', relation: 'not_contains', condition: 'gmail' }]),
+      build([
+        { column: 'email', relation: 'not_contains', condition: 'gmail' },
+      ]),
     ).resolves.toEqual({
       AND: [
         {
@@ -188,17 +228,23 @@ describe('customer-group-rules — dịch điều kiện sang Prisma where', () 
 
     // state không nullable — không cần nhánh NULL
     await expect(
-      build([{ column: 'state', relation: 'not_equals', condition: 'enabled' }]),
+      build([
+        { column: 'state', relation: 'not_equals', condition: 'enabled' },
+      ]),
     ).resolves.toEqual({ AND: [{ NOT: { state: 'enabled' } }] });
   });
 
   it('accepts_marketing nhận chuỗi "true"/"false"', async () => {
     await expect(
-      build([{ column: 'accepts_marketing', relation: 'equals', condition: 'true' }]),
+      build([
+        { column: 'accepts_marketing', relation: 'equals', condition: 'true' },
+      ]),
     ).resolves.toEqual({ AND: [{ acceptsMarketing: true }] });
 
     await expect(
-      build([{ column: 'accepts_marketing', relation: 'equals', condition: 'false' }]),
+      build([
+        { column: 'accepts_marketing', relation: 'equals', condition: 'false' },
+      ]),
     ).resolves.toEqual({ AND: [{ acceptsMarketing: false }] });
   });
 
@@ -222,7 +268,9 @@ describe('customer-group-rules — chặn điều kiện sai', () => {
 
   it('cột không tồn tại', async () => {
     await expect(
-      build([{ column: 'khong_co_cot_nay', relation: 'equals', condition: 'x' }]),
+      build([
+        { column: 'khong_co_cot_nay', relation: 'equals', condition: 'x' },
+      ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -247,13 +295,21 @@ describe('customer-group-rules — chặn điều kiện sai', () => {
 
   it('tháng sinh nhật ngoài 1–12', async () => {
     await expect(
-      build([{ column: 'birthday_month', relation: 'equals', condition: '13' }]),
+      build([
+        { column: 'birthday_month', relation: 'equals', condition: '13' },
+      ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('ngày tạo không parse được', async () => {
     await expect(
-      build([{ column: 'created_on', relation: 'greater_than', condition: 'hôm qua' }]),
+      build([
+        {
+          column: 'created_on',
+          relation: 'greater_than',
+          condition: 'hôm qua',
+        },
+      ]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
@@ -288,8 +344,12 @@ describe('customer-group-rules — parseRules & catalog', () => {
     }
 
     const phone = catalog.find((c) => c.value === 'phone');
-    expect(phone?.relations.find((r) => r.value === 'is_set')?.needs_value).toBe(false);
-    expect(phone?.relations.find((r) => r.value === 'contains')?.needs_value).toBe(true);
+    expect(
+      phone?.relations.find((r) => r.value === 'is_set')?.needs_value,
+    ).toBe(false);
+    expect(
+      phone?.relations.find((r) => r.value === 'contains')?.needs_value,
+    ).toBe(true);
 
     // Cột kiểu select phải kèm danh sách lựa chọn để builder dựng dropdown
     const gender = catalog.find((c) => c.value === 'gender');
@@ -313,7 +373,11 @@ describe('customer-group-rules — parseRules & catalog', () => {
           ? (sampleValue[col.value] ?? col.choices?.[0]?.value ?? '1')
           : undefined;
         await expect(
-          build([{ column: col.value, relation: rel.value, condition }], false, prisma),
+          build(
+            [{ column: col.value, relation: rel.value, condition }],
+            false,
+            prisma,
+          ),
         ).resolves.toBeDefined();
       }
     }

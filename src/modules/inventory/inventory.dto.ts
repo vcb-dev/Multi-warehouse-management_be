@@ -96,4 +96,3 @@ export class ListMovementsQueryDto {
   @Min(1)
   page_size?: number = 20;
 }
-

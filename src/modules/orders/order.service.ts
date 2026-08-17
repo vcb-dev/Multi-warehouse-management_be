@@ -662,10 +662,9 @@ export class OrderService {
     }
 
     try {
-      const order = await this.repo.client.$transaction(
-        async (tx) => {
-          const name =
-            dto.name?.trim() || (await generateOrderCode(tx, locationId));
+      const order = await this.repo.client.$transaction(async (tx) => {
+        const name =
+          dto.name?.trim() || (await generateOrderCode(tx, locationId));
 
         const initialPaidReachesFull =
           initialPaid >= totals.totalPrice && totals.totalPrice > 0;
@@ -710,15 +709,12 @@ export class OrderService {
             shippingWard: shippingAddress.ward?.trim() || null,
             shippingWardCode: shippingAddress.ward_code?.trim() || null,
             shippingDistrict: shippingAddress.district?.trim() || null,
-            shippingDistrictCode:
-              shippingAddress.district_code?.trim() || null,
+            shippingDistrictCode: shippingAddress.district_code?.trim() || null,
             shippingProvince: shippingAddress.province?.trim() || null,
-            shippingProvinceCode:
-              shippingAddress.province_code?.trim() || null,
+            shippingProvinceCode: shippingAddress.province_code?.trim() || null,
             shippingCity: shippingAddress.city?.trim() || null,
             shippingCountry: shippingAddress.country?.trim() || null,
-            shippingCountryCode:
-              shippingAddress.country_code?.trim() || null,
+            shippingCountryCode: shippingAddress.country_code?.trim() || null,
             shippingZip: shippingAddress.zip?.trim() || null,
             shippingCompany: shippingAddress.company?.trim() || null,
             deliveryCodAmount: dto.delivery_cod_amount ?? null,
@@ -828,9 +824,7 @@ export class OrderService {
         });
 
         return record;
-      },
-      TX_OPTIONS,
-    );
+      }, TX_OPTIONS);
 
       // Sau khi tx commit — không đưa vào trong tx: fan-out chậm sẽ giữ lock hàng đơn,
       // và tx rollback vẫn để lại thông báo trỏ tới đơn không tồn tại.
@@ -838,7 +832,10 @@ export class OrderService {
         NotificationTopic.orders_create,
         order,
         `Đơn hàng mới ${order.name}`,
-        { total_price: Number(order.totalPrice), source_name: order.sourceName },
+        {
+          total_price: Number(order.totalPrice),
+          source_name: order.sourceName,
+        },
       );
       // Đơn tạo ra đã thanh toán đủ luôn (bán tại quầy) thì không đi qua nhánh
       // `pay()` bên dưới, nên phải bắn orders/paid ngay tại đây.
@@ -981,23 +978,22 @@ export class OrderService {
           409,
         );
       }
-      await this.repo.client.$transaction(
-        async (tx) => {
-          for (const item of sortForLocking(order.items)) {
-            await this.inventory.applyMovement(
-              {
-                variantId: item.variantId,
-                locationId: order.locationId,
-                bucket: InventoryBucket.committed,
-                change: -item.quantity,
-                type: MovementType.order_release,
-                referenceType: 'order',
-                referenceId: order.id,
-                createdById: user.userId,
-              },
-              tx,
-            );
-          }
+      await this.repo.client.$transaction(async (tx) => {
+        for (const item of sortForLocking(order.items)) {
+          await this.inventory.applyMovement(
+            {
+              variantId: item.variantId,
+              locationId: order.locationId,
+              bucket: InventoryBucket.committed,
+              change: -item.quantity,
+              type: MovementType.order_release,
+              referenceType: 'order',
+              referenceId: order.id,
+              createdById: user.userId,
+            },
+            tx,
+          );
+        }
         // Hủy đơn giảm công nợ đúng giá trị đơn; phần khách đã trả
         // trở thành nợ âm (shop nợ khách) chờ hoàn tiền
         if (order.customerId) {
@@ -1077,9 +1073,7 @@ export class OrderService {
             metadata: { code: order.name },
           },
         });
-      },
-      TX_OPTIONS,
-    );
+      }, TX_OPTIONS);
       this.notifyOrder(
         NotificationTopic.orders_cancelled,
         order,
@@ -1108,30 +1102,27 @@ export class OrderService {
           409,
         );
       }
-      const deliveredOn = await this.repo.client.$transaction(
-        async (tx) => {
-          await this.shipOrderItems(order, user, tx);
-          const now = new Date();
-          await tx.order.update({
-            where: { id },
-            data: {
-              deliveredOn: now,
-              fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
-            },
-          });
-          await tx.activityLog.create({
-            data: {
-              userId: user.userId,
-              action: 'order.ship',
-              entityType: 'order',
-              entityId: id,
-              metadata: { code: order.name },
-            },
-          });
-          return now;
-        },
-        TX_OPTIONS,
-      );
+      const deliveredOn = await this.repo.client.$transaction(async (tx) => {
+        await this.shipOrderItems(order, user, tx);
+        const now = new Date();
+        await tx.order.update({
+          where: { id },
+          data: {
+            deliveredOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+          },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.ship',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.name },
+          },
+        });
+        return now;
+      }, TX_OPTIONS);
       this.notifyOrder(
         NotificationTopic.orders_fulfilled,
         order,
@@ -1156,36 +1147,33 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
-      await this.repo.client.$transaction(
-        async (tx) => {
-          // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
-          // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
-          if (!order.deliveredOn) {
-            await this.shipOrderItems(order, user, tx);
-          }
-          const now = new Date();
-          await tx.order.update({
-            where: { id },
-            data: {
-              status: OrderStatus.closed,
-              closedOn: now,
-              completedOn: now,
-              fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
-              deliveredOn: order.deliveredOn ?? now,
-            },
-          });
-          await tx.activityLog.create({
-            data: {
-              userId: user.userId,
-              action: 'order.complete',
-              entityType: 'order',
-              entityId: id,
-              metadata: { code: order.name },
-            },
-          });
-        },
-        TX_OPTIONS,
-      );
+      await this.repo.client.$transaction(async (tx) => {
+        // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
+        // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
+        if (!order.deliveredOn) {
+          await this.shipOrderItems(order, user, tx);
+        }
+        const now = new Date();
+        await tx.order.update({
+          where: { id },
+          data: {
+            status: OrderStatus.closed,
+            closedOn: now,
+            completedOn: now,
+            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            deliveredOn: order.deliveredOn ?? now,
+          },
+        });
+        await tx.activityLog.create({
+          data: {
+            userId: user.userId,
+            action: 'order.complete',
+            entityType: 'order',
+            entityId: id,
+            metadata: { code: order.name },
+          },
+        });
+      }, TX_OPTIONS);
       // `complete` cũng đặt fulfillment_status = fulfilled. Chỉ báo nếu đơn CHƯA từng
       // xuất hàng qua action 'ship' — nếu không thì cùng một đơn bắn orders/fulfilled
       // hai lần (ship rồi complete là luồng bình thường).
@@ -1305,9 +1293,7 @@ export class OrderService {
       customer.addresses.find((a) => a.isDefault) ?? customer.addresses[0];
     const name =
       dto.name?.trim() ||
-      (addr
-        ? [addr.firstName, addr.lastName].filter(Boolean).join(' ')
-        : '') ||
+      (addr ? [addr.firstName, addr.lastName].filter(Boolean).join(' ') : '') ||
       [customer.firstName, customer.lastName].filter(Boolean).join(' ');
     const phone =
       dto.phone?.trim() ||
@@ -1329,9 +1315,11 @@ export class OrderService {
       ward: dto.ward?.trim() || addr.ward || undefined,
       ward_code: dto.ward_code?.trim() || addr.wardCode || undefined,
       district: dto.district?.trim() || addr.district || undefined,
-      district_code: dto.district_code?.trim() || addr.districtCode || undefined,
+      district_code:
+        dto.district_code?.trim() || addr.districtCode || undefined,
       province: dto.province?.trim() || addr.province || undefined,
-      province_code: dto.province_code?.trim() || addr.provinceCode || undefined,
+      province_code:
+        dto.province_code?.trim() || addr.provinceCode || undefined,
       city: dto.city?.trim() || addr.city || undefined,
       country: dto.country?.trim() || addr.country || undefined,
       country_code: dto.country_code?.trim() || addr.countryCode || undefined,

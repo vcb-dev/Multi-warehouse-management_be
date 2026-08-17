@@ -10,7 +10,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-const SALES_CHANNELS = ['shopee', 'tiktok', 'facebook', 'pos', 'website'] as const;
+const SALES_CHANNELS = [
+  'shopee',
+  'tiktok',
+  'facebook',
+  'pos',
+  'website',
+] as const;
 
 export type AutoConditions = {
   vendor?: string;
@@ -52,7 +58,9 @@ export class CreateCategoryDto {
   @IsString()
   image_url?: string;
 
-  @IsIn(['manual', 'auto'], { message: 'condition_type phải là manual hoặc auto' })
+  @IsIn(['manual', 'auto'], {
+    message: 'condition_type phải là manual hoặc auto',
+  })
   condition_type!: 'manual' | 'auto';
 
   @IsOptional()

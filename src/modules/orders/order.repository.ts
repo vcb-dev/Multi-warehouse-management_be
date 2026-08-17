@@ -4,7 +4,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 const orderInclude = {
   items: {
-    include: { variant: { select: { productId: true, imageUrl: true, unit: true } } },
+    include: {
+      variant: { select: { productId: true, imageUrl: true, unit: true } },
+    },
   },
   customer: true,
   location: {
@@ -18,12 +20,18 @@ const orderInclude = {
       province: true,
     },
   },
-  assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
-  createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  assignedTo: {
+    select: { id: true, firstName: true, lastName: true, email: true },
+  },
+  createdBy: {
+    select: { id: true, firstName: true, lastName: true, email: true },
+  },
   fulfillments: {
     orderBy: { id: 'desc' },
     include: {
-      packer: { select: { id: true, firstName: true, lastName: true, email: true } },
+      packer: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
       provider: { select: { id: true, code: true, name: true, type: true } },
       location: { select: { id: true, code: true, name: true } },
     },

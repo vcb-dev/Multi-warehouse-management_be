@@ -39,7 +39,11 @@ export function serializeOrderReturnLine(row: {
       refundStatus: string;
       location: { name: string };
     };
-    createdBy: { firstName: string | null; lastName: string | null; email: string };
+    createdBy: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    };
   };
 }) {
   const rf = row.refund;
