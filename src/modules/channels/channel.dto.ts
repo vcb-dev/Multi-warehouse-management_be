@@ -1,5 +1,10 @@
 import { IsOptional, IsString } from 'class-validator';
 
+export class UpdateChannelConnectionDto {
+  @IsString()
+  location_id!: string;
+}
+
 export class ChannelOverviewQueryDto {
   /** YYYY-MM-DD */
   @IsOptional()

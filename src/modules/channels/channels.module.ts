@@ -5,6 +5,7 @@ import { ChannelSyncScheduler } from './channel-sync.scheduler';
 import { ChannelSyncService } from './channel-sync.service';
 import { ChannelsController } from './channels.controller';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
+import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 
 @Module({
@@ -14,7 +15,7 @@ import { TiktokAuthService } from './tiktok/tiktok-auth.service';
     ChannelSyncService,
     ChannelSyncScheduler,
     ShopeeAuthService,
-    TiktokAuthService,
+    ShopeeSyncService,
     TiktokAuthService,
     ChannelOverviewService,
   ],

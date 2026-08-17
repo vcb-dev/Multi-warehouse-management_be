@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -13,7 +21,11 @@ import { ChannelWebhookDto } from '../orders/order.dto';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
-import { ChannelOverviewQueryDto } from './channel.dto';
+import { ShopeeSyncService } from './shopee/shopee-sync.service';
+import {
+  ChannelOverviewQueryDto,
+  UpdateChannelConnectionDto,
+} from './channel.dto';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 
 @ApiTags('channels')
@@ -23,6 +35,7 @@ export class ChannelsController {
   constructor(
     private sync: ChannelSyncService,
     private shopeeAuth: ShopeeAuthService,
+    private shopeeSync: ShopeeSyncService,
     private tiktokAuth: TiktokAuthService,
     private overview: ChannelOverviewService,
   ) {}
@@ -39,6 +52,17 @@ export class ChannelsController {
   @LocationOptional()
   syncConnected(@CurrentUser() user: AuthUser) {
     return this.sync.syncConnectedChannels(user);
+  }
+
+  /** Kéo đơn từ Shopee Open Platform (sandbox/production theo SHOPEE_ENV). */
+  @Post('shopee/sync')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  syncShopee(
+    @CurrentUser() user: AuthUser,
+    @Query('connection_id') connectionId?: string,
+  ) {
+    return this.shopeeSync.syncShopeeOrders(user, connectionId);
   }
 
   /**
@@ -61,6 +85,16 @@ export class ChannelsController {
   @LocationOptional()
   listConnections() {
     return this.sync.listConnections();
+  }
+
+  @Patch('connections/:id')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  updateConnection(
+    @Param('id') id: string,
+    @Body() dto: UpdateChannelConnectionDto,
+  ) {
+    return this.sync.updateConnectionLocation(id, dto.location_id);
   }
 
   /**

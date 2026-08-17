@@ -36,7 +36,7 @@ export class ChannelSyncScheduler {
     try {
       const result = await this.sync.syncConnectedChannels(user);
       this.logger.log(
-        `Channel sync cron: synced ${result.synced}/${result.results.length}`,
+        `Channel sync cron: pending ${result.pending.synced}/${result.pending.results.length}, shopee ${result.shopee.synced}`,
       );
     } catch (e) {
       this.logger.error(

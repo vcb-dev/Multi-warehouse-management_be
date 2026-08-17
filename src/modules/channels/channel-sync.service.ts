@@ -5,6 +5,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ChannelWebhookDto } from '../orders/order.dto';
 import { OrderService } from '../orders/order.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ShopeeSyncService } from './shopee/shopee-sync.service';
 
 type PendingChannelOrder = ChannelWebhookDto & { external_id: string };
 
@@ -15,6 +16,7 @@ export class ChannelSyncService {
   constructor(
     private prisma: PrismaService,
     private orders: OrderService,
+    private shopeeSync: ShopeeSyncService,
   ) {}
 
   /** Danh sách shop đã ủy quyền kết nối trực tiếp (TikTok Shop, Shopee...). Không trả token. */
@@ -32,8 +34,30 @@ export class ChannelSyncService {
       access_token_expires_at: r.accessTokenExpiresAt,
       refresh_token_expires_at: r.refreshTokenExpiresAt,
       granted_scopes_count: r.grantedScopes.length,
-      location: r.location ? { id: r.location.id.toString(), name: r.location.name } : null,
+      location: r.location
+        ? { id: r.location.id.toString(), name: r.location.name }
+        : null,
     }));
+  }
+
+  async updateConnectionLocation(connectionId: string, locationId: string) {
+    const id = BigInt(connectionId);
+    const locId = BigInt(locationId);
+    await this.prisma.location.findUniqueOrThrow({ where: { id: locId } });
+    const conn = await this.prisma.channelConnection.update({
+      where: { id },
+      data: { locationId: locId },
+      include: { location: { select: { id: true, name: true } } },
+    });
+    return {
+      id: conn.id.toString(),
+      channel: conn.channel,
+      shop_id: conn.shopId,
+      shop_name: conn.shopName,
+      location: conn.location
+        ? { id: conn.location.id.toString(), name: conn.location.name }
+        : null,
+    };
   }
 
   async handleWebhook(dto: ChannelWebhookDto, user: AuthUser) {
@@ -69,7 +93,7 @@ export class ChannelSyncService {
     return { order_id: result.id, code: result.code, status: result.status };
   }
 
-  /** Đồng bộ đơn chờ từ kênh đã kết nối (file queue hoặc env) */
+  /** Đồng bộ đơn chờ từ file queue + kéo đơn Shopee đã kết nối */
   async syncConnectedChannels(user: AuthUser) {
     const pending = await this.loadPendingOrders();
     const results: {
@@ -101,8 +125,18 @@ export class ChannelSyncService {
       await this.savePendingOrders(remaining);
     }
 
-    this.logger.log(`Synced ${results.filter((r) => r.order_id).length} pending channel orders`);
-    return { synced: results.filter((r) => r.order_id).length, results };
+    const shopee = await this.shopeeSync.syncShopeeOrders(user);
+
+    this.logger.log(
+      `Synced ${results.filter((r) => r.order_id).length} pending + ${shopee.synced} Shopee orders`,
+    );
+    return {
+      pending: {
+        synced: results.filter((r) => r.order_id).length,
+        results,
+      },
+      shopee,
+    };
   }
 
   private queueFilePath(): string {
