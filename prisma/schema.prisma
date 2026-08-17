@@ -508,6 +508,34 @@ model ChannelConnection {
   @@map("channel_connections")
 }
 
+/// SKU có trên đơn của kênh bán nhưng không khớp `ProductVariant.sku`.
+///
+/// Dòng hàng như vậy không chèn được vào `order_items` (`variant_id` là FK bắt buộc) nên
+/// bị bỏ khi đồng bộ; bảng này giữ lại dấu vết để màn Kênh bán chỉ ra đang thiếu SKU nào
+/// và bỏ sót bao nhiêu doanh số, thay vì im lặng nuốt mất.
+model ChannelSkuGap {
+  id      BigInt      @id @default(autoincrement())
+  channel OrderSource
+  sku     String
+
+  /// Tên kênh trả về — để người dùng nhận ra hàng nào mà không phải tra ngược sang sàn
+  productName String? @map("product_name")
+  variantName String? @map("variant_name")
+
+  /// Cộng dồn qua các lần đồng bộ
+  lineCount Int     @default(0) @map("line_count")
+  quantity  Int     @default(0)
+  amount    Decimal @default(0) @db.Decimal(18, 2)
+
+  firstSeenAt DateTime @map("first_seen_at")
+  lastSeenAt  DateTime @map("last_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([channel, sku])
+  @@map("channel_sku_gaps")
+}
+
 // --- Module Sản phẩm (005) ---
 
 /// Sapo `customer_groups` — cùng dạng rule như custom_collections

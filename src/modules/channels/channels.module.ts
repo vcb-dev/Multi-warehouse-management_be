@@ -7,6 +7,8 @@ import { ChannelsController } from './channels.controller';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
 import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
+import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
+import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
 
 @Module({
   imports: [OrdersModule],
@@ -17,6 +19,8 @@ import { TiktokAuthService } from './tiktok/tiktok-auth.service';
     ShopeeAuthService,
     ShopeeSyncService,
     TiktokAuthService,
+    TiktokOrderSyncService,
+    TiktokWebhookService,
     ChannelOverviewService,
   ],
 })
