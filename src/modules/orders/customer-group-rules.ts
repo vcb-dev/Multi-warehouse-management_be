@@ -56,7 +56,9 @@ const VALUELESS: ReadonlySet<string> = new Set(['is_set', 'is_not_set']);
 type TextField = 'email' | 'phone' | 'company';
 
 function textColumn(label: string, field: TextField): ColumnSpec {
-  const on = (filter: Prisma.StringNullableFilter | null): Prisma.CustomerWhereInput =>
+  const on = (
+    filter: Prisma.StringNullableFilter | null,
+  ): Prisma.CustomerWhereInput =>
     ({ [field]: filter }) as Prisma.CustomerWhereInput;
 
   return {
@@ -73,7 +75,10 @@ function textColumn(label: string, field: TextField): ColumnSpec {
           // Khách bỏ trống ô này cũng là "không chứa" — nếu chỉ bọc NOT thì
           // SQL trả NULL cho họ và loại họ ra khỏi nhóm.
           return {
-            OR: [on(null), { NOT: on({ contains: condition, mode: 'insensitive' }) }],
+            OR: [
+              on(null),
+              { NOT: on({ contains: condition, mode: 'insensitive' }) },
+            ],
           };
         case 'is_set':
           return { AND: [on({ not: null }), { NOT: on({ equals: '' }) }] };
@@ -86,7 +91,11 @@ function textColumn(label: string, field: TextField): ColumnSpec {
 
 type NumberField = 'totalSpent' | 'ordersCount';
 
-function numberColumn(label: string, field: NumberField, hint?: string): ColumnSpec {
+function numberColumn(
+  label: string,
+  field: NumberField,
+  hint?: string,
+): ColumnSpec {
   return {
     label,
     input: 'number',
@@ -148,8 +157,12 @@ type AddressField = 'province' | 'district' | 'ward';
  * so với chỉ xét địa chỉ mặc định, vì khách hay có nhiều địa chỉ giao hàng.
  */
 function addressColumn(label: string, field: AddressField): ColumnSpec {
-  const some = (filter: Prisma.StringNullableFilter): Prisma.CustomerWhereInput => ({
-    addresses: { some: { [field]: filter } as Prisma.CustomerAddressWhereInput },
+  const some = (
+    filter: Prisma.StringNullableFilter,
+  ): Prisma.CustomerWhereInput => ({
+    addresses: {
+      some: { [field]: filter } as Prisma.CustomerAddressWhereInput,
+    },
   });
 
   return {
@@ -252,16 +265,23 @@ const RULE_COLUMNS: Record<string, ColumnSpec> = {
         );
       }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new BadRequestException('Điều kiện "Địa chỉ" phải là một object JSON');
+        throw new BadRequestException(
+          'Điều kiện "Địa chỉ" phải là một object JSON',
+        );
       }
 
-      const byKey: Record<string, 'provinceCode' | 'districtCode' | 'wardCode'> = {
+      const byKey: Record<
+        string,
+        'provinceCode' | 'districtCode' | 'wardCode'
+      > = {
         province: 'provinceCode',
         district: 'districtCode',
         ward: 'wardCode',
       };
       const some: Prisma.CustomerAddressWhereInput = {};
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      for (const [key, value] of Object.entries(
+        parsed as Record<string, unknown>,
+      )) {
         const field = byKey[key];
         if (!field) {
           throw new BadRequestException(
@@ -271,7 +291,9 @@ const RULE_COLUMNS: Record<string, ColumnSpec> = {
         (some as Record<string, unknown>)[field] = String(value);
       }
       if (!Object.keys(some).length) {
-        throw new BadRequestException('Điều kiện "Địa chỉ" chưa có mã vùng nào');
+        throw new BadRequestException(
+          'Điều kiện "Địa chỉ" chưa có mã vùng nào',
+        );
       }
       // Cùng một địa chỉ phải thoả mọi mã đưa vào (tỉnh + quận + phường).
       return { addresses: { some } };
@@ -402,7 +424,9 @@ async function buildOne(
   }
   const condition = rule.condition?.trim() ?? '';
   if (!VALUELESS.has(rule.relation) && !condition) {
-    throw new BadRequestException(`Điều kiện "${spec.label}" chưa nhập giá trị`);
+    throw new BadRequestException(
+      `Điều kiện "${spec.label}" chưa nhập giá trị`,
+    );
   }
   return spec.build({
     relation: rule.relation as RuleRelation,

@@ -35,7 +35,9 @@ describe('ProductRepository.variantIdsWithInventory', () => {
     } as unknown as PrismaService;
     const repo = new ProductRepository(db);
 
-    await expect(repo.variantIdsWithInventory(db, [])).resolves.toEqual(new Set());
+    await expect(repo.variantIdsWithInventory(db, [])).resolves.toEqual(
+      new Set(),
+    );
     expect(db.inventoryLevel.groupBy).not.toHaveBeenCalled();
   });
 });

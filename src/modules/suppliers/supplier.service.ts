@@ -80,7 +80,10 @@ export class SupplierService {
     ]);
 
     const balanceMap = new Map(
-      ledgerAgg.map((r) => [r.supplierId.toString(), Number(r._sum.amount ?? 0)]),
+      ledgerAgg.map((r) => [
+        r.supplierId.toString(),
+        Number(r._sum.amount ?? 0),
+      ]),
     );
     const countMap = new Map(
       outstandingAgg.map((r) => [r.supplierId.toString(), r._count]),
@@ -106,7 +109,11 @@ export class SupplierService {
   async findOne(id: bigint) {
     const row = await this.prisma.supplier.findUnique({
       where: { id },
-      include: { assignedTo: { select: { firstName: true, lastName: true, email: true } } },
+      include: {
+        assignedTo: {
+          select: { firstName: true, lastName: true, email: true },
+        },
+      },
     });
     if (!row) throw new NotFoundException('Không tìm thấy NCC');
     return { data: serializeSupplier(row) };
@@ -149,9 +156,15 @@ export class SupplierService {
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-        ...(dto.email !== undefined ? { email: dto.email?.trim() || null } : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
-        ...(dto.website !== undefined ? { website: dto.website?.trim() || null } : {}),
+        ...(dto.email !== undefined
+          ? { email: dto.email?.trim() || null }
+          : {}),
+        ...(dto.phone !== undefined
+          ? { phone: dto.phone?.trim() || null }
+          : {}),
+        ...(dto.website !== undefined
+          ? { website: dto.website?.trim() || null }
+          : {}),
         ...(dto.fax !== undefined ? { fax: dto.fax?.trim() || null } : {}),
         ...(dto.tax_code !== undefined
           ? { taxCode: dto.tax_code?.trim() || null }
@@ -159,9 +172,7 @@ export class SupplierService {
         ...(dto.address !== undefined ? this.mapAddress(dto.address) : {}),
         ...(dto.assigned_to !== undefined
           ? {
-              assignedToId: dto.assigned_to
-                ? BigInt(dto.assigned_to)
-                : null,
+              assignedToId: dto.assigned_to ? BigInt(dto.assigned_to) : null,
             }
           : {}),
         ...(dto.tags !== undefined ? { tags: dto.tags } : {}),
@@ -195,54 +206,49 @@ export class SupplierService {
           }
         : undefined;
 
-    const [
-      reiCreated,
-      reiUnpaid,
-      pvnCreated,
-      pvnUnrefunded,
-      debtAgg,
-    ] = await Promise.all([
-      this.prisma.goodsReceipt.aggregate({
-        where: {
-          supplierId: id,
-          status: { not: GoodsReceiptStatus.huy },
-          ...(createdAtRange ? { createdAt: createdAtRange } : {}),
-        },
-        _count: true,
-        _sum: { amountDue: true },
-      }),
-      this.prisma.goodsReceipt.aggregate({
-        where: {
-          supplierId: id,
-          status: GoodsReceiptStatus.da_nhap,
-          paymentStatus: { not: PaymentStatus.da_thanh_toan },
-          ...(createdAtRange ? { createdAt: createdAtRange } : {}),
-        },
-        _count: true,
-        _sum: { amountDue: true, paidAmount: true },
-      }),
-      this.prisma.purchaseReturn.aggregate({
-        where: {
-          supplierId: id,
-          ...(createdAtRange ? { createdAt: createdAtRange } : {}),
-        },
-        _count: true,
-        _sum: { totalAmount: true },
-      }),
-      this.prisma.purchaseReturn.aggregate({
-        where: {
-          supplierId: id,
-          refundStatus: RefundStatus.chua_hoan_tien,
-          ...(createdAtRange ? { createdAt: createdAtRange } : {}),
-        },
-        _count: true,
-        _sum: { totalAmount: true },
-      }),
-      this.prisma.supplierLedgerEntry.aggregate({
-        where: { supplierId: id },
-        _sum: { amount: true },
-      }),
-    ]);
+    const [reiCreated, reiUnpaid, pvnCreated, pvnUnrefunded, debtAgg] =
+      await Promise.all([
+        this.prisma.goodsReceipt.aggregate({
+          where: {
+            supplierId: id,
+            status: { not: GoodsReceiptStatus.huy },
+            ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+          },
+          _count: true,
+          _sum: { amountDue: true },
+        }),
+        this.prisma.goodsReceipt.aggregate({
+          where: {
+            supplierId: id,
+            status: GoodsReceiptStatus.da_nhap,
+            paymentStatus: { not: PaymentStatus.da_thanh_toan },
+            ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+          },
+          _count: true,
+          _sum: { amountDue: true, paidAmount: true },
+        }),
+        this.prisma.purchaseReturn.aggregate({
+          where: {
+            supplierId: id,
+            ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+          },
+          _count: true,
+          _sum: { totalAmount: true },
+        }),
+        this.prisma.purchaseReturn.aggregate({
+          where: {
+            supplierId: id,
+            refundStatus: RefundStatus.chua_hoan_tien,
+            ...(createdAtRange ? { createdAt: createdAtRange } : {}),
+          },
+          _count: true,
+          _sum: { totalAmount: true },
+        }),
+        this.prisma.supplierLedgerEntry.aggregate({
+          where: { supplierId: id },
+          _sum: { amount: true },
+        }),
+      ]);
 
     return {
       data: {
@@ -304,7 +310,11 @@ export class SupplierService {
       await Promise.all([
         this.prisma.supplierLedgerEntry.findMany({
           where,
-          include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
+          include: {
+            createdBy: {
+              select: { firstName: true, lastName: true, email: true },
+            },
+          },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip: (page - 1) * pageSize,
           take: pageSize,
@@ -358,9 +368,7 @@ export class SupplierService {
     // Tra id chứng từ theo mã để FE dựng link
     const codes = [
       ...new Set(
-        rows
-          .map((r) => r.referenceCode)
-          .filter((c): c is string => !!c),
+        rows.map((r) => r.referenceCode).filter((c): c is string => !!c),
       ),
     ];
     const [reis, pvns] = codes.length
@@ -438,7 +446,9 @@ export class SupplierService {
         amount: dto.amount,
         createdById: user.userId,
       },
-      include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
+      include: {
+        createdBy: { select: { firstName: true, lastName: true, email: true } },
+      },
     });
 
     return { data: serializeLedgerEntry(entry) };
@@ -546,7 +556,11 @@ export class SupplierService {
           amount: total,
           createdById: user.userId,
         },
-        include: { createdBy: { select: { firstName: true, lastName: true, email: true } } },
+        include: {
+          createdBy: {
+            select: { firstName: true, lastName: true, email: true },
+          },
+        },
       });
 
       return { voucher, ledgerEntry };

@@ -16,7 +16,10 @@ const MAX_ENTRIES = 2000;
 
 @Injectable()
 export class AuthCacheService {
-  private readonly cache = new Map<string, { value: AuthUser; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { value: AuthUser; expiresAt: number }
+  >();
 
   get(userId: string): AuthUser | undefined {
     const cached = this.cache.get(userId);

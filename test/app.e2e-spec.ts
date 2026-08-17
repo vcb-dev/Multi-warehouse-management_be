@@ -28,7 +28,9 @@ describe('AppController (e2e)', () => {
   });
 
   it('GET /api/health — không cần token', async () => {
-    const res = await request(app.getHttpServer()).get('/api/health').expect(200);
+    const res = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
     expect(res.body).toMatchObject({ status: 'ok' });
   });
 

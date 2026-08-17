@@ -74,7 +74,9 @@ describeIfDb('resolvePrice priority (integration)', () => {
     const variant = await prisma.productVariant.findUniqueOrThrow({
       where: { id: variantId },
     });
-    const result = await pricing.resolvePrice(variantId, { location_id: locationId });
+    const result = await pricing.resolvePrice(variantId, {
+      location_id: locationId,
+    });
     expect(result.source).toBe('branch');
     expect(result.price).toBe(150_000);
     expect(result.price).not.toBe(Number(variant.price));

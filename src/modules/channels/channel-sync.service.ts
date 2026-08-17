@@ -32,7 +32,9 @@ export class ChannelSyncService {
       access_token_expires_at: r.accessTokenExpiresAt,
       refresh_token_expires_at: r.refreshTokenExpiresAt,
       granted_scopes_count: r.grantedScopes.length,
-      location: r.location ? { id: r.location.id.toString(), name: r.location.name } : null,
+      location: r.location
+        ? { id: r.location.id.toString(), name: r.location.name }
+        : null,
     }));
   }
 
@@ -101,7 +103,9 @@ export class ChannelSyncService {
       await this.savePendingOrders(remaining);
     }
 
-    this.logger.log(`Synced ${results.filter((r) => r.order_id).length} pending channel orders`);
+    this.logger.log(
+      `Synced ${results.filter((r) => r.order_id).length} pending channel orders`,
+    );
     return { synced: results.filter((r) => r.order_id).length, results };
   }
 

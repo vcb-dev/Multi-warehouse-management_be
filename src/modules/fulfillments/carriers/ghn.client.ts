@@ -28,8 +28,6 @@ export function isGhnSandbox(): boolean {
   return resolveGhnBaseUrl().includes('dev-online-gateway');
 }
 
-const DEFAULT_BASE_URL = PRODUCTION_BASE_URL;
-
 /** Trang tra cứu vận đơn công khai của GHN — lưu vào Sapo `fulfillments.tracking_url`. */
 export const GHN_TRACKING_URL = 'https://donhang.ghn.vn/?order_code=';
 

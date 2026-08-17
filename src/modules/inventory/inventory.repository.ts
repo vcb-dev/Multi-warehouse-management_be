@@ -7,7 +7,11 @@ import { ApplyMovementInput } from './inventory.types';
 export class InventoryRepository {
   constructor(private prisma: PrismaService) {}
 
-  lockLevel(tx: Prisma.TransactionClient, variantId: bigint, locationId: bigint) {
+  lockLevel(
+    tx: Prisma.TransactionClient,
+    variantId: bigint,
+    locationId: bigint,
+  ) {
     return tx.$queryRaw<
       Array<{
         variant_id: bigint;

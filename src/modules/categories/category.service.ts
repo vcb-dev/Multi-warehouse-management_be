@@ -3,10 +3,7 @@ import { CategoryConditionType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { slugify } from '../products/product.serializer';
-import {
-  type AutoConditions,
-  CreateCategoryDto,
-} from './category.dto';
+import { type AutoConditions, CreateCategoryDto } from './category.dto';
 
 export type { AutoConditions, CreateCategoryDto };
 
@@ -74,7 +71,9 @@ export class CategoryService {
   }
 
   async assignProducts(categoryId: bigint, productIds: bigint[]) {
-    const cat = await this.prisma.category.findUnique({ where: { id: categoryId } });
+    const cat = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+    });
     if (!cat) throw new NotFoundException('Không tìm thấy danh mục');
     if (cat.conditionType !== CategoryConditionType.manual) {
       throw new BusinessException(

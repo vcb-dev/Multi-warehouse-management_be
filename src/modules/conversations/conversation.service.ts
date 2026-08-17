@@ -64,7 +64,8 @@ export class ConversationService {
       data: {
         customerName: dto.customer_name,
         customerPhone: dto.customer_phone,
-        channel: (dto.channel as Prisma.ConversationCreateInput['channel']) ?? 'other',
+        channel:
+          (dto.channel as Prisma.ConversationCreateInput['channel']) ?? 'other',
         customerId: dto.customer_id ? BigInt(dto.customer_id) : undefined,
         assignedToId: dto.assigned_to ? BigInt(dto.assigned_to) : undefined,
       },

@@ -103,7 +103,9 @@ export class VoucherService {
         take: pageSize,
         include: {
           location: { select: { name: true } },
-          createdBy: { select: { firstName: true, lastName: true, email: true } },
+          createdBy: {
+            select: { firstName: true, lastName: true, email: true },
+          },
         },
       }),
       this.prisma.voucher.count({ where }),

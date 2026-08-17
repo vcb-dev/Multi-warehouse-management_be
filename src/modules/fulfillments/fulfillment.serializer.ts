@@ -3,7 +3,9 @@ import { userDisplayName } from '../../common/utils/user-display-name';
 import { carrierDisplayName } from './carrier-display';
 
 const fulfillmentInclude = {
-  packer: { select: { id: true, firstName: true, lastName: true, email: true } },
+  packer: {
+    select: { id: true, firstName: true, lastName: true, email: true },
+  },
   provider: { select: { id: true, code: true, name: true, type: true } },
   location: { select: { id: true, code: true, name: true } },
 } satisfies Prisma.FulfillmentInclude;
@@ -27,7 +29,9 @@ export function serializeFulfillment(f: FulfillmentWithRelations) {
     // Đóng gói
     packed_status: f.packedStatus,
     assigned_packer_id: f.assignedPackerId?.toString() ?? null,
-    packer_name: f.packer ? (userDisplayName(f.packer) ?? f.packer.email) : null,
+    packer_name: f.packer
+      ? (userDisplayName(f.packer) ?? f.packer.email)
+      : null,
     packed_on: f.packedOn?.toISOString() ?? null,
     delivery_note_printed_at: f.deliveryNotePrintedAt?.toISOString() ?? null,
     // Vận đơn

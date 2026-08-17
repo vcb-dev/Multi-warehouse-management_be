@@ -39,10 +39,13 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     categories = module.get(CategoryService);
     pricing = module.get(PriceListService);
     prisma = module.get(PrismaService);
-    const { ProductRepository } = await import('../src/modules/products/product.repository');
+    const { ProductRepository } =
+      await import('../src/modules/products/product.repository');
     productRepo = module.get(ProductRepository);
 
-    const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
+    const user = await prisma.user.findFirst({
+      where: { email: 'admin@local.dev' },
+    });
     const branch = await prisma.location.findFirst();
     const cg = await prisma.customerGroup.findFirst();
     if (!user || !branch || !cg) throw new Error('Run seed first');
@@ -166,9 +169,8 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
   });
 
   it('KC6 — export trả buffer Excel', async () => {
-    const { ProductExportService } = await import(
-      '../src/modules/products/product-import.service'
-    );
+    const { ProductExportService } =
+      await import('../src/modules/products/product-import.service');
     const exporter = new ProductExportService(products, productRepo);
     const buf = await exporter.exportExcel({});
     expect(buf.length).toBeGreaterThan(100);

@@ -11,7 +11,11 @@ type StnWithRelations = StockTransfer & {
   })[];
   fromLocation?: { code: string | null; name: string };
   toLocation?: { code: string | null; name: string };
-  createdBy?: { firstName: string | null; lastName: string | null; email: string } | null;
+  createdBy?: {
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+  } | null;
 };
 
 export function serializeStockTransfer(stn: StnWithRelations) {
@@ -35,7 +39,8 @@ export function serializeStockTransfer(stn: StnWithRelations) {
     note: stn.note,
     total_quantity: stn.totalQuantity,
     transfer_value: transferValue.toString(),
-    created_by_name: userDisplayName(stn.createdBy) ?? stn.createdBy?.email ?? null,
+    created_by_name:
+      userDisplayName(stn.createdBy) ?? stn.createdBy?.email ?? null,
     created_at: stn.createdAt.toISOString(),
     shipped_at: stn.shippedAt?.toISOString() ?? null,
     received_at: stn.receivedAt?.toISOString() ?? null,
