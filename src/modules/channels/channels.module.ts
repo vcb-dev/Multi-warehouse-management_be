@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { OrdersModule } from '../orders/orders.module';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncScheduler } from './channel-sync.scheduler';
@@ -10,7 +11,7 @@ import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
 import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
 
 @Module({
-  imports: [OrdersModule],
+  imports: [OrdersModule, NotificationsModule],
   controllers: [ChannelsController],
   providers: [
     ChannelSyncService,

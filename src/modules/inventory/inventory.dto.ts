@@ -40,9 +40,14 @@ export class ListInventoryQueryDto {
   @IsBoolean()
   low_stock?: boolean;
 
+  /**
+   * `negative` (available < 0) tách riêng khỏi `out_of_stock` (available <= 0): hai cái
+   * này lệch nhau rất xa trên dữ liệu thật — 756 dòng âm thật so với 14.395 dòng <= 0.
+   * Thông báo cảnh báo âm kho link tới đây nên phải khớp chính xác, không được gộp.
+   */
   @IsOptional()
-  @IsIn(['in_stock', 'out_of_stock'])
-  stock_status?: 'in_stock' | 'out_of_stock';
+  @IsIn(['in_stock', 'out_of_stock', 'negative'])
+  stock_status?: 'in_stock' | 'out_of_stock' | 'negative';
 
   /** Đầu kỳ NXT (ISO date) — mặc định đầu tháng hiện tại; kỳ kết thúc ở hiện tại */
   @IsOptional()

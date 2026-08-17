@@ -6,6 +6,7 @@ import {
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
+  NotificationTopic,
   Prisma,
   RestockType,
 } from '@prisma/client';
@@ -21,6 +22,7 @@ import {
 } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
+import { NotificationService } from '../notifications/notification.service';
 import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from './customer-debt.service';
@@ -74,7 +76,28 @@ export class OrderService {
     private pricing: PriceListService,
     private vouchers: VoucherService,
     private customerDebt: CustomerDebtService,
+    private notifications: NotificationService,
   ) {}
+
+  /**
+   * Thông báo cho một đơn. Luôn gọi SAU khi transaction đã commit và KHÔNG await —
+   * `emit` tự nuốt lỗi, nên fire-and-forget ở đây là an toàn và giữ thời gian phản hồi
+   * của việc tạo/sửa đơn không phụ thuộc vào tốc độ fan-out.
+   */
+  private notifyOrder(
+    topic: NotificationTopic,
+    order: { id: bigint; name: string; locationId: bigint },
+    title: string,
+    payload?: Record<string, string | number | null>,
+  ) {
+    void this.notifications.emit(topic, {
+      subjectType: 'order',
+      subjectId: order.id,
+      locationId: order.locationId,
+      title,
+      payload: { code: order.name, ...payload },
+    });
+  }
 
   async list(query: ListOrdersQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
@@ -548,6 +571,17 @@ export class OrderService {
       return result;
     });
 
+    // Chỉ báo khi đơn đã thu ĐỦ. Thanh toán từng phần là chuyện thường ngày của đơn
+    // công nợ — báo mỗi lần trả góp sẽ biến chuông thành nhiễu.
+    if (reachedPaid) {
+      this.notifyOrder(
+        NotificationTopic.orders_paid,
+        order,
+        `Đơn ${order.name} đã thanh toán đủ`,
+        { total_price: Number(order.totalPrice), amount: payAmount },
+      );
+    }
+
     return {
       id: order.id.toString(),
       payment_status: newStatus,
@@ -798,6 +832,25 @@ export class OrderService {
       TX_OPTIONS,
     );
 
+      // Sau khi tx commit — không đưa vào trong tx: fan-out chậm sẽ giữ lock hàng đơn,
+      // và tx rollback vẫn để lại thông báo trỏ tới đơn không tồn tại.
+      this.notifyOrder(
+        NotificationTopic.orders_create,
+        order,
+        `Đơn hàng mới ${order.name}`,
+        { total_price: Number(order.totalPrice), source_name: order.sourceName },
+      );
+      // Đơn tạo ra đã thanh toán đủ luôn (bán tại quầy) thì không đi qua nhánh
+      // `pay()` bên dưới, nên phải bắn orders/paid ngay tại đây.
+      if (order.financialStatus === OrderFinancialStatus.paid) {
+        this.notifyOrder(
+          NotificationTopic.orders_paid,
+          order,
+          `Đơn ${order.name} đã thanh toán đủ`,
+          { total_price: Number(order.totalPrice) },
+        );
+      }
+
       return {
         id: order.id.toString(),
         code: order.name,
@@ -1027,6 +1080,12 @@ export class OrderService {
       },
       TX_OPTIONS,
     );
+      this.notifyOrder(
+        NotificationTopic.orders_cancelled,
+        order,
+        `Đơn ${order.name} đã bị hủy`,
+        { reason: dto.reason?.trim() || null },
+      );
       return { id: id.toString(), status: OrderStatus.cancelled };
     }
 
@@ -1072,6 +1131,11 @@ export class OrderService {
           return now;
         },
         TX_OPTIONS,
+      );
+      this.notifyOrder(
+        NotificationTopic.orders_fulfilled,
+        order,
+        `Đơn ${order.name} đã xuất hàng`,
       );
       return {
         id: id.toString(),
@@ -1122,6 +1186,16 @@ export class OrderService {
         },
         TX_OPTIONS,
       );
+      // `complete` cũng đặt fulfillment_status = fulfilled. Chỉ báo nếu đơn CHƯA từng
+      // xuất hàng qua action 'ship' — nếu không thì cùng một đơn bắn orders/fulfilled
+      // hai lần (ship rồi complete là luồng bình thường).
+      if (!order.deliveredOn) {
+        this.notifyOrder(
+          NotificationTopic.orders_fulfilled,
+          order,
+          `Đơn ${order.name} đã hoàn thành`,
+        );
+      }
       return { id: id.toString(), status: OrderStatus.closed };
     }
 

@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole } from '@prisma/client';
+import { NotificationTopic, PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -90,6 +90,38 @@ async function seedShippingProviders() {
       phone: '0901234567',
     },
   });
+}
+
+/**
+ * Cấu hình mặc định cho 8 topic thông báo. `update` cố tình để trống: chỉ tạo dòng
+ * thiếu, KHÔNG ghi đè lựa chọn admin đã chỉnh ở /cau-hinh/thong-bao (seed hay bị chạy
+ * lại sau mỗi lần deploy).
+ */
+async function seedNotificationSettings() {
+  const defaults: {
+    topic: NotificationTopic;
+    recipientPermissions: string[];
+  }[] = [
+    { topic: 'orders_create', recipientPermissions: ['order:view'] },
+    { topic: 'orders_paid', recipientPermissions: ['order:view'] },
+    { topic: 'orders_cancelled', recipientPermissions: ['order:view'] },
+    { topic: 'orders_fulfilled', recipientPermissions: ['order:view'] },
+    { topic: 'fulfillments_create', recipientPermissions: ['order:pack'] },
+    { topic: 'fulfillments_update', recipientPermissions: ['order:pack'] },
+    { topic: 'refunds_create', recipientPermissions: ['order:view'] },
+    { topic: 'customers_create', recipientPermissions: ['customer:view'] },
+    // Cảnh báo tồn kho: "cần nhập" là việc mua hàng, "âm kho" là việc kho — khác người nhận.
+    { topic: 'inventory_low_stock', recipientPermissions: ['purchasing:manage'] },
+    { topic: 'inventory_negative', recipientPermissions: ['inventory:view'] },
+  ];
+
+  for (const d of defaults) {
+    await prisma.notificationSetting.upsert({
+      where: { topic: d.topic },
+      update: {},
+      create: d,
+    });
+  }
 }
 
 async function seedRbac() {
@@ -210,6 +242,9 @@ async function main() {
 
   // RBAC động: seed permissions + roles, gán role theo kho cho user hiện có
   const roleByCode = await seedRbac();
+
+  // Sau seedRbac vì recipientPermissions trỏ tới permission key vừa seed
+  await seedNotificationSettings();
   const assignRole = async (userId: bigint, locationId: bigint, code: string) => {
     const roleId = roleByCode.get(code);
     if (!roleId) return;
