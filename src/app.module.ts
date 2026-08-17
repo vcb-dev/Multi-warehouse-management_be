@@ -26,6 +26,7 @@ import { ConversationModule } from './modules/conversations/conversation.module'
 import { RbacModule } from './modules/rbac/rbac.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage/storage.module';
 
@@ -69,6 +70,7 @@ import { StorageModule } from './common/storage/storage.module';
     RbacModule,
     ReportsModule,
     ApiKeysModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [

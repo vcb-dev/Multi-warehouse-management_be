@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { InventoryAlertScheduler } from './inventory-alert.scheduler';
+import { InventoryAlertService } from './inventory-alert.service';
 import { InventoryController } from './inventory.controller';
 import {
   InventoryExportService,
@@ -12,6 +15,7 @@ import { ReconcileScheduler } from './reconcile.scheduler';
 import { ReconcileService } from './reconcile.service';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [InventoryController],
   providers: [
     InventoryRepository,
@@ -22,7 +26,14 @@ import { ReconcileService } from './reconcile.service';
     InventoryImportService,
     ReconcileService,
     ReconcileScheduler,
+    InventoryAlertService,
+    InventoryAlertScheduler,
   ],
-  exports: [InventoryService, InventoryRepository, ReconcileService],
+  exports: [
+    InventoryService,
+    InventoryRepository,
+    ReconcileService,
+    InventoryAlertService,
+  ],
 })
 export class InventoryModule {}

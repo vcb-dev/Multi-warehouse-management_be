@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   FulfillmentDeliveryMethod,
+  NotificationTopic,
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
@@ -9,6 +10,7 @@ import {
   ShipmentStatus,
 } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   TiktokApiClient,
@@ -16,6 +18,14 @@ import {
   TiktokOrderLine,
 } from './tiktok-api.client';
 import { TiktokAuthService } from './tiktok-auth.service';
+
+/**
+ * Đơn đặt cách đây quá số giờ này thì kéo về im lặng, không sinh thông báo.
+ * Mục đích duy nhất: sync bù khoảng đã hụt không làm ngập chuông bằng đơn cũ.
+ */
+const SYNC_NOTIFY_MAX_AGE_HOURS = Number(
+  process.env.SYNC_NOTIFY_MAX_AGE_HOURS ?? 24,
+);
 
 /**
  * Kéo đơn thẳng từ TikTok Shop Open API vào bảng `orders` — KHÔNG đi qua Sapo.
@@ -45,6 +55,7 @@ export class TiktokOrderSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: TiktokAuthService,
+    private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -321,6 +332,7 @@ export class TiktokOrderSyncService {
     });
 
     const fulfillment = mapFulfillmentRecord(order, locationId, createdById);
+    let newOrderId: bigint | null = null;
 
     await this.prisma.$transaction(async (tx) => {
       let orderId: bigint;
@@ -336,6 +348,7 @@ export class TiktokOrderSyncService {
           select: { id: true },
         });
         orderId = row.id;
+        newOrderId = orderId;
       }
       if (items.length) {
         await tx.orderItem.createMany({
@@ -387,7 +400,42 @@ export class TiktokOrderSyncService {
       }
     });
 
+    if (newOrderId !== null) {
+      this.notifyNewSyncedOrder(newOrderId, order, data, locationId);
+    }
+
     return { created: !existing, skippedLines };
+  }
+
+  /**
+   * Thông báo "đơn hàng mới" cho đơn TikTok vừa kéo về. Đây là NGUỒN ĐƠN LỚN NHẤT của
+   * hệ thống — trước đây im lặng hoàn toàn vì sync ghi thẳng `tx.order.create()`, không
+   * đi qua `OrderService.create()` (nơi duy nhất có `emit`).
+   *
+   * ⚠️ Chốt chặn backfill: chỉ báo đơn ĐẶT TRONG {@link SYNC_NOTIFY_MAX_AGE_HOURS} giờ
+   * gần đây. Sync bù các khoảng đã hụt (hiện còn ~3.043 đơn Sapo chưa về) sẽ tạo hàng
+   * nghìn đơn cũ một lúc — không có chặn này thì mỗi nhân viên nhận vài nghìn thông báo
+   * về đơn từ tháng trước, chuông thành vô dụng vĩnh viễn.
+   */
+  private notifyNewSyncedOrder(
+    orderId: bigint,
+    order: TiktokOrder,
+    data: { createdOn?: Date | null },
+    locationId: bigint,
+  ) {
+    const placedAt = data.createdOn ?? null;
+    if (!placedAt) return;
+
+    const ageHours = (Date.now() - placedAt.getTime()) / 3_600_000;
+    if (ageHours > SYNC_NOTIFY_MAX_AGE_HOURS) return;
+
+    void this.notifications.emit(NotificationTopic.orders_create, {
+      subjectType: 'order',
+      subjectId: orderId,
+      locationId,
+      title: `Đơn TikTok mới ${order.id}`,
+      payload: { code: order.id, source_name: 'tiktok' },
+    });
   }
 
   /** Cộng dồn SKU chưa khớp vào `channel_sku_gaps` để UI hiển thị được. */

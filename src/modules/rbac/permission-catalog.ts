@@ -49,6 +49,14 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     label: 'Quản lý API key đối tác',
     scope: PermissionScope.system,
   },
+  // Chỉ chi phối trang /cau-hinh/thong-bao (bật/tắt topic, chọn người nhận).
+  // ĐỌC thông báo của chính mình KHÔNG cần quyền này — ai cũng có chuông.
+  {
+    key: 'notification:manage',
+    group: 'Hệ thống',
+    label: 'Cấu hình thông báo',
+    scope: PermissionScope.system,
+  },
 
   // Đơn hàng (theo kho)
   {
@@ -167,6 +175,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'dashboard:view',
       'report:view',
       'shipping:manage',
+      'notification:manage',
       'order:view',
       'order:create',
       'order:update',
