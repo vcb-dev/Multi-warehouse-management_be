@@ -216,7 +216,6 @@ describeIfDb('getShipmentOverview', () => {
       authUser,
     );
 
-    const delivered = overview.status_cards.find((c) => c.key === 'delivered');
     // delivered không có trong 7 thẻ UI — nhưng DB có status delivered
     // đơn đã delivered không còn pending/picked_up
     const pending = overview.status_cards.find((c) => c.key === 'pending');

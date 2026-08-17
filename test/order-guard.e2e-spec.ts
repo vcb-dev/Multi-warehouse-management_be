@@ -37,7 +37,12 @@ describeIfDb('order guards', () => {
   it('MISSING_WAREHOUSE', async () => {
     await expect(
       orders.create(
-        { location_id: locationId.toString(), items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }] },
+        {
+          location_id: locationId.toString(),
+          items: [
+            { variant_id: variantId.toString(), location_id: '', quantity: 1 },
+          ],
+        },
         adminAuth({ userId }),
       ),
     ).rejects.toMatchObject({ code: 'MISSING_WAREHOUSE' });

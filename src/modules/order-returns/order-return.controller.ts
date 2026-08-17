@@ -1,8 +1,14 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import { CreateOrderReturnDto, ListOrderReturnsQueryDto } from '../orders/order.dto';
+import {
+  CreateOrderReturnDto,
+  ListOrderReturnsQueryDto,
+} from '../orders/order.dto';
 import { OrderReturnService } from './order-return.service';
 
 @ApiTags('order-returns')
@@ -13,7 +19,10 @@ export class OrderReturnController {
 
   @Get()
   @RequirePermission('order_return:view')
-  list(@Query() query: ListOrderReturnsQueryDto, @CurrentUser() user: AuthUser) {
+  list(
+    @Query() query: ListOrderReturnsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.returns.list(query, user);
   }
 

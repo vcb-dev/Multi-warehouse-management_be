@@ -9,7 +9,10 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
@@ -65,7 +68,10 @@ export class CustomersController {
         gender: c.gender,
         orders_count: c.ordersCount,
         total_spent: Number(c.totalSpent),
-        label: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.phone || c.email,
+        label:
+          [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+          c.phone ||
+          c.email,
       })),
     };
   }
@@ -96,7 +102,10 @@ export class CustomersController {
 
   @Get(':id/ledger')
   @RequirePermission('customer:view')
-  getLedger(@Param('id') id: string, @Query() query: ListCustomerLedgerQueryDto) {
+  getLedger(
+    @Param('id') id: string,
+    @Query() query: ListCustomerLedgerQueryDto,
+  ) {
     return this.debt.getLedger(BigInt(id), query);
   }
 

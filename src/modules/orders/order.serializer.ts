@@ -41,7 +41,11 @@ export function serializeOrderListItem(
       phone: string | null;
     } | null;
     location: { name: string };
-    createdBy: { firstName: string | null; lastName: string | null; email: string };
+    createdBy: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    };
     items: { sku: string }[];
     fulfillments?: {
       packedStatus: string | null;
@@ -60,11 +64,17 @@ export function serializeOrderListItem(
   const openFulfillment = o.fulfillments?.[0] ?? null;
   const recipientName =
     o.shippingName?.trim() ||
-    [o.shippingFirstName, o.shippingLastName].filter(Boolean).join(' ').trim() ||
+    [o.shippingFirstName, o.shippingLastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim() ||
     customerName ||
     '';
   const recipientPhone =
-    o.shippingPhone?.trim() || o.phone?.trim() || o.customer?.phone?.trim() || '';
+    o.shippingPhone?.trim() ||
+    o.phone?.trim() ||
+    o.customer?.phone?.trim() ||
+    '';
   const carrierShipReady =
     !!recipientName &&
     !!recipientPhone &&
@@ -161,7 +171,8 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     total_weight: o.totalWeight,
     net_payment: o.netPayment != null ? dec(o.netPayment) : null,
     unpaid_amount: o.unpaidAmount != null ? dec(o.unpaidAmount) : null,
-    total_outstanding: o.totalOutstanding != null ? dec(o.totalOutstanding) : null,
+    total_outstanding:
+      o.totalOutstanding != null ? dec(o.totalOutstanding) : null,
     total_refunded: o.totalRefunded != null ? dec(o.totalRefunded) : null,
     number: o.number,
     order_number: o.orderNumber,
@@ -205,7 +216,8 @@ export function serializeOrderDetail(o: OrderWithRelations) {
       country: o.billingCountry,
       zip: o.billingZip,
     },
-    delivery_cod_amount: o.deliveryCodAmount != null ? dec(o.deliveryCodAmount) : null,
+    delivery_cod_amount:
+      o.deliveryCodAmount != null ? dec(o.deliveryCodAmount) : null,
     delivery_weight_grams: o.deliveryWeightGrams,
     delivery_length_cm: o.deliveryLengthCm,
     delivery_width_cm: o.deliveryWidthCm,
@@ -224,7 +236,8 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     items: o.items.map((i) => ({
       id: i.id.toString(),
       variant_id: i.variantId.toString(),
-      product_id: i.productId?.toString() ?? i.variant?.productId.toString() ?? null,
+      product_id:
+        i.productId?.toString() ?? i.variant?.productId.toString() ?? null,
       inventory_item_id: i.inventoryItemId?.toString() ?? null,
       name: i.name,
       variant_title: i.variantTitle,

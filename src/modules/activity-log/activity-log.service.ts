@@ -9,7 +9,9 @@ export class ActivityLogService {
   async getHistory(entityType: string, entityId: bigint) {
     const rows = await this.prisma.activityLog.findMany({
       where: { entityType, entityId },
-      include: { user: { select: { firstName: true, lastName: true, email: true } } },
+      include: {
+        user: { select: { firstName: true, lastName: true, email: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
     return { data: rows.map(serializeActivityLog) };

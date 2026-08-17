@@ -311,7 +311,11 @@ export class ReportService {
       week1Monday.getMonth(),
       week1Monday.getDate() + (weekNum - 1) * 7,
     );
-    const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7);
+    const to = new Date(
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate() + 7,
+    );
     const prevFrom = new Date(
       from.getFullYear(),
       from.getMonth(),

@@ -22,7 +22,9 @@ export const adminAuth = (over: Partial<AuthUser> = {}): AuthUser => ({
  * Dùng cho các test kiểm chốt chặn FORBIDDEN_SCOPE.
  */
 export const staffAuth = (
-  over: Partial<AuthUser> & { warehousePermissions?: Record<string, string[]> } = {},
+  over: Partial<AuthUser> & {
+    warehousePermissions?: Record<string, string[]>;
+  } = {},
 ): AuthUser => ({
   userId: 0n,
   email: 'staff@local.dev',

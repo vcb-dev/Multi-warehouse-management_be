@@ -41,7 +41,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       return res.status(status).json({
         error: {
-          code: status === HttpStatus.UNPROCESSABLE_ENTITY ? 'VALIDATION_ERROR' : 'HTTP_ERROR',
+          code:
+            status === HttpStatus.UNPROCESSABLE_ENTITY
+              ? 'VALIDATION_ERROR'
+              : 'HTTP_ERROR',
           message: Array.isArray(message) ? message.join(', ') : message,
           ...(fields ? { fields } : {}),
         },

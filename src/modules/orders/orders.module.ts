@@ -14,7 +14,11 @@ import { OrderReconcileService } from './reconcile.service';
 
 @Module({
   imports: [InventoryModule, PricingModule, ActivityLogModule],
-  controllers: [OrdersController, CustomersController, CustomerGroupsController],
+  controllers: [
+    OrdersController,
+    CustomersController,
+    CustomerGroupsController,
+  ],
   providers: [
     CustomerService,
     CustomerGroupService,

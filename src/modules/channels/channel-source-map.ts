@@ -46,7 +46,15 @@ export const CHANNEL_DEFS: ChannelDef[] = [
   {
     key: 'facebook',
     label: 'Facebook',
-    sources: ['facebook', 'facebook_shopping', 'instagram', 'live_fb', 'live-fb', 'livestream', 'social'],
+    sources: [
+      'facebook',
+      'facebook_shopping',
+      'instagram',
+      'live_fb',
+      'live-fb',
+      'livestream',
+      'social',
+    ],
     connectable: false,
   },
   {
@@ -56,7 +64,12 @@ export const CHANNEL_DEFS: ChannelDef[] = [
     connectable: false,
   },
   { key: 'pos', label: 'POS', sources: ['pos'], connectable: false },
-  { key: 'zalo', label: 'Zalo', sources: ['zalo', 'zalo-oa'], connectable: false },
+  {
+    key: 'zalo',
+    label: 'Zalo',
+    sources: ['zalo', 'zalo-oa'],
+    connectable: false,
+  },
 ];
 
 const CHANNEL_BY_SOURCE = new Map<string, ChannelKey>(
@@ -79,7 +92,10 @@ export function channelOfSource(sourceName: string | null): ChannelKey {
 }
 
 export function findChannelDef(key: string): ChannelDef | undefined {
-  return CHANNEL_DEFS.find((d) => d.key === key) ?? (key === 'other' ? OTHER_CHANNEL : undefined);
+  return (
+    CHANNEL_DEFS.find((d) => d.key === key) ??
+    (key === 'other' ? OTHER_CHANNEL : undefined)
+  );
 }
 
 export function channelLabel(key: ChannelKey): string {
