@@ -3,7 +3,6 @@ import * as ExcelJS from 'exceljs';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ProductRepository } from './product.repository';
 import { ProductService } from './product.service';
-import { ListProductsQueryDto } from './product.dto';
 
 /** Cột Excel Sapo — `Sản phẩm/Danh_sách_sản_phẩm.xlsx` */
 const SAPO_PRODUCT_HEADERS: Record<string, string> = {
@@ -22,21 +21,6 @@ const SAPO_PRODUCT_HEADERS: Record<string, string> = {
   'Giá vốn': 'cost',
   Barcode: 'barcode',
 };
-
-const EXPORT_COLUMNS = [
-  { header: 'Đường dẫn/Alias', key: 'alias', width: 24 },
-  { header: 'Tên sản phẩm*', key: 'name', width: 40 },
-  { header: 'Nhãn hiệu', key: 'vendor', width: 20 },
-  { header: 'Loại sản phẩm', key: 'product_type', width: 16 },
-  { header: 'Tags', key: 'tags', width: 24 },
-  { header: 'Đơn vị tính', key: 'unit', width: 12 },
-  { header: 'Hiển thị*', key: 'is_published', width: 10 },
-  { header: 'Mã SKU', key: 'sku', width: 20 },
-  { header: 'Giá', key: 'price', width: 14 },
-  { header: 'Giá so sánh', key: 'compare_at_price', width: 14 },
-  { header: 'Giá vốn', key: 'cost', width: 14 },
-  { header: 'Barcode', key: 'barcode', width: 16 },
-];
 
 function buildColumnMap(sheet: ExcelJS.Worksheet): Map<string, number> {
   const map = new Map<string, number>();
@@ -175,51 +159,5 @@ export class ProductImportService {
     }
 
     return { created, updated, errors };
-  }
-}
-
-@Injectable()
-export class ProductExportService {
-  constructor(
-    private products: ProductService,
-    private repo: ProductRepository,
-  ) {}
-
-  async exportExcel(query: ListProductsQueryDto) {
-    const where = await this.products.buildListWhere(query);
-    const products = await this.repo.client.product.findMany({
-      where,
-      orderBy: { modifiedOn: 'desc' },
-      include: {
-        variants: { where: { enabled: true }, orderBy: { id: 'asc' } },
-      },
-    });
-
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('San pham');
-    sheet.columns = EXPORT_COLUMNS;
-
-    for (const p of products) {
-      const variants = p.variants.length ? p.variants : [null];
-      for (const v of variants) {
-        sheet.addRow({
-          alias: p.alias,
-          name: p.name,
-          vendor: p.vendor ?? '',
-          product_type: p.productType ?? '',
-          tags: p.tags.join(', '),
-          unit: v?.unit ?? '',
-          is_published: p.status === 'active' ? 'Có' : 'Không',
-          sku: v?.sku ?? '',
-          price: v ? Number(v.price) : 0,
-          compare_at_price: v?.compareAtPrice ? Number(v.compareAtPrice) : '',
-          cost: v ? Number(v.cost) : '',
-          barcode: v?.barcode ?? '',
-        });
-      }
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer);
   }
 }

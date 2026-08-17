@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -269,6 +270,28 @@ export class ListOrdersQueryDto {
   @Min(1)
   @Type(() => Number)
   page_size?: number;
+}
+
+/**
+ * Ba loại file của Sapo: `order` = tổng quan mỗi đơn 1 dòng, `detail` = mỗi
+ * dòng hàng 1 dòng, `product` = gộp theo SKU trên toàn bộ đơn đã lọc.
+ */
+export const ORDER_EXPORT_MODES = ['order', 'product', 'detail'] as const;
+
+export class ExportOrdersQueryDto extends ListOrdersQueryDto {
+  @IsOptional()
+  @IsIn(ORDER_EXPORT_MODES)
+  mode?: (typeof ORDER_EXPORT_MODES)[number];
+
+  /** Các key cột cách nhau bởi dấu phẩy; thứ tự trong chuỗi là thứ tự cột file */
+  @IsOptional()
+  @IsString()
+  fields?: string;
+
+  /** Giới hạn về đúng các đơn được chọn / đang hiển thị (id cách nhau bởi dấu phẩy) */
+  @IsOptional()
+  @IsString()
+  ids?: string;
 }
 
 export class UpdateOrderDto {

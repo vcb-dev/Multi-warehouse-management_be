@@ -4,6 +4,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CustomerDebtService } from './customer-debt.service';
+import { OrderExportService } from './order-export.service';
 import { OrderRepository } from './order.repository';
 import { OrderService } from './order.service';
 import { OrdersController } from './orders.controller';
@@ -30,6 +31,7 @@ import { OrderReconcileService } from './reconcile.service';
     CustomerGroupService,
     OrderRepository,
     OrderService,
+    OrderExportService,
     OrderReconcileService,
     CustomerDebtService,
   ],

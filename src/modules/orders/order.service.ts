@@ -55,6 +55,76 @@ import {
 // DB xa + lặp nhiều dòng giữ chỗ/tồn — timeout mặc định 5s của Prisma quá ngắn.
 const TX_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 
+/** Quan hệ cần nạp để `serializeOrderListItem` chạy được */
+export const orderListInclude = {
+  customer: true,
+  location: true,
+  createdBy: true,
+  items: {
+    select: { sku: true, variantId: true, quantity: true },
+  },
+  fulfillments: {
+    where: { closedAt: null },
+    take: 1,
+    select: {
+      packedStatus: true,
+      shipmentStatus: true,
+      provider: { select: { name: true } },
+      // Đơn đồng bộ từ sàn không có provider tích hợp — tên hãng nằm ở đây
+      carrierName: true,
+      trackingCompany: true,
+      carrier: true,
+    },
+  },
+} as const;
+
+function stockStatusOf(
+  query: ListOrdersQueryDto,
+): 'thieu_hang' | 'du_hang' | undefined {
+  return query.stock_status === 'thieu_hang' || query.stock_status === 'du_hang'
+    ? query.stock_status
+    : undefined;
+}
+
+async function computeStockReady(
+  repo: OrderRepository,
+  // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
+  orders: {
+    id: bigint;
+    locationId: bigint;
+    items: { variantId: bigint; quantity: number }[];
+  }[],
+) {
+  const pairs = new Map<string, { variantId: bigint; locationId: bigint }>();
+  for (const row of orders) {
+    for (const item of row.items) {
+      pairs.set(`${item.variantId}:${row.locationId}`, {
+        variantId: item.variantId,
+        locationId: row.locationId,
+      });
+    }
+  }
+  const levels = pairs.size
+    ? await repo.client.inventoryLevel.findMany({
+        where: { OR: Array.from(pairs.values()) },
+        select: { variantId: true, locationId: true, onHand: true },
+      })
+    : [];
+  const onHandMap = new Map(
+    levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
+  );
+  return new Map<bigint, boolean>(
+    orders.map((row) => [
+      row.id,
+      row.items.every(
+        (i) =>
+          (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
+          i.quantity,
+      ),
+    ]),
+  );
+}
+
 type ResolvedItem = {
   variantId: bigint;
   locationId: bigint;
@@ -99,9 +169,18 @@ export class OrderService {
     });
   }
 
-  async list(query: ListOrdersQueryDto, user: AuthUser) {
-    const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+  /**
+   * Dựng `where` cho danh sách đơn từ bộ lọc màn hình. Tách khỏi `list` để
+   * export dùng lại đúng một bộ lọc — file xuất phải khớp tuyệt đối với những
+   * gì người dùng đang nhìn thấy trên bảng.
+   *
+   * Không xử lý `stock_status`: lọc đủ/thiếu hàng phải tính tồn từng đơn bằng
+   * JS nên nằm ở {@link filterByStockStatus}.
+   */
+  async buildListWhere(
+    query: ListOrdersQueryDto,
+    user: AuthUser,
+  ): Promise<Prisma.OrderWhereInput> {
     const where: Prisma.OrderWhereInput = {};
 
     // Location nằm ở cấp đơn (theo Sapo), không còn theo từng dòng hàng.
@@ -113,10 +192,7 @@ export class OrderService {
       where.locationId = locationScopeFilter(user, 'order:view');
     }
 
-    const stockFilter =
-      query.stock_status === 'thieu_hang' || query.stock_status === 'du_hang'
-        ? query.stock_status
-        : undefined;
+    const stockFilter = stockStatusOf(query);
 
     if (stockFilter) {
       // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ. Không thể chỉ lọc
@@ -166,69 +242,40 @@ export class OrderService {
       where.id = { in: ids };
     }
 
-    const listInclude = {
-      customer: true,
-      location: true,
-      createdBy: true,
-      items: {
-        select: { sku: true, variantId: true, quantity: true },
-      },
-      fulfillments: {
-        where: { closedAt: null },
-        take: 1,
-        select: {
-          packedStatus: true,
-          shipmentStatus: true,
-          provider: { select: { name: true } },
-          // Đơn đồng bộ từ sàn không có provider tích hợp — tên hãng nằm ở đây
-          carrierName: true,
-          trackingCompany: true,
-          carrier: true,
-        },
-      },
-    } as const;
+    return where;
+  }
 
-    async function computeStockReady(
-      repo: OrderRepository,
-      // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
-      orders: {
-        id: bigint;
-        locationId: bigint;
-        items: { variantId: bigint; quantity: number }[];
-      }[],
-    ) {
-      const pairs = new Map<
-        string,
-        { variantId: bigint; locationId: bigint }
-      >();
-      for (const row of orders) {
-        for (const item of row.items) {
-          pairs.set(`${item.variantId}:${row.locationId}`, {
-            variantId: item.variantId,
-            locationId: row.locationId,
-          });
-        }
-      }
-      const levels = pairs.size
-        ? await repo.client.inventoryLevel.findMany({
-            where: { OR: Array.from(pairs.values()) },
-            select: { variantId: true, locationId: true, onHand: true },
-          })
-        : [];
-      const onHandMap = new Map(
-        levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
-      );
-      return new Map<bigint, boolean>(
-        orders.map((row) => [
-          row.id,
-          row.items.every(
-            (i) =>
-              (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
-              i.quantity,
-          ),
-        ]),
-      );
-    }
+  /**
+   * Lọc đủ/thiếu hàng: không có cột lưu sẵn nên phải nạp đơn đang chờ xử lý,
+   * tính tồn từng đơn rồi lọc bằng JS. Chấp nhận được vì `buildListWhere` đã
+   * thu tập này về ~1.7k đơn (đơn đã giao/hủy không nằm trong tập).
+   */
+  async filterByStockStatus(
+    where: Prisma.OrderWhereInput,
+    stockFilter: 'thieu_hang' | 'du_hang',
+  ): Promise<bigint[]> {
+    const rows = await this.repo.client.order.findMany({
+      where,
+      orderBy: { createdOn: 'desc' },
+      select: {
+        id: true,
+        locationId: true,
+        items: { select: { variantId: true, quantity: true } },
+      },
+    });
+    const readyMap = await computeStockReady(this.repo, rows);
+    const wantReady = stockFilter === 'du_hang';
+    return rows
+      .filter((row) => (readyMap.get(row.id) ?? true) === wantReady)
+      .map((row) => row.id);
+  }
+
+  async list(query: ListOrdersQueryDto, user: AuthUser) {
+    const page = query.page ?? 1;
+    const pageSize = query.page_size ?? 20;
+    const where = await this.buildListWhere(query, user);
+
+    const stockFilter = stockStatusOf(query);
 
     if (stockFilter) {
       // Không có cột lưu sẵn "đủ/thiếu hàng" nên phải lấy hết đơn đang chờ
@@ -238,7 +285,7 @@ export class OrderService {
       const all = await this.repo.client.order.findMany({
         where,
         orderBy: { createdOn: 'desc' },
-        include: listInclude,
+        include: orderListInclude,
       });
       const stockReadyMap = await computeStockReady(this.repo, all);
       const wantReady = stockFilter === 'du_hang';
@@ -263,7 +310,7 @@ export class OrderService {
         orderBy: { createdOn: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: listInclude,
+        include: orderListInclude,
       }),
       this.repo.count(where),
     ]);
