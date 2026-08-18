@@ -4,6 +4,10 @@ import {
   LocationOptional,
   RequirePermission,
 } from '../../common/decorators/permissions.decorator';
+import {
+  CurrentUser,
+  AuthUser,
+} from '../../common/decorators/current-user.decorator';
 import { CreatePriceListDto, PriceListService } from './price-list.service';
 
 @ApiTags('price-lists')
@@ -58,7 +62,8 @@ export class PricingController {
         enabled?: boolean;
       }[];
     },
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.pricing.upsertItems(BigInt(id), body.items ?? []);
+    return this.pricing.upsertItems(BigInt(id), body.items ?? [], user);
   }
 }
