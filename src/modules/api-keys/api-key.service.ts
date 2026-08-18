@@ -116,6 +116,9 @@ export class ApiKeyService {
       systemPermissions: resolved.systemPermissions,
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,
+      // Dùng chung cache với JWT (cùng khoá userId) nên phải khớp shape, nếu không
+      // request JWT bám vào entry do API key nạp sẽ bị so lệch phiên bản.
+      tokenVersion: actingUser.tokenVersion,
     };
     this.authCache.set(cacheKey, authUser);
     return authUser;

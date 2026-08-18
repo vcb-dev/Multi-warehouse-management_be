@@ -9,6 +9,7 @@ import { AuthService } from '../src/modules/auth/auth.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import type { JwtService } from '@nestjs/jwt';
 import type { RbacService } from '../src/modules/rbac/rbac.service';
+import type { AuthCacheService } from '../src/modules/rbac/auth-cache.service';
 
 const baseUser = {
   id: 7n,
@@ -38,7 +39,8 @@ function build(userRow: unknown = baseUser) {
   const rbac = {
     resolvePermissions: jest.fn().mockResolvedValue(resolved),
   } as unknown as RbacService;
-  return new AuthService(prisma, jwt, rbac);
+  const authCache = { invalidate: jest.fn() } as unknown as AuthCacheService;
+  return new AuthService(prisma, jwt, rbac, authCache);
 }
 
 describe('AuthService.me', () => {

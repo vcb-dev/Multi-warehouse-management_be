@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
+import { AuthCacheService } from '../rbac/auth-cache.service';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import type { User } from '@prisma/client';
 import type { ResolvedPermissions } from '../rbac/rbac.service';
@@ -17,6 +18,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private rbac: RbacService,
+    private authCache: AuthCacheService,
   ) {}
 
   /**
@@ -56,6 +58,7 @@ export class AuthService {
     const token = await this.jwt.signAsync({
       sub: user.id.toString(),
       email: user.email,
+      ver: user.tokenVersion,
     });
 
     return {
@@ -74,5 +77,24 @@ export class AuthService {
     if (!user) throw new NotFoundException('USER_NOT_FOUND');
     const resolved = await this.rbac.resolvePermissions(user.id);
     return { user: this.buildUserPayload(user, resolved) };
+  }
+
+  /**
+   * Vô hiệu hoá MỌI token đã phát cho user — đăng xuất toàn bộ thiết bị.
+   *
+   * Đăng xuất thường chỉ xoá cookie tại máy đang dùng, token vẫn sống tới khi hết
+   * hạn (7 ngày); đây là đường duy nhất thu hồi thật. Vì đá văng cả thiết bị khác
+   * nên tách riêng, không gộp vào nút đăng xuất bình thường.
+   *
+   * Phải xoá cache quyền ngay: `JwtStrategy` trả cache TRƯỚC khi tra DB, không xoá
+   * thì token vừa thu hồi vẫn đi lọt tới hết TTL 30s.
+   */
+  async revokeAllSessions(userId: bigint) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    this.authCache.invalidate(userId);
+    return { data: { revoked: true, token_version: user.tokenVersion } };
   }
 }
