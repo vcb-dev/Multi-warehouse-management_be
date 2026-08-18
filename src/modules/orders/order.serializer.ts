@@ -75,7 +75,17 @@ export function serializeOrderListItem(
     o.phone?.trim() ||
     o.customer?.phone?.trim() ||
     '';
+  // Đơn sàn (TikTok/Shopee) có địa chỉ bị sàn che: `đ** đ** q***g`, `0947****98`. Đủ để
+  // HIỂN THỊ nhưng không đủ để giao — đẩy sang GHN/ViettelPost sẽ ra vận đơn sai địa chỉ.
+  // Trước đây các cột này bỏ trống nên tự động rớt điều kiện; từ khi lưu bản che thì phải
+  // loại tường minh, nếu không màn "Đẩy đơn hàng loạt" sẽ coi chúng là sẵn sàng.
+  const maskedRecipient = [
+    recipientName,
+    recipientPhone,
+    o.shippingAddress1 ?? '',
+  ].some((v) => v.includes('*'));
   const carrierShipReady =
+    !maskedRecipient &&
     !!recipientName &&
     !!recipientPhone &&
     !!o.shippingAddress1?.trim() &&

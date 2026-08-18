@@ -21,6 +21,11 @@ const RETRY_BASE_MS = 3000;
 const RETRYABLE_TIKTOK_CODES = new Set([
   105005, // Access denied — TikTok trả nhầm khi scope vừa bật xong
   105002, // Rate limit
+  // "Internal error. Please try again." — hay gặp khi phân trang sâu (đo 2026-08-18: vỡ ở
+  // trang 5 của một khoảng 20 ngày). KHÔNG phải trần phân trang: gọi lại đúng
+  // `next_page_token` đó là qua ngay lần đầu. Không có mã này trong danh sách thì mọi lượt
+  // backfill dài đều chết giữa chừng và mất trọn khoảng còn lại.
+  36009003,
 ]);
 
 /** Giữ `code` gốc của TikTok để tầng retry phân biệt lỗi tạm thời với lỗi cấu hình. */
@@ -119,9 +124,17 @@ export type TiktokOrder = {
     tax?: string;
   };
   /**
-   * CẢNH BÁO: TikTok che toàn bộ thông tin người nhận với app chỉ có `seller.order.info` —
-   * mọi trường về rỗng chuỗi (kiểm chứng 2026-08-15), không phải lỗi parse. Muốn có tên/
-   * SĐT/địa chỉ thật phải xin thêm quyền PII bên Partner Center.
+   * Thông tin người nhận, **bị che một phần** chứ không rỗng.
+   *
+   * Đo lại 2026-08-18 (ghi chú cũ nói "mọi trường về rỗng chuỗi" là sai): TikTok trả
+   * `name` = `đ** đ** q***g`, `phone_number` = `(+84)947****98`, `address_detail` =
+   * `Ph********************`, nhưng `district_info` cấp L0/L1/L2 (nước / tỉnh /
+   * quận-huyện) thì KHÔNG che. `getOrderDetail` che y hệt `searchOrders` — gọi thêm API
+   * chi tiết không lấy được gì hơn.
+   *
+   * Nguyên nhân che là `shipping_type = "TIKTOK"` (TikTok Shipping — 50/50 đơn đo được),
+   * không phải thiếu scope: đơn `shipping_type = "SELLER"` mới trả địa chỉ đầy đủ. Đơn
+   * đang ở trạng thái giữ (`is_on_hold_order`) thì cả object này về rỗng thật.
    */
   recipient_address?: {
     name?: string;
@@ -131,11 +144,62 @@ export type TiktokOrder = {
     full_address?: string;
     address_detail?: string;
     address_line1?: string;
+    address_line2?: string;
     postal_code?: string;
     region_code?: string;
-    district_info?: { address_name?: string; address_level_name?: string }[];
+    /**
+     * Các cấp hành chính, xếp sẵn theo thứ tự. Phân biệt cấp bằng `address_level`
+     * (`L0`..`L3`) — xem ghi chú ở `mapRecipientAddress()` về việc vì sao KHÔNG được
+     * dùng `address_level_name`.
+     */
+    district_info?: {
+      address_level?: string;
+      address_level_name?: string;
+      address_name?: string;
+      iso_code?: string;
+    }[];
   };
   line_items?: TiktokOrderLine[];
+};
+
+/**
+ * Một phiếu hoàn/trả. Hình dạng chép từ dữ liệu thật 2026-08-18 (563 phiếu/120 ngày),
+ * không phải từ tài liệu — tài liệu không nói `return_method` có thể vắng mặt (36/563).
+ */
+export type TiktokReturn = {
+  return_id: string;
+  order_id: string;
+  /** Quan sát được: RETURN_AND_REFUND (560), REFUND (3 — hoàn tiền, KHÔNG trả hàng). */
+  return_type?: string;
+  /**
+   * Quan sát được: RETURN_OR_REFUND_REQUEST_COMPLETE (437), RETURN_OR_REFUND_REQUEST_CANCEL
+   * (96), BUYER_SHIPPED_ITEM (21), AWAITING_BUYER_SHIP (9). TikTok còn nhiều trạng thái
+   * khác chưa gặp (PENDING/REJECT...) nên mọi nhánh map phải có mặc định.
+   */
+  return_status?: string;
+  return_reason?: string;
+  return_reason_text?: string;
+  return_method?: string;
+  return_tracking_number?: string;
+  create_time?: number;
+  update_time?: number;
+  is_combined_return?: boolean;
+  refund_amount?: {
+    currency?: string;
+    refund_total?: string;
+    refund_subtotal?: string;
+    refund_shipping_fee?: string;
+    refund_tax?: string;
+  };
+  return_line_items?: {
+    return_line_item_id?: string;
+    order_line_item_id?: string;
+    seller_sku?: string;
+    sku_id?: string;
+    sku_name?: string;
+    product_name?: string;
+    refund_amount?: { refund_total?: string };
+  }[];
 };
 
 export class TiktokApiClient {
@@ -198,6 +262,45 @@ export class TiktokApiClient {
     return this.call(
       'POST',
       `/order/${API_VERSION}/orders/search`,
+      query,
+      body,
+    );
+  }
+
+  /**
+   * Phiếu hoàn/trả trong một khoảng thời gian.
+   *
+   * `page_size` bị chặn trong khoảng **10–50** (gửi 100 là lỗi "Value Out Of Range"), khác
+   * hẳn API đơn hàng cho tới 100 — đừng chép hằng số từ `searchOrders` sang.
+   */
+  searchReturns(params: {
+    shopCipher: string;
+    createTimeGe?: number;
+    createTimeLt?: number;
+    updateTimeGe?: number;
+    updateTimeLt?: number;
+    pageSize?: number;
+    pageToken?: string;
+  }): Promise<{
+    return_orders?: TiktokReturn[];
+    next_page_token?: string;
+    total_count?: number;
+  }> {
+    const query: Record<string, string> = {
+      shop_cipher: params.shopCipher,
+      page_size: String(Math.min(params.pageSize ?? 50, 50)),
+    };
+    if (params.pageToken) query.page_token = params.pageToken;
+
+    const body: Record<string, unknown> = {};
+    if (params.createTimeGe != null) body.create_time_ge = params.createTimeGe;
+    if (params.createTimeLt != null) body.create_time_lt = params.createTimeLt;
+    if (params.updateTimeGe != null) body.update_time_ge = params.updateTimeGe;
+    if (params.updateTimeLt != null) body.update_time_lt = params.updateTimeLt;
+
+    return this.call(
+      'POST',
+      `/return_refund/${API_VERSION}/returns/search`,
       query,
       body,
     );

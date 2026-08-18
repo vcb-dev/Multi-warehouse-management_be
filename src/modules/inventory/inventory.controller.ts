@@ -16,8 +16,11 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
-import { sendXlsx } from '../../common/utils/send-xlsx';
-import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
+import {
+  ExportInventoryQueryDto,
+  ListInventoryQueryDto,
+  ListMovementsQueryDto,
+} from './inventory.dto';
 import {
   InventoryExportService,
   InventoryImportService,
@@ -48,15 +51,20 @@ export class InventoryController {
     return this.query.listInventory(query, user);
   }
 
+  @Get('export/fields')
+  @RequirePermission('inventory:view')
+  exportFields() {
+    return this.exporter.fields();
+  }
+
   @Get('export')
   @RequirePermission('inventory:view')
   async export(
-    @Query() query: ListInventoryQueryDto,
+    @Query() query: ExportInventoryQueryDto,
     @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    const buffer = await this.exporter.exportExcel(query, user);
-    sendXlsx(res, buffer, 'ton-kho.xlsx');
+    await this.exporter.export(query, user, res);
   }
 
   @Post('import')

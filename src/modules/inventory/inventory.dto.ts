@@ -67,6 +67,16 @@ export class ListInventoryQueryDto {
   page_size?: number = 20;
 }
 
+export class ExportInventoryQueryDto extends ListInventoryQueryDto {
+  /**
+   * Các key cột cách nhau bởi dấu phẩy; thứ tự trong chuỗi là thứ tự cột file.
+   * Phạm vi "dòng được chọn" dùng lại `variant_ids` chứ không có tham số riêng.
+   */
+  @IsOptional()
+  @IsString()
+  fields?: string;
+}
+
 export class ListMovementsQueryDto {
   @IsOptional()
   @IsString()

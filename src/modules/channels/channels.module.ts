@@ -8,6 +8,7 @@ import { ChannelsController } from './channels.controller';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
+import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
 import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
     ShopeeAuthService,
     TiktokAuthService,
     TiktokOrderSyncService,
+    TiktokReturnSyncService,
     TiktokWebhookService,
     ChannelOverviewService,
   ],

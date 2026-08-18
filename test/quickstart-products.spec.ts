@@ -2,7 +2,9 @@
  * Quickstart KC1–KC6 — specs/005-san-pham/quickstart.md
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/quickstart-products.spec.ts
  */
+import { Writable } from 'node:stream';
 import { Test, TestingModule } from '@nestjs/testing';
+import type { Response } from 'express';
 import { CategoriesModule } from '../src/modules/categories/categories.module';
 import { CategoryService } from '../src/modules/categories/category.service';
 import { PricingModule } from '../src/modules/pricing/pricing.module';
@@ -168,12 +170,31 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     expect(link).toBeTruthy();
   });
 
-  it('KC6 — export trả buffer Excel', async () => {
-    const { ProductExportService } =
-      await import('../src/modules/products/product-import.service');
+  it('KC6 — export ghi file Excel xuống response', async () => {
+    const { ProductExportService } = await import(
+      '../src/modules/products/product-export.service'
+    );
     const exporter = new ProductExportService(products, productRepo);
-    const buf = await exporter.exportExcel({});
-    expect(buf.length).toBeGreaterThan(100);
+
+    // Export stream thẳng vào response: giả một Writable có setHeader để hứng byte
+    const chunks: Buffer[] = [];
+    const headers: Record<string, string> = {};
+    const res = new Writable({
+      write(chunk: Buffer, _enc, cb) {
+        chunks.push(Buffer.from(chunk));
+        cb();
+      },
+    }) as Writable & {
+      setHeader: (k: string, v: string) => void;
+    };
+    res.setHeader = (k, v) => {
+      headers[k] = v;
+    };
+
+    await exporter.export({}, res as unknown as Response);
+
+    expect(headers['Content-Disposition']).toContain('san-pham');
+    expect(Buffer.concat(chunks).length).toBeGreaterThan(100);
   });
 });
 
