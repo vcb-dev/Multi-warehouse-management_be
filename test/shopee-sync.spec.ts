@@ -33,6 +33,11 @@ describe('ShopeeSyncService', () => {
       deleteMany: jest.fn(),
       createMany: jest.fn(),
     },
+    fulfillment: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
   };
 
   const prisma = {
@@ -198,12 +203,12 @@ describe('ShopeeSyncService', () => {
   });
 
   it.each([
-    ['PROCESSED', null, null],
-    ['SHIPPED', 'fulfilled', null],
-    ['COMPLETED', 'fulfilled', new Date(1704153600 * 1000)],
+    ['PROCESSED', null, null, 'pending'],
+    ['SHIPPED', 'fulfilled', null, 'picked_up'],
+    ['COMPLETED', 'fulfilled', new Date(1704153600 * 1000), 'delivered'],
   ] as const)(
     'map trạng thái giao hàng %s → fulfillment=%s',
-    async (orderStatus, fulfillmentStatus, deliveredOn) => {
+    async (orderStatus, fulfillmentStatus, deliveredOn, shipmentStatus) => {
       client.getOrderList.mockResolvedValue({
         order_list: [{ order_sn: '240101SHP', order_status: orderStatus }],
         more: false,
@@ -217,6 +222,19 @@ describe('ShopeeSyncService', () => {
             update_time: 1704153600,
             total_amount: 100000,
             cod: false,
+            shipping_carrier: 'SPX Express',
+            package_list: [
+              {
+                package_number: 'OFG123',
+                logistics_status:
+                  orderStatus === 'COMPLETED'
+                    ? 'LOGISTICS_DELIVERY_DONE'
+                    : orderStatus === 'SHIPPED'
+                      ? 'LOGISTICS_PICKUP_DONE'
+                      : 'LOGISTICS_REQUEST_CREATED',
+                tracking_number: 'SPX123456',
+              },
+            ],
             item_list: [
               {
                 item_name: 'Item',
@@ -238,6 +256,17 @@ describe('ShopeeSyncService', () => {
           data: expect.objectContaining({
             fulfillmentStatus,
             deliveredOn,
+          }),
+        }),
+      );
+      expect(tx.fulfillment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            name: 'SPE-OFG123',
+            shipmentStatus,
+            packedStatus: 'packed',
+            trackingNumber: 'SPX123456',
+            carrierName: 'SPX Express',
           }),
         }),
       );

@@ -1,11 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   ChannelConnection,
+  FulfillmentDeliveryMethod,
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderSource,
   OrderStatus,
+  PackingStatus,
   Prisma,
+  ShipmentStatus,
 } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -360,6 +363,7 @@ export class ShopeeSyncService {
       select: { id: true },
     });
 
+    const fulfillment = mapFulfillmentRecord(order, locationId, createdById);
     let orderId!: bigint;
     await this.prisma.$transaction(async (tx) => {
       if (existing) {
@@ -377,6 +381,39 @@ export class ShopeeSyncService {
         await tx.orderItem.createMany({
           data: items.map((i) => ({ ...i, orderId })),
         });
+      }
+
+      if (fulfillment) {
+        const { name, ...rest } = fulfillment;
+        const shippingFields = {
+          status: rest.status,
+          shipmentStatus: rest.shipmentStatus,
+          packedStatus: rest.packedStatus,
+          deliveryMethod: rest.deliveryMethod,
+          trackingNumber: rest.trackingNumber,
+          carrierName: rest.carrierName,
+          trackingCompany: rest.trackingCompany,
+          shipmentCreatedOn: rest.shipmentCreatedOn,
+          pickedUpAt: rest.pickedUpAt,
+          deliveredOn: rest.deliveredOn,
+          cancelledOn: rest.cancelledOn,
+          codAmount: rest.codAmount,
+          totalQuantity: rest.totalQuantity,
+        };
+
+        const target = await tx.fulfillment.findFirst({
+          where: { OR: [{ name }, { orderId, closedAt: null }] },
+          select: { id: true },
+        });
+
+        if (target) {
+          await tx.fulfillment.update({
+            where: { id: target.id },
+            data: shippingFields,
+          });
+        } else {
+          await tx.fulfillment.create({ data: { ...rest, name, orderId } });
+        }
       }
     });
 
@@ -490,13 +527,13 @@ export class ShopeeSyncService {
         where: { phone },
       });
       if (existing) return existing.id;
-      const created = await this.prisma.customer.create({
-        data: {
-          phone,
-          firstName: name || null,
-        },
-      });
-      return created.id;
+      // const created = await this.prisma.customer.create({
+      //   data: {
+      //     phone,
+      //     firstName: name || null,
+      //   },
+      // });
+      // return created.id;
     }
 
     const pseudoPhone = `shopee-${order.buyer_user_id ?? order.order_sn}`;
@@ -703,6 +740,123 @@ function mapFulfillment(status?: string): OrderFulfillmentStatus | null {
     return OrderFulfillmentStatus.fulfilled;
   }
   return null;
+}
+
+/**
+ * Vận đơn cho đơn sàn Shopee — cùng quy ước TikTok: `delivery_method = ecommerce`,
+ * `provider_id` NULL, hãng thật ở `carrier_name`.
+ */
+function mapFulfillmentRecord(
+  order: ShopeeOrderDetail,
+  locationId: bigint,
+  createdById: bigint,
+) {
+  const pkg = order.package_list?.[0];
+  const packageNumber = pkg?.package_number?.trim();
+  const tracking = (pkg?.tracking_number ?? '').trim();
+  const validTracking = tracking && tracking !== '-' ? tracking : null;
+  const orderStatus = order.order_status;
+
+  const hasShippingActivity =
+    orderStatus === 'PROCESSED' ||
+    orderStatus === 'SHIPPED' ||
+    orderStatus === 'COMPLETED' ||
+    orderStatus === 'CANCELLED' ||
+    orderStatus === 'IN_CANCEL';
+
+  if (!packageNumber && !validTracking && !hasShippingActivity) return null;
+
+  const shipmentStatus = mapShipmentStatus(orderStatus, pkg?.logistics_status);
+  if (!shipmentStatus) return null;
+
+  const at = (unix?: number) => (unix ? new Date(unix * 1000) : null);
+  const updateAt = at(order.update_time);
+  const carrier =
+    pkg?.shipping_carrier?.trim() || order.shipping_carrier?.trim() || null;
+  const totalPrice = toDecimal(order.total_amount);
+
+  return {
+    name: `SPE-${packageNumber ?? validTracking ?? order.order_sn}`,
+    status:
+      orderStatus === 'CANCELLED' || orderStatus === 'IN_CANCEL'
+        ? 'cancelled'
+        : 'success',
+    shipmentStatus,
+    deliveryMethod: FulfillmentDeliveryMethod.ecommerce,
+    packedStatus:
+      orderStatus === 'PROCESSED' ||
+      orderStatus === 'SHIPPED' ||
+      orderStatus === 'COMPLETED'
+        ? PackingStatus.packed
+        : PackingStatus.unknown,
+    trackingNumber: validTracking,
+    carrierName: carrier,
+    trackingCompany: carrier,
+    locationId,
+    createdById,
+    shipmentCreatedOn: at(order.create_time),
+    pickedUpAt: at(order.pickup_done_time),
+    deliveredOn:
+      orderStatus === 'COMPLETED' ||
+      pkg?.logistics_status === 'LOGISTICS_DELIVERY_DONE'
+        ? updateAt
+        : null,
+    cancelledOn:
+      orderStatus === 'CANCELLED' || orderStatus === 'IN_CANCEL'
+        ? updateAt
+        : null,
+    codAmount: order.cod === true ? totalPrice : new Prisma.Decimal(0),
+    totalQuantity:
+      order.item_list?.reduce(
+        (sum, i) => sum + (i.model_quantity_purchased ?? 1),
+        0,
+      ) ?? 0,
+  };
+}
+
+/** Shopee `order_status` + `logistics_status` → `shipment_status` nội bộ. */
+function mapShipmentStatus(
+  orderStatus?: string,
+  logisticsStatus?: string,
+): ShipmentStatus | null {
+  if (orderStatus === 'CANCELLED' || orderStatus === 'IN_CANCEL') {
+    return ShipmentStatus.cancelled;
+  }
+
+  if (logisticsStatus) {
+    switch (logisticsStatus) {
+      case 'LOGISTICS_NOT_START':
+      case 'LOGISTICS_READY':
+      case 'LOGISTICS_REQUEST_CREATED':
+      case 'LOGISTICS_PENDING_ARRANGE':
+        return ShipmentStatus.pending;
+      case 'LOGISTICS_PICKUP_DONE':
+        return ShipmentStatus.picked_up;
+      case 'LOGISTICS_DELIVERY_DONE':
+        return ShipmentStatus.delivered;
+      case 'LOGISTICS_PICKUP_RETRY':
+        return ShipmentStatus.retry_delivery;
+      case 'LOGISTICS_PICKUP_FAILED':
+      case 'LOGISTICS_DELIVERY_FAILED':
+      case 'LOGISTICS_LOST':
+      case 'LOGISTICS_INVALID':
+      case 'LOGISTICS_REQUEST_CANCELED':
+        return ShipmentStatus.cancelled;
+      default:
+        break;
+    }
+  }
+
+  switch (orderStatus) {
+    case 'PROCESSED':
+      return ShipmentStatus.pending;
+    case 'SHIPPED':
+      return ShipmentStatus.delivering;
+    case 'COMPLETED':
+      return ShipmentStatus.delivered;
+    default:
+      return null;
+  }
 }
 
 function toDecimal(v?: number | null): Prisma.Decimal {

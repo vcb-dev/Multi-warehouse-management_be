@@ -40,11 +40,19 @@ export type ShopeeRecipientAddress = {
   zipcode?: string;
 };
 
+export type ShopeePackage = {
+  package_number?: string;
+  logistics_status?: string;
+  tracking_number?: string;
+  shipping_carrier?: string;
+};
+
 export type ShopeeOrderDetail = {
   order_sn: string;
   order_status?: string;
   create_time?: number;
   update_time?: number;
+  pickup_done_time?: number;
   currency?: string;
   cod?: boolean;
   total_amount?: number;
@@ -57,6 +65,7 @@ export type ShopeeOrderDetail = {
   buyer_username?: string;
   recipient_address?: ShopeeRecipientAddress;
   item_list?: ShopeeOrderItem[];
+  package_list?: ShopeePackage[];
 };
 
 type ShopeeApiEnvelope<T = unknown> = {
@@ -72,7 +81,7 @@ type ShopeeApiEnvelope<T = unknown> = {
 };
 
 const ORDER_DETAIL_FIELDS =
-  'order_status,buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller';
+  'order_status,buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller,package_list,pickup_done_time,cod,update_time,create_time,currency';
 
 /** Public API — partner_id + path + timestamp */
 /**
