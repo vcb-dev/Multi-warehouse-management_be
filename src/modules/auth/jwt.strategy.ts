@@ -8,7 +8,7 @@ import { RbacService } from '../rbac/rbac.service';
 import { AuthCacheService } from '../rbac/auth-cache.service';
 import { requireEnv } from '../../common/utils/require-env';
 
-type JwtPayload = { sub: string; email: string };
+type JwtPayload = { sub: string; email: string; ver?: number };
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -27,13 +27,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
     const cached = this.authCache.get(payload.sub);
-    if (cached) return cached;
+    if (cached) {
+      // Cache theo userId nên dùng chung cho mọi token của user. Không so ở đây thì
+      // sau khi thu hồi, chỉ cần user đăng nhập lại là entry cache mới nạp lên và
+      // token cũ bám theo đó đi lọt.
+      if ((payload.ver ?? 0) !== (cached.tokenVersion ?? 0)) {
+        throw new UnauthorizedException();
+      }
+      return cached;
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(payload.sub) },
       include: { locations: true, locationRoles: true },
     });
     if (!user || !user.active || user.status === 'inactive') {
+      this.authCache.invalidate(payload.sub);
+      throw new UnauthorizedException();
+    }
+    // Token phát trước lần thu hồi gần nhất -> từ chối. `ver` vắng mặt nghĩa là token
+    // ký bởi bản cũ (trước khi có tokenVersion), coi như phiên bản 0 để những token
+    // đang lưu hành lúc triển khai không bị đá hàng loạt ngoài ý muốn.
+    if ((payload.ver ?? 0) !== user.tokenVersion) {
       this.authCache.invalidate(payload.sub);
       throw new UnauthorizedException();
     }
@@ -48,6 +63,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       systemPermissions: resolved.systemPermissions,
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,
+      tokenVersion: user.tokenVersion,
     };
     this.authCache.set(payload.sub, authUser);
     return authUser;

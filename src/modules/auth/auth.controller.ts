@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength } from 'class-validator';
 import { Public } from '../../common/decorators/roles.decorator';
@@ -42,6 +49,18 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.userId);
+  }
+
+  /**
+   * Đăng xuất khỏi MỌI thiết bị. Nút đăng xuất thường chỉ xoá cookie tại máy đang
+   * dùng — token vẫn hiệu lực tới khi hết hạn (7 ngày); đây là đường duy nhất thu
+   * hồi thật, dùng khi nghi lộ token hoặc mất máy.
+   */
+  @ApiBearerAuth()
+  @Post('logout-all')
+  @HttpCode(200)
+  logoutAll(@CurrentUser() user: AuthUser) {
+    return this.auth.revokeAllSessions(user.userId);
   }
 
   @Public()

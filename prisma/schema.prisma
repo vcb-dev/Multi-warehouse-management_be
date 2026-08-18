@@ -311,6 +311,10 @@ model User {
   roles           UserRole[]    @default([])
   status          AccountStatus @default(active)
   active          Boolean       @default(true)
+  // Tăng lên để vô hiệu hoá MỌI token đã phát của user (đăng xuất toàn bộ thiết
+  // bị, đổi mật khẩu, nghi lộ token). JWT mang `ver` lúc ký; `JwtStrategy` đối
+  // chiếu trong đúng lượt tra DB vốn đã chạy mỗi request nên không tốn thêm query.
+  tokenVersion    Int           @default(0) @map("token_version")
   // Tham chiếu thô từ /admin/users.json — KHÔNG điều khiển nghiệp vụ (RBAC
   // nội bộ vẫn là nguồn thật duy nhất). Bảng users hiện không đồng bộ với
   // Sapo (không có sapo_id nào khớp thật), nên các field này luôn NULL cho
