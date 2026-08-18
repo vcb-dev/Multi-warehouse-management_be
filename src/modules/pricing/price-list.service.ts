@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessException } from '../../common/exceptions/business.exception';
+import { assertLocationPermission } from '../../common/auth/access';
+import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 export type ResolveContext = {
   location_id?: bigint;
@@ -167,8 +169,19 @@ export class PriceListService {
       compare_at_price?: number;
       enabled?: boolean;
     }[],
+    user: AuthUser,
   ) {
-    await this.prisma.priceList.findUniqueOrThrow({ where: { id } });
+    const priceList = await this.prisma.priceList.findUniqueOrThrow({
+      where: { id },
+    });
+
+    // Kho nằm trên BẢN GHI chứ không có trong request (id ở path, body chỉ có items),
+    // nên PermissionGuard không kiểm được — `@LocationOptional` ở route này chỉ mở
+    // đường cho bảng giá toàn cục. Không chốt ở đây thì người có `product:manage` tại
+    // kho A sửa được giá của bảng giá thuộc kho B.
+    if (priceList.locationId) {
+      assertLocationPermission(user, 'product:manage', priceList.locationId);
+    }
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of items) {

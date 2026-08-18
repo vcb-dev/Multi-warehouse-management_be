@@ -17,6 +17,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/roles.decorator';
+import { assertWebhookSecret } from '../../common/auth/webhook-secret';
 import { CarrierTicketService } from './carrier-ticket.service';
 import {
   CancelFulfillmentDto,
@@ -142,10 +143,7 @@ export class FulfillmentsController {
     @Body() dto: GhnWebhookDto,
     @Headers('x-ghn-webhook-secret') webhookSecret?: string,
   ) {
-    const expected = process.env.GHN_WEBHOOK_SECRET?.trim();
-    if (expected && webhookSecret !== expected) {
-      throw new UnauthorizedException('Invalid webhook secret');
-    }
+    assertWebhookSecret('GHN_WEBHOOK_SECRET', webhookSecret);
     return this.fulfillments.webhookGhn(dto);
   }
 
@@ -172,14 +170,9 @@ export class FulfillmentsController {
     @Body() dto: VtpWebhookDto,
     @Headers('authorization') authHeader?: string,
   ) {
-    const expected = process.env.VTP_WEBHOOK_SECRET?.trim();
-    if (expected) {
-      const headerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
-      const bodyToken = dto.TOKEN?.trim();
-      if (headerToken !== expected && bodyToken !== expected) {
-        throw new UnauthorizedException('Invalid webhook secret');
-      }
-    }
+    const headerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
+    const bodyToken = dto.TOKEN?.trim();
+    assertWebhookSecret('VTP_WEBHOOK_SECRET', headerToken, bodyToken);
     return this.fulfillments.webhookVtp(dto);
   }
 
