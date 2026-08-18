@@ -1248,6 +1248,12 @@ export class OrderService {
       totalShippingPrice?: number;
       note?: string;
       phone?: string;
+      name?: string;
+      createdOn?: Date;
+      shippingAddress?: ShippingAddressDto;
+      totalReceived?: number;
+      deliveryCodAmount?: number;
+      shippingMethod?: string;
     },
     user: AuthUser,
   ) {
@@ -1266,6 +1272,22 @@ export class OrderService {
       total_shipping_price: params.totalShippingPrice,
       note: params.note,
       phone: params.phone,
+      ...(params.name ? { name: params.name } : {}),
+      ...(params.createdOn
+        ? { created_on: params.createdOn.toISOString() }
+        : {}),
+      ...(params.shippingAddress
+        ? { shipping_address: params.shippingAddress }
+        : {}),
+      ...(params.totalReceived != null
+        ? { total_received: params.totalReceived }
+        : {}),
+      ...(params.deliveryCodAmount != null
+        ? { delivery_cod_amount: params.deliveryCodAmount }
+        : {}),
+      ...(params.shippingMethod
+        ? { shipping_method: params.shippingMethod }
+        : {}),
     };
     return this.create(dto, user);
   }

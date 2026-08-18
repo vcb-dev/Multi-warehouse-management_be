@@ -32,6 +32,12 @@ export class ShopeeAuthService {
   getAuthorizeUrl(): string {
     return this.assertConfigured().buildAuthorizeUrl();
   }
+
+  /** Client đã cấu hình — dùng cho sync đơn. */
+  getClient(): ShopeeClient {
+    return this.assertConfigured();
+  }
+
   /**
    * Xử lý callback đăng nhập Shopee
    * https://open.shopee.com/documents/v2/auth.html#section/Authentication/Get-authorization-code
@@ -69,6 +75,18 @@ export class ShopeeAuthService {
       conn.shopId,
     );
     return this.persistToken(conn.shopId, token, conn.shopName);
+  }
+
+  /** Gia hạn access token nếu sắp hết hạn (còn < 5 phút). */
+  async ensureFreshConnection(connectionId: bigint) {
+    const conn = await this.prisma.channelConnection.findUniqueOrThrow({
+      where: { id: connectionId },
+    });
+    const marginMs = 5 * 60 * 1000;
+    if (conn.accessTokenExpiresAt.getTime() - Date.now() < marginMs) {
+      return this.refreshConnection(connectionId);
+    }
+    return conn;
   }
 
   private assertConfigured(): ShopeeClient {

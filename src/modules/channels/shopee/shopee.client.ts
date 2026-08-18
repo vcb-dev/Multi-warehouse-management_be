@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { Logger } from '@nestjs/common';
 import { BusinessException } from '../../../common/exceptions/business.exception';
 
@@ -13,10 +13,57 @@ export type ShopeeTokenResult = {
   shop_id?: number;
 };
 
-type ShopeeApiEnvelope = {
+export type ShopeeOrderListEntry = {
+  order_sn: string;
+  order_status?: string;
+};
+
+export type ShopeeOrderItem = {
+  item_name?: string;
+  item_sku?: string;
+  model_sku?: string;
+  model_name?: string;
+  model_quantity_purchased?: number;
+  model_original_price?: number;
+  model_discounted_price?: number;
+};
+
+export type ShopeeRecipientAddress = {
+  name?: string;
+  phone?: string;
+  full_address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+  region?: string;
+  town?: string;
+  zipcode?: string;
+};
+
+export type ShopeeOrderDetail = {
+  order_sn: string;
+  order_status?: string;
+  create_time?: number;
+  update_time?: number;
+  currency?: string;
+  cod?: boolean;
+  total_amount?: number;
+  estimated_shipping_fee?: number;
+  actual_shipping_fee?: number;
+  shipping_carrier?: string;
+  payment_method?: string;
+  message_to_seller?: string;
+  buyer_user_id?: number;
+  buyer_username?: string;
+  recipient_address?: ShopeeRecipientAddress;
+  item_list?: ShopeeOrderItem[];
+};
+
+type ShopeeApiEnvelope<T = unknown> = {
   error?: string;
   message?: string;
   request_id?: string;
+  response?: T;
   access_token?: string;
   refresh_token?: string;
   expire_in?: number;
@@ -24,9 +71,13 @@ type ShopeeApiEnvelope = {
   shop_name?: string;
 };
 
+const ORDER_DETAIL_FIELDS =
+  'order_status,buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller';
+
 /** Public API — partner_id + path + timestamp */
 /**
  * Tạo signature cho public API
+ * Gọi mỗi lần gọi auth API
  */
 export function shopeeSignPublic(
   partnerId: string,
@@ -35,12 +86,34 @@ export function shopeeSignPublic(
   partnerKey: string,
 ): string {
   const base = `${partnerId}${path}${timestamp}`;
+  // createHmac: tạo hmac sha256 với key là partnerKey
   return createHmac('sha256', partnerKey).update(base).digest('hex');
 }
 
 /** Shop API — partner_id + path + timestamp + access_token + shop_id */
 /**
  * Tạo signature cho shop API
+ * gọi khi shopee Post push
+ */
+/** Push webhook: HMAC-SHA256(partner_key, callbackUrl + "|" + rawBody) → hex, header Authorization. */
+export function verifyShopeePushSignature(
+  callbackUrl: string,
+  rawBody: string,
+  partnerKey: string,
+  authorization: string,
+): boolean {
+  if (!callbackUrl || !partnerKey || !authorization) return false;
+  const expected = createHmac('sha256', partnerKey)
+    .update(`${callbackUrl}|${rawBody}`)
+    .digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(authorization.trim());
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Tạo signature cho shop API
+ * Gọi mỗi lần gọi order api
  */
 export function shopeeSignShop(
   partnerId: string,
@@ -56,6 +129,9 @@ export function shopeeSignShop(
 
 /**
  * Xử lý host Shopee (production hoặc sandbox)
+ * Shopee có 2 host: production và sandbox
+ * Production: https://partner.shopeemobile.com
+ * Sandbox: https://openplatform.sandbox.test-stable.shopee.sg
  */
 export function resolveShopeeHost(): string {
   const explicit = process.env.SHOPEE_HOST?.trim();
@@ -84,6 +160,7 @@ export class ShopeeClient {
   ) {}
   /**
    * Xây dựng URL để đăng nhập Shopee
+   * gọi khi user click vào link đăng nhập Shopee
    * https://open.shopee.com/documents/v2/auth.html#section/Authentication/Get-authorization-code
    */
   buildAuthorizeUrl(): string {
@@ -111,6 +188,7 @@ export class ShopeeClient {
    * @returns Promise<ShopeeTokenResult> - Kết quả hoán đổi token Shopee
    */
   exchangeToken(code: string, shopId: string): Promise<ShopeeTokenResult> {
+    // gọi khi user click vào link đăng nhập Shopee
     const path = '/api/v2/auth/token/get';
     const timestamp = Math.floor(Date.now() / 1000);
     const sign = shopeeSignPublic(
@@ -171,6 +249,67 @@ export class ShopeeClient {
    */
   getShopName(accessToken: string, shopId: string): Promise<string | null> {
     const path = '/api/v2/shop/get_shop_info';
+    return this.shopGet<{ shop_name?: string }>(path, accessToken, shopId)
+      .then((data) => data.shop_name ?? null)
+      .catch(() => null);
+  }
+
+  /**
+   * Danh sách đơn theo khoảng thời gian — mỗi request tối đa 15 ngày.
+   * https://open.shopee.com/documents/v2/v2.order.get_order_list
+   */
+  getOrderList(
+    accessToken: string,
+    shopId: string,
+    params: {
+      timeRangeField: 'create_time' | 'update_time';
+      timeFrom: number;
+      timeTo: number;
+      pageSize?: number;
+      cursor?: string;
+      orderStatus?: string;
+    },
+  ): Promise<{
+    order_list: ShopeeOrderListEntry[];
+    more: boolean;
+    next_cursor?: string;
+  }> {
+    const path = '/api/v2/order/get_order_list';
+    const query: Record<string, string> = {
+      time_range_field: params.timeRangeField,
+      time_from: String(params.timeFrom),
+      time_to: String(params.timeTo),
+      page_size: String(params.pageSize ?? 50),
+      response_optional_fields: 'order_status',
+      cursor: params.cursor ?? '',
+    };
+    if (params.orderStatus) query.order_status = params.orderStatus;
+
+    return this.shopGet(path, accessToken, shopId, query);
+  }
+
+  /**
+   * Chi tiết đơn (tối đa 50 order_sn mỗi lần).
+   * https://open.shopee.com/documents/v2/v2.order.get_order_detail
+   */
+  getOrderDetail(
+    accessToken: string,
+    shopId: string,
+    orderSnList: string[],
+  ): Promise<{ order_list: ShopeeOrderDetail[] }> {
+    const path = '/api/v2/order/get_order_detail';
+    return this.shopGet(path, accessToken, shopId, {
+      order_sn_list: orderSnList.join(','),
+      response_optional_fields: ORDER_DETAIL_FIELDS,
+    });
+  }
+
+  private shopGet<T>(
+    path: string,
+    accessToken: string,
+    shopId: string,
+    query: Record<string, string> = {},
+  ): Promise<T> {
     const timestamp = Math.floor(Date.now() / 1000);
     const sign = shopeeSignShop(
       this.partnerId,
@@ -186,16 +325,22 @@ export class ShopeeClient {
     url.searchParams.set('sign', sign);
     url.searchParams.set('access_token', accessToken);
     url.searchParams.set('shop_id', shopId);
+    for (const [k, v] of Object.entries(query)) {
+      url.searchParams.set(k, v);
+    }
+    return this.getJson<ShopeeApiEnvelope<T>>(url.toString()).then((raw) =>
+      this.unwrapShopResponse(raw, path),
+    );
+  }
 
-    return this.getJson<ShopeeApiEnvelope & { shop_name?: string }>(
-      url.toString(),
-    ).then((raw) => {
-      if (raw.error) {
-        this.logger.warn(`Shopee get_shop_info: ${raw.message ?? raw.error}`);
-        return null;
-      }
-      return raw.shop_name ?? null;
-    });
+  private unwrapShopResponse<T>(raw: ShopeeApiEnvelope<T>, path: string): T {
+    if (raw.error) {
+      const msg = raw.message ?? raw.error;
+      this.logger.warn(`Shopee ${path}: ${msg}`);
+      throw new BusinessException('CHANNEL_API_ERROR', `Shopee: ${msg}`, 422);
+    }
+    if (raw.response !== undefined) return raw.response;
+    return raw as T;
   }
 
   /**

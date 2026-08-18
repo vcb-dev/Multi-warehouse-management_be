@@ -21,6 +21,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
+import { resolveChannelSyncActorUser } from '../channels/channel-sync-actor';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -1592,20 +1593,18 @@ export class FulfillmentService {
    * `channel-sync.scheduler.ts` làm cho cron đồng bộ sàn.
    */
   private async systemUser(): Promise<AuthUser> {
-    const admin = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-    });
+    const admin = await resolveChannelSyncActorUser(this.prisma);
     if (!admin) {
       throw new BusinessException(
         'CONFIG_ERROR',
-        'Không tìm thấy tài khoản hệ thống admin@local.dev để ghi nhận webhook',
+        'Không tìm thấy user đồng bộ hệ thống (CHANNEL_SYNC_ACTOR_* hoặc admin active)',
         500,
       );
     }
     return {
       userId: admin.id,
       email: admin.email,
-      roles: [UserRole.admin],
+      roles: admin.roles,
       locationIds: [],
     };
   }

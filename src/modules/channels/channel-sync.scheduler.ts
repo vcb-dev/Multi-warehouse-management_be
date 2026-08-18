@@ -1,9 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { UserRole } from '@prisma/client';
-import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RbacService } from '../rbac/rbac.service';
+import {
+  resolveChannelSyncActor,
+  resolveChannelSyncActorId,
+} from './channel-sync-actor';
 import { ChannelSyncService } from './channel-sync.service';
+import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
 import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
 
@@ -14,6 +18,10 @@ import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
  */
 const TIKTOK_WINDOW_MINUTES = Number(
   process.env.TIKTOK_SYNC_WINDOW_MINUTES ?? 30,
+);
+
+const SHOPEE_WINDOW_MINUTES = Number(
+  process.env.SHOPEE_SYNC_WINDOW_MINUTES ?? 45,
 );
 
 /**
@@ -27,12 +35,15 @@ export class ChannelSyncScheduler {
   private readonly logger = new Logger(ChannelSyncScheduler.name);
   /** Chặn hai lần chạy chồng nhau khi một lần quét kéo dài quá chu kỳ cron. */
   private tiktokRunning = false;
+  private shopeeRunning = false;
 
   constructor(
     private readonly sync: ChannelSyncService,
     private readonly tiktokOrders: TiktokOrderSyncService,
+    private readonly shopeeSync: ShopeeSyncService,
     private readonly tiktokReturns: TiktokReturnSyncService,
     private readonly prisma: PrismaService,
+    private readonly rbac: RbacService,
   ) {}
 
   /**
@@ -48,12 +59,11 @@ export class ChannelSyncScheduler {
       return;
     }
 
-    const actor = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-      select: { id: true },
-    });
-    if (!actor) {
-      this.logger.warn('Cron TikTok: không tìm thấy admin@local.dev');
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) {
+      this.logger.warn(
+        'Cron TikTok: không tìm thấy user đồng bộ (CHANNEL_SYNC_ACTOR_* hoặc admin active)',
+      );
       return;
     }
 
@@ -61,7 +71,7 @@ export class ChannelSyncScheduler {
     try {
       const r = await this.tiktokOrders.syncRecent(
         TIKTOK_WINDOW_MINUTES,
-        actor.id,
+        actorId,
       );
       if (r.fetched) {
         this.logger.log(
@@ -74,6 +84,46 @@ export class ChannelSyncScheduler {
       );
     } finally {
       this.tiktokRunning = false;
+    }
+  }
+
+  /**
+   * Kéo đơn Shopee định kỳ theo `update_time` — cùng mô hình cron TikTok.
+   * Bật bằng `SHOPEE_SYNC_CRON_ENABLED=true` (hoặc legacy `CHANNEL_SYNC_CRON_ENABLED`).
+   */
+  @Cron(process.env.SHOPEE_SYNC_CRON ?? '0 */15 * * * *')
+  async pollShopeeOrders() {
+    if (!this.isShopeeCronEnabled()) return;
+    if (this.shopeeRunning) {
+      this.logger.warn('Cron Shopee: lần chạy trước chưa xong, bỏ lượt này');
+      return;
+    }
+
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) {
+      this.logger.warn(
+        'Cron Shopee: không tìm thấy user đồng bộ (CHANNEL_SYNC_ACTOR_* hoặc admin active)',
+      );
+      return;
+    }
+
+    this.shopeeRunning = true;
+    try {
+      const r = await this.shopeeSync.syncRecent(
+        SHOPEE_WINDOW_MINUTES,
+        actorId,
+      );
+      if (r.fetched) {
+        this.logger.log(
+          `Cron Shopee: ${r.fetched} đơn thay đổi trong ${SHOPEE_WINDOW_MINUTES} phút — ${r.created} mới, ${r.updated} cập nhật`,
+        );
+      }
+    } catch (e) {
+      this.logger.error(
+        `Cron Shopee thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      this.shopeeRunning = false;
     }
   }
 
@@ -97,12 +147,11 @@ export class ChannelSyncScheduler {
       return;
     }
 
-    const actor = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-      select: { id: true },
-    });
-    if (!actor) {
-      this.logger.warn('Quét ngày TikTok: không tìm thấy admin@local.dev');
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) {
+      this.logger.warn(
+        'Quét ngày TikTok: không tìm thấy user đồng bộ (CHANNEL_SYNC_ACTOR_* hoặc admin active)',
+      );
       return;
     }
 
@@ -110,7 +159,7 @@ export class ChannelSyncScheduler {
     try {
       const r = await this.tiktokOrders.syncRecent(
         TIKTOK_SWEEP_DAYS * 24 * 60,
-        actor.id,
+        actorId,
       );
       this.logger.log(
         `Quét ngày TikTok (${TIKTOK_SWEEP_DAYS} ngày): ${r.fetched} đơn — ${r.created} mới, ${r.updated} cập nhật`,
@@ -134,14 +183,11 @@ export class ChannelSyncScheduler {
   async pollTiktokReturns() {
     if (process.env.TIKTOK_SYNC_CRON_ENABLED !== 'true') return;
 
-    const actor = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-      select: { id: true },
-    });
-    if (!actor) return;
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) return;
 
     try {
-      const r = await this.tiktokReturns.syncRecent(180, actor.id);
+      const r = await this.tiktokReturns.syncRecent(180, actorId);
       if (r.fetched) {
         this.logger.log(
           `Cron hoàn hàng TikTok: ${r.fetched} phiếu — ${r.orders_updated} đơn đổi trạng thái`,
@@ -154,35 +200,36 @@ export class ChannelSyncScheduler {
     }
   }
 
+  /** Queue file/env — không kéo Shopee (Shopee có cron riêng). */
   @Cron(process.env.CHANNEL_SYNC_CRON ?? CronExpression.EVERY_10_MINUTES)
   async pollPendingOrders() {
     if (process.env.CHANNEL_SYNC_CRON_ENABLED !== 'true') return;
 
-    const admin = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-    });
-    if (!admin) {
-      this.logger.warn('Channel sync cron: admin@local.dev not found');
+    const user = await resolveChannelSyncActor(this.prisma, this.rbac);
+    if (!user) {
+      this.logger.warn('Channel queue cron: không tìm thấy user đồng bộ');
       return;
     }
 
-    const user: AuthUser = {
-      userId: admin.id,
-      email: admin.email,
-      roles: [UserRole.admin],
-      locationIds: [],
-    };
-
     try {
-      const result = await this.sync.syncConnectedChannels(user);
-      this.logger.log(
-        `Channel sync cron: synced ${result.synced}/${result.results.length}`,
-      );
+      const result = await this.sync.syncPendingOrders(user);
+      if (result.synced || result.results.length) {
+        this.logger.log(
+          `Channel queue cron: synced ${result.synced}/${result.results.length}`,
+        );
+      }
     } catch (e) {
       this.logger.error(
-        'Channel sync cron failed',
+        'Channel queue cron failed',
         e instanceof Error ? e.stack : e,
       );
     }
+  }
+
+  private isShopeeCronEnabled(): boolean {
+    const explicit = process.env.SHOPEE_SYNC_CRON_ENABLED?.trim();
+    if (explicit === 'true') return true;
+    if (explicit === 'false') return false;
+    return process.env.CHANNEL_SYNC_CRON_ENABLED === 'true';
   }
 }
