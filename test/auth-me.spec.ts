@@ -7,9 +7,8 @@
 import { NotFoundException } from '@nestjs/common';
 import { AuthService } from '../src/modules/auth/auth.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
-import type { JwtService } from '@nestjs/jwt';
 import type { RbacService } from '../src/modules/rbac/rbac.service';
-import type { AuthCacheService } from '../src/modules/rbac/auth-cache.service';
+import type { SessionService } from '../src/modules/auth/session.service';
 
 const baseUser = {
   id: 7n,
@@ -35,12 +34,17 @@ function build(userRow: unknown = baseUser) {
   const prisma = {
     user: { findUnique: jest.fn().mockResolvedValue(userRow) },
   } as unknown as PrismaService;
-  const jwt = {} as JwtService;
   const rbac = {
     resolvePermissions: jest.fn().mockResolvedValue(resolved),
   } as unknown as RbacService;
-  const authCache = { invalidate: jest.fn() } as unknown as AuthCacheService;
-  return new AuthService(prisma, jwt, rbac, authCache);
+  const sessions = {
+    create: jest.fn().mockResolvedValue({
+      token: 'ses_token-moi',
+      sessionId: 42n,
+      expiresAt: new Date('2026-08-25T00:00:00.000Z'),
+    }),
+  } as unknown as SessionService;
+  return new AuthService(prisma, rbac, sessions);
 }
 
 describe('AuthService.me', () => {

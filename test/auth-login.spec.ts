@@ -9,9 +9,8 @@ import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/modules/auth/auth.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
-import type { JwtService } from '@nestjs/jwt';
 import type { RbacService } from '../src/modules/rbac/rbac.service';
-import type { AuthCacheService } from '../src/modules/rbac/auth-cache.service';
+import type { SessionService } from '../src/modules/auth/session.service';
 
 const activeUser = {
   id: 7n,
@@ -38,14 +37,17 @@ function build(userRow: unknown = activeUser) {
   const prisma = {
     user: { findUnique: jest.fn().mockResolvedValue(userRow) },
   } as unknown as PrismaService;
-  const jwt = {
-    signAsync: jest.fn().mockResolvedValue('signed-token'),
-  } as unknown as JwtService;
   const rbac = {
     resolvePermissions: jest.fn().mockResolvedValue(resolved),
   } as unknown as RbacService;
-  const authCache = { invalidate: jest.fn() } as unknown as AuthCacheService;
-  return { auth: new AuthService(prisma, jwt, rbac, authCache), jwt, rbac };
+  const sessions = {
+    create: jest.fn().mockResolvedValue({
+      token: 'ses_token-moi',
+      sessionId: 42n,
+      expiresAt: new Date('2026-08-25T00:00:00.000Z'),
+    }),
+  } as unknown as SessionService;
+  return { auth: new AuthService(prisma, rbac, sessions), sessions, rbac };
 }
 
 function allowPassword(ok: boolean) {
@@ -105,11 +107,11 @@ describe('AuthService.login — từ chối', () => {
     await expect(auth.login('u@test', 'pw')).rejects.toThrow(/kích hoạt/i);
   });
 
-  it('không phát token ở bất kỳ đường từ chối nào', async () => {
+  it('không tạo phiên ở bất kỳ đường từ chối nào', async () => {
     allowPassword(false);
-    const { auth, jwt } = build();
+    const { auth, sessions } = build();
     await auth.login('u@test', 'pw').catch(() => undefined);
-    expect(jwt.signAsync).not.toHaveBeenCalled();
+    expect(sessions.create).not.toHaveBeenCalled();
   });
 
   it('không tra quyền cho tài khoản đã bị khoá — hỏng sớm, đỡ tốn query', async () => {
@@ -127,7 +129,8 @@ describe('AuthService.login — thành công', () => {
     const result = await auth.login('u@test', 'pw');
 
     expect(result).toEqual({
-      access_token: 'signed-token',
+      access_token: 'ses_token-moi',
+      expires_at: '2026-08-25T00:00:00.000Z',
       user: {
         id: '7',
         email: 'u@test',
@@ -158,15 +161,22 @@ describe('AuthService.login — thành công', () => {
     expect(JSON.stringify(result)).not.toContain('hash-that-bcrypt');
   });
 
-  it('token chỉ mang sub/email/ver — không nhét quyền vào JWT', async () => {
-    // Quyền nằm trong JWT là quyền đóng băng tới lúc token hết hạn; hệ thống này cố
-    // ý tra lại quyền mỗi request để đổi role có hiệu lực ngay.
-    const { auth, jwt } = build();
-    await auth.login('u@test', 'pw');
-    expect(jwt.signAsync).toHaveBeenCalledWith({
-      sub: '7',
-      email: 'u@test',
-      ver: 0,
-    });
+  it('token là chuỗi đục gắn với phiên, không phải JWT mang dữ liệu', async () => {
+    // Đây là điểm mấu chốt của mô hình phiên: token không tự chứng minh được gì, nên
+    // không có khoá ký nào để dò ngược, và thu hồi là đánh dấu một dòng chứ không
+    // phải chờ hết hạn.
+    const { auth, sessions } = build();
+    const result = await auth.login('u@test', 'pw');
+
+    expect(sessions.create).toHaveBeenCalledWith(7n, {});
+    expect(result.access_token).toBe('ses_token-moi');
+    // Không mang thông tin: tách bằng dấu chấm kiểu JWT sẽ không ra 3 phần.
+    expect(result.access_token.split('.')).toHaveLength(1);
+  });
+
+  it('trả kèm hạn phiên để FE khớp thời gian sống của cookie', async () => {
+    const { auth } = build();
+    const result = await auth.login('u@test', 'pw');
+    expect(result.expires_at).toBe('2026-08-25T00:00:00.000Z');
   });
 });

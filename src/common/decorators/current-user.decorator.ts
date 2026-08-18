@@ -2,6 +2,11 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export type AuthUser = {
   userId: bigint;
+  /**
+   * Phiên đang dùng. Có với người đăng nhập, KHÔNG có với đường API key đối tác — key
+   * không thuộc phiên nào nên không tự đăng xuất hay tự liệt kê thiết bị được.
+   */
+  sessionId?: bigint;
   email: string;
   roles: string[];
   locationIds: bigint[];
@@ -15,13 +20,6 @@ export type AuthUser = {
   permissions?: string[];
   /** Quyền `scope=location`: hiệu lực riêng tại từng kho. */
   warehousePermissions?: Record<string, string[]>;
-  /**
-   * Phiên bản token tại thời điểm dựng bản ghi này. Cache quyền dùng chung theo
-   * userId cho MỌI token của user (kể cả API key), nên phải mang theo để nhánh
-   * cache còn đối chiếu được — thiếu nó thì token đã thu hồi vẫn đi lọt bằng cách
-   * bám vào entry cache do một token hợp lệ khác nạp lên.
-   */
-  tokenVersion?: number;
 };
 
 export const CurrentUser = createParamDecorator(

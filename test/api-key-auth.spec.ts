@@ -30,7 +30,6 @@ const actingUser = {
   active: true,
   status: 'active',
   roles: ['sales'],
-  tokenVersion: 5,
 };
 
 const resolved = {
@@ -158,12 +157,12 @@ describe('resolveAuthUser — chấp nhận', () => {
     });
   });
 
-  it('mang theo tokenVersion — dùng chung cache với JWT nên phải khớp shape', async () => {
-    // Thiếu field này thì request JWT bám vào entry cache do API key nạp sẽ bị so
-    // lệch phiên bản và bị từ chối oan.
+  it('nhớ cache theo actingUserId — API key không thuộc phiên nào', async () => {
+    // Khác người dùng: key không có sessionId, nên không tự đăng xuất hay tự liệt kê
+    // thiết bị được. Khoá cache vì thế vẫn là userId chứ không phải hash phiên.
     const { service } = build();
     const user = await service.resolveAuthUser(RAW_KEY);
-    expect(user?.tokenVersion).toBe(5);
+    expect(user?.sessionId).toBeUndefined();
   });
 
   it('quyền lấy từ RBAC thật của user, không tự chế cho key', async () => {
@@ -177,7 +176,8 @@ describe('resolveAuthUser — chấp nhận', () => {
     await service.resolveAuthUser(RAW_KEY);
     expect(authCache.set).toHaveBeenCalledWith(
       '7',
-      expect.objectContaining({ userId: 7n, tokenVersion: 5 }),
+      7n,
+      expect.objectContaining({ userId: 7n }),
     );
   });
 

@@ -164,7 +164,7 @@ export class RoleService {
       select: { userId: true },
       distinct: ['userId'],
     });
-    for (const h of holders) this.authCache.invalidate(h.userId);
+    for (const h of holders) this.authCache.invalidateUser(h.userId);
   }
 
   async remove(id: string) {

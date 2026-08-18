@@ -4,10 +4,10 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { GoneException, NotFoundException } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { RbacModule } from '../src/modules/rbac/rbac.module';
 import { InvitationService } from '../src/modules/rbac/invitation.service';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { SessionService } from '../src/modules/auth/session.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -31,12 +31,9 @@ describeIfDb('invitation flow (integration)', () => {
       imports: [
         PrismaModule,
         RbacModule,
-        JwtModule.register({
-          secret: 'test-secret',
-          signOptions: { expiresIn: '1h' },
-        }),
       ],
-      providers: [AuthService],
+      // Không còn JwtModule: token là phiên lưu ở bảng `user_sessions`, không phải JWT.
+      providers: [AuthService, SessionService],
     }).compile();
     invitations = module.get(InvitationService);
     auth = module.get(AuthService);
