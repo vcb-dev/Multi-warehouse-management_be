@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { Logger } from '@nestjs/common';
 import { BusinessException } from '../../../common/exceptions/business.exception';
 
@@ -72,11 +72,12 @@ type ShopeeApiEnvelope<T = unknown> = {
 };
 
 const ORDER_DETAIL_FIELDS =
-  'buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller';
+  'order_status,buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller';
 
 /** Public API — partner_id + path + timestamp */
 /**
  * Tạo signature cho public API
+ * Gọi mỗi lần gọi auth API
  */
 export function shopeeSignPublic(
   partnerId: string,
@@ -85,12 +86,34 @@ export function shopeeSignPublic(
   partnerKey: string,
 ): string {
   const base = `${partnerId}${path}${timestamp}`;
+  // createHmac: tạo hmac sha256 với key là partnerKey
   return createHmac('sha256', partnerKey).update(base).digest('hex');
 }
 
 /** Shop API — partner_id + path + timestamp + access_token + shop_id */
 /**
  * Tạo signature cho shop API
+ * gọi khi shopee Post push
+ */
+/** Push webhook: HMAC-SHA256(partner_key, callbackUrl + "|" + rawBody) → hex, header Authorization. */
+export function verifyShopeePushSignature(
+  callbackUrl: string,
+  rawBody: string,
+  partnerKey: string,
+  authorization: string,
+): boolean {
+  if (!callbackUrl || !partnerKey || !authorization) return false;
+  const expected = createHmac('sha256', partnerKey)
+    .update(`${callbackUrl}|${rawBody}`)
+    .digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(authorization.trim());
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Tạo signature cho shop API
+ * Gọi mỗi lần gọi order api
  */
 export function shopeeSignShop(
   partnerId: string,
@@ -106,6 +129,9 @@ export function shopeeSignShop(
 
 /**
  * Xử lý host Shopee (production hoặc sandbox)
+ * Shopee có 2 host: production và sandbox
+ * Production: https://partner.shopeemobile.com
+ * Sandbox: https://openplatform.sandbox.test-stable.shopee.sg
  */
 export function resolveShopeeHost(): string {
   const explicit = process.env.SHOPEE_HOST?.trim();
@@ -134,6 +160,7 @@ export class ShopeeClient {
   ) {}
   /**
    * Xây dựng URL để đăng nhập Shopee
+   * gọi khi user click vào link đăng nhập Shopee
    * https://open.shopee.com/documents/v2/auth.html#section/Authentication/Get-authorization-code
    */
   buildAuthorizeUrl(): string {
@@ -161,6 +188,7 @@ export class ShopeeClient {
    * @returns Promise<ShopeeTokenResult> - Kết quả hoán đổi token Shopee
    */
   exchangeToken(code: string, shopId: string): Promise<ShopeeTokenResult> {
+    // gọi khi user click vào link đăng nhập Shopee
     const path = '/api/v2/auth/token/get';
     const timestamp = Math.floor(Date.now() / 1000);
     const sign = shopeeSignPublic(

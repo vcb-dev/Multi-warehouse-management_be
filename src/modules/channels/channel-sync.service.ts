@@ -95,6 +95,17 @@ export class ChannelSyncService {
 
   /** Đồng bộ đơn chờ từ file queue + kéo đơn Shopee đã kết nối */
   async syncConnectedChannels(user: AuthUser) {
+    const pending = await this.syncPendingOrders(user);
+    const shopee = await this.shopeeSync.syncShopeeOrders(user.userId);
+
+    this.logger.log(
+      `Synced ${pending.synced} pending + ${shopee.created} Shopee mới, ${shopee.updated} cập nhật`,
+    );
+    return { pending, shopee };
+  }
+
+  /** Chỉ xử lý queue file/env — không kéo Shopee (cron Shopee chạy riêng). */
+  async syncPendingOrders(user: AuthUser) {
     const pending = await this.loadPendingOrders();
     const results: {
       external_id: string;
@@ -125,17 +136,9 @@ export class ChannelSyncService {
       await this.savePendingOrders(remaining);
     }
 
-    const shopee = await this.shopeeSync.syncShopeeOrders(user);
-
-    this.logger.log(
-      `Synced ${results.filter((r) => r.order_id).length} pending + ${shopee.synced} Shopee orders`,
-    );
     return {
-      pending: {
-        synced: results.filter((r) => r.order_id).length,
-        results,
-      },
-      shopee,
+      synced: results.filter((r) => r.order_id).length,
+      results,
     };
   }
 

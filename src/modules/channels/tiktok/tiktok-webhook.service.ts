@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { resolveChannelSyncActorId } from '../channel-sync-actor';
 import { TiktokOrderSyncService } from './tiktok-order-sync.service';
 
 /**
@@ -80,10 +80,10 @@ export class TiktokWebhookService {
       return { accepted: false };
     }
 
-    const actorId = await this.resolveActor();
+    const actorId = await resolveChannelSyncActorId(this.prisma);
     if (!actorId) {
       this.logger.error(
-        'Webhook TikTok: không tìm được user để gán làm người tạo đơn',
+        'Webhook TikTok: không tìm được user đồng bộ để gán làm người tạo đơn',
       );
       return { accepted: false };
     }
@@ -103,26 +103,6 @@ export class TiktokWebhookService {
       );
 
     return { accepted: true };
-  }
-
-  /**
-   * Webhook không có người dùng đăng nhập, mà `orders.user_id` là cột bắt buộc. Dùng cùng
-   * tài khoản với cron cho hai luồng khớp nhau.
-   */
-  private async resolveActor(): Promise<bigint | null> {
-    const admin = await this.prisma.user.findFirst({
-      where: { email: 'admin@local.dev', active: true },
-      select: { id: true },
-    });
-    if (admin) return admin.id;
-
-    // `roles` là mảng scalar `UserRole[]` chứ không phải quan hệ — phải dùng `has`
-    const fallback = await this.prisma.user.findFirst({
-      where: { active: true, roles: { has: UserRole.admin } },
-      orderBy: { id: 'asc' },
-      select: { id: true },
-    });
-    return fallback?.id ?? null;
   }
 }
 
