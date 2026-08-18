@@ -515,10 +515,6 @@ export class ShopeeSyncService {
     return [...seen];
   }
 
-  private isMasked(value: string): boolean {
-    return value.includes('*');
-  }
-
   private async resolveCustomer(
     order: ShopeeOrderDetail,
   ): Promise<bigint | null> {
@@ -526,18 +522,18 @@ export class ShopeeSyncService {
     const phone = (addr?.phone ?? '').trim();
     const name = (addr?.name ?? order.buyer_username ?? '').trim();
 
-    if (phone && !this.isMasked(phone)) {
+    if (phone) {
       const existing = await this.prisma.customer.findFirst({
         where: { phone },
       });
       if (existing) return existing.id;
-      const created = await this.prisma.customer.create({
-        data: {
-          phone,
-          firstName: name || null,
-        },
-      });
-      return created.id;
+      // const created = await this.prisma.customer.create({
+      //   data: {
+      //     phone,
+      //     firstName: name || null,
+      //   },
+      // });
+      // return created.id;
     }
 
     const pseudoPhone = `shopee-${order.buyer_user_id ?? order.order_sn}`;
