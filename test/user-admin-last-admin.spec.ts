@@ -13,7 +13,7 @@ import type { AuthUser } from '../src/common/decorators/current-user.decorator';
 import type { AuthCacheService } from '../src/modules/rbac/auth-cache.service';
 
 function fakeAuthCache(): AuthCacheService {
-  return { invalidate: jest.fn() } as unknown as AuthCacheService;
+  return { invalidateUser: jest.fn() } as unknown as AuthCacheService;
 }
 
 type Where = Record<string, unknown>;
@@ -137,7 +137,7 @@ describe('UserAdminService — bảo vệ admin cuối cùng', () => {
       expect(prisma.userLocationRole.count).not.toHaveBeenCalled();
       // Mở lại tài khoản cũng đổi quyền hiệu lực — không invalidate thì cache
       // 30s cũ vẫn coi user là inactive.
-      expect(authCache.invalidate).toHaveBeenCalledWith(1n);
+      expect(authCache.invalidateUser).toHaveBeenCalledWith(1n);
     });
 
     it('setStatus(false) hợp lệ vẫn invalidate cache ngay — không đợi hết TTL', async () => {
@@ -148,7 +148,7 @@ describe('UserAdminService — bảo vệ admin cuối cùng', () => {
       const authCache = fakeAuthCache();
       const svc = new UserAdminService(prisma, authCache);
       await svc.setStatus('1', false);
-      expect(authCache.invalidate).toHaveBeenCalledWith(1n);
+      expect(authCache.invalidateUser).toHaveBeenCalledWith(1n);
     });
   });
 
@@ -179,7 +179,7 @@ describe('UserAdminService — bảo vệ admin cuối cùng', () => {
       await expect(
         svc.putWarehouseRoles('1', dtoKeepsAdmin, adminCaller),
       ).resolves.toBeDefined();
-      expect(authCache.invalidate).toHaveBeenCalledWith(1n);
+      expect(authCache.invalidateUser).toHaveBeenCalledWith(1n);
     });
 
     it('non-admin không gán được role admin cho người khác', async () => {
@@ -241,7 +241,7 @@ describe('UserAdminService — bảo vệ admin cuối cùng', () => {
         authCache,
       );
       await expect(svc.removeWarehouseRole('1', '1')).resolves.toBeUndefined();
-      expect(authCache.invalidate).toHaveBeenCalledWith(1n);
+      expect(authCache.invalidateUser).toHaveBeenCalledWith(1n);
     });
 
     it('cho qua nếu role bị gỡ không phải admin', async () => {

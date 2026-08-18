@@ -3,20 +3,20 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
 import { userDisplayName } from '../../common/utils/user-display-name';
 import type { User } from '@prisma/client';
 import type { ResolvedPermissions } from '../rbac/rbac.service';
+import { SessionService, type SessionContext } from './session.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwt: JwtService,
     private rbac: RbacService,
+    private sessions: SessionService,
   ) {}
 
   /**
@@ -37,7 +37,7 @@ export class AuthService {
     };
   }
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string, ctx: SessionContext = {}) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || !user.active || user.status === 'inactive') {
       throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
@@ -53,13 +53,13 @@ export class AuthService {
     }
 
     const resolved = await this.rbac.resolvePermissions(user.id);
-    const token = await this.jwt.signAsync({
-      sub: user.id.toString(),
-      email: user.email,
-    });
+    // Token là chuỗi ngẫu nhiên gắn với một dòng `user_sessions`, không phải JWT: thu hồi
+    // được từng phiên, và không có khoá ký nào để dò ngược từ token bắt được.
+    const session = await this.sessions.create(user.id, ctx);
 
     return {
-      access_token: token,
+      access_token: session.token,
+      expires_at: session.expiresAt.toISOString(),
       user: this.buildUserPayload(user, resolved),
     };
   }

@@ -1,10 +1,10 @@
 /**
- * E2E cho xác thực API key qua header `x-api-key` (đối tác bên thứ 3, không qua JWT).
+ * E2E cho xác thực API key qua header `x-api-key` (đối tác bên thứ 3, không qua phiên).
  * Key xác thực THAY một user có sẵn (`ApiKey.actingUserId`) nên hoạt động trên MỌI route
- * — quyền của key = quyền thật của user đó, kiểm bởi đúng `PermissionGuard` dùng cho JWT.
+ * — quyền của key = quyền thật của user đó, kiểm bởi đúng `PermissionGuard` dùng cho phiên người dùng.
  *
  * Bootstrap AppModule thật qua supertest (không gọi thẳng service) vì cần test đúng chuỗi
- * guard toàn cục (JwtAuthGuard nhận diện x-api-key trước khi rơi về passport-jwt, rồi
+ * guard toàn cục (JwtAuthGuard nhận diện x-api-key trước khi rơi về giải mã phiên, rồi
  * PermissionGuard/ThrottlerGuard chạy tiếp bình thường).
  *
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/api-key-integration.e2e-spec.ts

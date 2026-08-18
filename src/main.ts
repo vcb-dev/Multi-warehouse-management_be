@@ -13,6 +13,12 @@ async function bootstrap() {
     rawBody: true,
   });
 
+  // Sau load balancer (Railway), `req.ip` mặc định là IP nội bộ của LB — mọi request
+  // trông như đến từ cùng một nguồn, làm hỏng cả giới hạn tần suất theo IP lẫn IP ghi
+  // trong audit log. Tin đúng MỘT lớp proxy: đọc IP thật từ nhánh cuối của
+  // `X-Forwarded-For`, không tin cả chuỗi (client tự bịa được các nhánh phía trước).
+  app.set('trust proxy', 1);
+
   app.use(compression());
 
   const uploadDir = process.env.UPLOAD_DIR ?? join(process.cwd(), 'uploads');

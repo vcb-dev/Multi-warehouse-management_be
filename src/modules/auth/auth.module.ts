@@ -1,32 +1,19 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { requireEnv } from '../../common/utils/require-env';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtStrategy } from './jwt.strategy';
+import { SessionService } from './session.service';
 import { RbacModule } from '../rbac/rbac.module';
 
+/**
+ * Không còn JwtModule/PassportModule: token phát cho client là chuỗi ngẫu nhiên đối
+ * chiếu với bảng `user_sessions`, không phải JWT tự chứng minh. Vì vậy hệ thống cũng
+ * không còn khoá ký nào (JWT_SECRET) để bảo vệ hay để bị dò ngược.
+ */
 @Module({
-  imports: [
-    PrismaModule,
-    RbacModule,
-    PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: requireEnv(config, 'JWT_SECRET'),
-        signOptions: {
-          expiresIn: config.get('JWT_EXPIRES_IN') ?? '7d',
-        },
-      }),
-    }),
-  ],
+  imports: [PrismaModule, RbacModule],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, SessionService],
+  exports: [AuthService, SessionService],
 })
 export class AuthModule {}

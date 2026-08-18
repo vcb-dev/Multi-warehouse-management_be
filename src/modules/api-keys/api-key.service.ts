@@ -72,7 +72,7 @@ export class ApiKeyService {
     });
     // Key có thể đang dùng chung cache quyền (theo acting_user_id) với JWT thật của user
     // đó — xoá cache để không có AuthUser cũ nào còn sống sót sau khi thu hồi.
-    this.authCache.invalidate(key.actingUserId);
+    this.authCache.invalidateUser(key.actingUserId);
     return { data: { id, revoked: true } };
   }
 
@@ -117,7 +117,7 @@ export class ApiKeyService {
       permissions: resolved.systemPermissions,
       warehousePermissions: resolved.warehousePermissions,
     };
-    this.authCache.set(cacheKey, authUser);
+    this.authCache.set(cacheKey, actingUser.id, authUser);
     return authUser;
   }
 
