@@ -36,7 +36,14 @@ describeIfDb('order create reserves stock', () => {
     await prisma.inventoryLevel.upsert({
       where: { variantId_locationId: { variantId, locationId } },
       update: { onHand: 10, available: 10, committed: 0 },
-      create: { variantId, locationId, onHand: 10, available: 10, price: 0, cost: 0 },
+      create: {
+        variantId,
+        locationId,
+        onHand: 10,
+        available: 10,
+        price: 0,
+        cost: 0,
+      },
     });
   });
 
@@ -46,7 +53,14 @@ describeIfDb('order create reserves stock', () => {
     await orders.create(
       {
         location_id: locationId.toString(),
-        items: [{ variant_id: variantId.toString(), location_id: locationId.toString(), quantity: 1, price: 1 }],
+        items: [
+          {
+            variant_id: variantId.toString(),
+            location_id: locationId.toString(),
+            quantity: 1,
+            price: 1,
+          },
+        ],
       },
       adminAuth({ userId, locationIds: [locationId] }),
     );

@@ -37,7 +37,9 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     reiService = module.get(GoodsReceiptService);
     prisma = module.get(PrismaService);
 
-    const supplier = await prisma.supplier.findFirst({ where: { isActive: true } });
+    const supplier = await prisma.supplier.findFirst({
+      where: { isActive: true },
+    });
     const warehouse = await prisma.location.findFirst();
     const user = await prisma.user.findFirst();
     if (!supplier || !warehouse || !user) {
@@ -79,7 +81,9 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
       {
         supplier_id: supplierId.toString(),
         location_id: locationId.toString(),
-        items: [{ variant_id: variantId.toString(), quantity: 10, unit_price: 50000 }],
+        items: [
+          { variant_id: variantId.toString(), quantity: 10, unit_price: 50000 },
+        ],
       },
       authUser,
     );

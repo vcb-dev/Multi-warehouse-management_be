@@ -15,7 +15,8 @@ export class TiktokAuthService {
   constructor(private prisma: PrismaService) {
     const appKey = process.env.TIKTOK_APP_KEY?.trim();
     const appSecret = process.env.TIKTOK_APP_SECRET?.trim();
-    this.client = appKey && appSecret ? new TiktokClient(appKey, appSecret) : null;
+    this.client =
+      appKey && appSecret ? new TiktokClient(appKey, appSecret) : null;
   }
 
   async handleAuthorizationCode(authCode: string) {

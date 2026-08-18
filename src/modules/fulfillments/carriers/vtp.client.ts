@@ -241,7 +241,12 @@ export class VtpClient {
 
   /** `POST /v2/order/UpdateOrder` — hủy đơn (TYPE=4) và các thao tác cập nhật trạng thái khác. */
   updateOrder(payload: VtpUpdateOrderPayload, creds: VtpCredentials) {
-    return this.request<unknown>('POST', 'v2/order/UpdateOrder', payload, creds);
+    return this.request<unknown>(
+      'POST',
+      'v2/order/UpdateOrder',
+      payload,
+      creds,
+    );
   }
 
   /** `GET /v3/categories/listProvinceNew` — danh mục Tỉnh/TP mới (sau sáp nhập), chỉ dùng để đổi tên → ID cho `RECEIVER_PROVINCE`. */

@@ -254,7 +254,8 @@ export class VtpAdapter implements CarrierAdapter {
       );
     }
     const sorted = [...quotes].sort((a, b) => a.GIA_CUOC - b.GIA_CUOC);
-    const matched = serviceCode === 'fast' ? sorted[sorted.length - 1] : sorted[0];
+    const matched =
+      serviceCode === 'fast' ? sorted[sorted.length - 1] : sorted[0];
     return { code: matched.MA_DV_CHINH, feeVnd: matched.GIA_CUOC };
   }
 

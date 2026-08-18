@@ -46,7 +46,9 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
     channels = module.get(ChannelSyncService);
     prisma = module.get(PrismaService);
 
-    const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
+    const user = await prisma.user.findFirst({
+      where: { email: 'admin@local.dev' },
+    });
     const branch = await prisma.location.findFirst();
     const warehouse = await prisma.location.findFirst();
     const variant = await prisma.productVariant.findFirst();
@@ -126,7 +128,9 @@ describeIfDb('Quickstart 002 KC1–KC6 (integration)', () => {
       orders.create(
         {
           location_id: locationId.toString(),
-          items: [{ variant_id: variantId.toString(), location_id: '', quantity: 1 }],
+          items: [
+            { variant_id: variantId.toString(), location_id: '', quantity: 1 },
+          ],
         },
         auth(),
       ),

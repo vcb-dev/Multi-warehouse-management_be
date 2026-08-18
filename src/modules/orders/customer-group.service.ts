@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -87,7 +91,11 @@ export class CustomerGroupService {
     const rules = parseRules(dto.rules);
     if (type === 'auto') {
       // Kiểm tra rule trước khi tạo để không đẻ ra nhóm tự động hỏng.
-      await buildCustomerGroupWhere(this.prisma, rules, dto.disjunctive ?? false);
+      await buildCustomerGroupWhere(
+        this.prisma,
+        rules,
+        dto.disjunctive ?? false,
+      );
     }
 
     const g = await this.prisma.customerGroup.create({
@@ -111,9 +119,16 @@ export class CustomerGroupService {
 
   async update(id: bigint, dto: UpdateCustomerGroupDto) {
     const current = await this.findOrThrow(id);
-    const type = dto.type ? (dto.type === 'auto' ? 'auto' : 'manual') : current.type;
+    const type = dto.type
+      ? dto.type === 'auto'
+        ? 'auto'
+        : 'manual'
+      : current.type;
     const disjunctive = dto.disjunctive ?? current.disjunctive;
-    const rules = dto.rules !== undefined ? parseRules(dto.rules) : parseRules(current.rules);
+    const rules =
+      dto.rules !== undefined
+        ? parseRules(dto.rules)
+        : parseRules(current.rules);
 
     if (type === 'auto') {
       await buildCustomerGroupWhere(this.prisma, rules, disjunctive);
@@ -171,7 +186,9 @@ export class CustomerGroupService {
       sample: sample.map((c) => ({
         id: c.id.toString(),
         name:
-          [c.firstName, c.lastName].filter(Boolean).join(' ') || c.phone || '(chưa đặt tên)',
+          [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+          c.phone ||
+          '(chưa đặt tên)',
       })),
     };
   }
@@ -214,7 +231,10 @@ export class CustomerGroupService {
       ...(toAdd.length
         ? [
             this.prisma.customerGroupMember.createMany({
-              data: toAdd.map((cid) => ({ customerId: cid, customerGroupId: id })),
+              data: toAdd.map((cid) => ({
+                customerId: cid,
+                customerGroupId: id,
+              })),
               skipDuplicates: true,
             }),
           ]
@@ -225,7 +245,11 @@ export class CustomerGroupService {
       }),
     ]);
 
-    return { total: nextIds.size, added: toAdd.length, removed: toRemove.length };
+    return {
+      total: nextIds.size,
+      added: toAdd.length,
+      removed: toRemove.length,
+    };
   }
 
   /**
@@ -294,7 +318,10 @@ export class CustomerGroupService {
         id: c.id.toString(),
         first_name: c.firstName,
         last_name: c.lastName,
-        label: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.phone || c.email,
+        label:
+          [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+          c.phone ||
+          c.email,
         phone: c.phone,
         email: c.email,
         state: c.state,

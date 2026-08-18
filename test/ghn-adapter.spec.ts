@@ -111,9 +111,11 @@ describe('GHN-3 tạo vận đơn — payload create', () => {
           ward_code: '11007',
         },
       ]),
-      getAvailableServices: jest.fn().mockResolvedValue([
-        { service_id: 53320, short_name: 'Chuẩn', service_type_id: 2 },
-      ]),
+      getAvailableServices: jest
+        .fn()
+        .mockResolvedValue([
+          { service_id: 53320, short_name: 'Chuẩn', service_type_id: 2 },
+        ]),
       createOrder: jest.fn(async (payload) => {
         attempt++;
         captured = payload as Record<string, unknown>;
@@ -126,15 +128,19 @@ describe('GHN-3 tạo vận đơn — payload create', () => {
         }
         return { order_code: 'GHN123', total_fee: 44080 };
       }),
-      getWards: jest.fn().mockResolvedValue([
-        { WardCode: '11007', WardName: 'Phường Phú Diễn' },
-      ]),
-      getProvinces: jest.fn().mockResolvedValue([
-        { ProvinceID: 201, ProvinceName: 'Hà Nội' },
-      ]),
-      getDistricts: jest.fn().mockResolvedValue([
-        { DistrictID: 1482, DistrictName: 'Quận Bắc Từ Liêm' },
-      ]),
+      getWards: jest
+        .fn()
+        .mockResolvedValue([
+          { WardCode: '11007', WardName: 'Phường Phú Diễn' },
+        ]),
+      getProvinces: jest
+        .fn()
+        .mockResolvedValue([{ ProvinceID: 201, ProvinceName: 'Hà Nội' }]),
+      getDistricts: jest
+        .fn()
+        .mockResolvedValue([
+          { DistrictID: 1482, DistrictName: 'Quận Bắc Từ Liêm' },
+        ]),
     };
     const resolver = new GhnLocationResolver(client as unknown as GhnClient);
     jest.spyOn(resolver, 'resolve').mockResolvedValue({
@@ -144,10 +150,7 @@ describe('GHN-3 tạo vận đơn — payload create', () => {
       districtName: 'Thành phố Mỹ Tho',
       wardName: 'Phường 5',
     });
-    const adapter = new GhnAdapter(
-      client as unknown as GhnClient,
-      resolver,
-    );
+    const adapter = new GhnAdapter(client as unknown as GhnClient, resolver);
 
     await adapter.createShipment(
       {

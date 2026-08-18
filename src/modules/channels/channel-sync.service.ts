@@ -136,10 +136,9 @@ export class ChannelSyncService {
       await this.savePendingOrders(remaining);
     }
 
-    return {
-      synced: results.filter((r) => r.order_id).length,
-      results,
-    };
+    const synced = results.filter((r) => r.order_id).length;
+    this.logger.log(`Synced ${synced} pending channel orders`);
+    return { synced, results };
   }
 
   private queueFilePath(): string {

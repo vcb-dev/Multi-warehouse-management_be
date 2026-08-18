@@ -105,4 +105,3 @@ export async function findOrderIdsByQuery(
   `;
   return rows.map((r) => r.id);
 }
-

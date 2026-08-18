@@ -1,40 +1,290 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
+import type { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { assertLocationPermission } from '../../common/auth/access';
-import { ListInventoryQueryDto } from './inventory.dto';
+import {
+  EXPORT_ROW_LIMIT,
+  ExportField,
+  describeFields,
+  exportFilename,
+  resolveFields,
+  singleBatch,
+  streamXlsx,
+} from '../../common/utils/xlsx-export';
+import { ExportInventoryQueryDto } from './inventory.dto';
 import { InventoryQueryService } from './inventory-query.service';
 import { InventoryService } from './inventory.service';
 
-const EXPORT_COLUMNS = [
-  { header: 'Mã SP', key: 'ma_sp', width: 14 },
-  { header: 'Mã SKU', key: 'sku', width: 20 },
-  { header: 'Sản phẩm', key: 'product_name', width: 40 },
-  { header: 'Giá bán', key: 'price', width: 14 },
-  { header: 'Giá vốn', key: 'cost', width: 14 },
-  { header: 'Đơn vị tính', key: 'unit', width: 12 },
-  { header: 'Tồn đầu kì', key: 'ton_dau_ky', width: 12 },
-  { header: 'SL Nhập', key: 'sl_nhap', width: 10 },
-  { header: 'SL Xuất', key: 'sl_xuat', width: 10 },
-  { header: 'Tồn kho', key: 'on_hand', width: 12 },
-  { header: 'Có thể bán', key: 'available', width: 12 },
-  { header: 'Bán 15 ngày', key: 'ban_15', width: 12 },
-  { header: 'Bán 30 ngày', key: 'ban_30', width: 12 },
-  { header: 'Bán 90 ngày', key: 'ban_90', width: 12 },
-  { header: 'Hàng đặt', key: 'committed', width: 12 },
-  { header: 'Hàng NK đang về', key: 'nk_dang_ve', width: 15 },
-  { header: 'Chuyển kho đang về', key: 'ck_dang_ve', width: 17 },
-  { header: 'ĐM tồn MIN 15 ngày', key: 'dm_ton_min_15', width: 17 },
-  { header: 'Cần nhập đủ bán 15 ngày', key: 'can_nhap_15', width: 20 },
-  { header: 'Tồn/Bán (ISR)', key: 'isr', width: 12 },
-  { header: 'Tình trạng', key: 'tinh_trang', width: 24 },
-  { header: 'NCC', key: 'ncc', width: 24 },
-  { header: 'Nhóm hàng 1', key: 'nhom_hang_1', width: 16 },
-  { header: 'Nhóm hàng 2', key: 'nhom_hang_2', width: 16 },
-  { header: 'Nhóm hàng 3', key: 'nhom_hang_3', width: 16 },
-  { header: 'Đang đóng gói', key: 'packing', width: 14 },
-  { header: 'Không thể bán', key: 'unavailable', width: 14 },
+type InventoryRow = Awaited<
+  ReturnType<InventoryQueryService['exportRows']>
+>[number];
+
+const G_PRODUCT = 'Thông tin sản phẩm';
+const G_STOCK = 'Tồn kho';
+const G_NXT = 'Nhập xuất tồn';
+const G_ADVICE = 'Gợi ý nhập hàng';
+
+/**
+ * `default: true` giữ nguyên bộ cột cũ của màn Tồn kho theo đúng thứ tự — file
+ * xuất mặc định không đổi so với trước, người dùng muốn khác thì tự chọn trong
+ * dialog "Tùy chọn trường dữ liệu xuất".
+ */
+const INVENTORY_FIELDS: ExportField<InventoryRow>[] = [
+  {
+    key: 'ma_sp',
+    header: 'Mã SP',
+    group: G_PRODUCT,
+    width: 14,
+    default: true,
+    value: (r) => r.ma_sp,
+  },
+  {
+    key: 'sku',
+    header: 'Mã SKU',
+    group: G_PRODUCT,
+    width: 20,
+    locked: true,
+    default: true,
+    value: (r) => r.sku,
+  },
+  {
+    key: 'product_name',
+    header: 'Sản phẩm',
+    group: G_PRODUCT,
+    width: 40,
+    default: true,
+    value: (r) => r.product_name,
+  },
+  {
+    key: 'price',
+    header: 'Giá bán',
+    group: G_PRODUCT,
+    width: 14,
+    default: true,
+    value: (r) => Number(r.price),
+  },
+  {
+    key: 'cost',
+    header: 'Giá vốn',
+    group: G_PRODUCT,
+    width: 14,
+    default: true,
+    value: (r) => Number(r.cost),
+  },
+  {
+    key: 'unit',
+    header: 'Đơn vị tính',
+    group: G_PRODUCT,
+    width: 12,
+    default: true,
+    value: (r) => r.unit ?? '',
+  },
+  {
+    key: 'ton_dau_ky',
+    header: 'Tồn đầu kì',
+    group: G_NXT,
+    width: 12,
+    default: true,
+    value: (r) => r.ton_dau_ky,
+  },
+  {
+    key: 'sl_nhap',
+    header: 'SL Nhập',
+    group: G_NXT,
+    width: 10,
+    default: true,
+    value: (r) => r.sl_nhap,
+  },
+  {
+    key: 'sl_xuat',
+    header: 'SL Xuất',
+    group: G_NXT,
+    width: 10,
+    default: true,
+    value: (r) => r.sl_xuat,
+  },
+  {
+    key: 'on_hand',
+    header: 'Tồn kho',
+    group: G_STOCK,
+    width: 12,
+    default: true,
+    value: (r) => r.on_hand,
+  },
+  {
+    key: 'available',
+    header: 'Có thể bán',
+    group: G_STOCK,
+    width: 12,
+    default: true,
+    value: (r) => r.available,
+  },
+  {
+    key: 'ban_15',
+    header: 'Bán 15 ngày',
+    group: G_NXT,
+    width: 12,
+    default: true,
+    value: (r) => r.ban_15,
+  },
+  {
+    key: 'ban_30',
+    header: 'Bán 30 ngày',
+    group: G_NXT,
+    width: 12,
+    default: true,
+    value: (r) => r.ban_30,
+  },
+  {
+    key: 'ban_90',
+    header: 'Bán 90 ngày',
+    group: G_NXT,
+    width: 12,
+    default: true,
+    value: (r) => r.ban_90,
+  },
+  {
+    key: 'committed',
+    header: 'Hàng đặt',
+    group: G_STOCK,
+    width: 12,
+    default: true,
+    value: (r) => r.committed,
+  },
+  {
+    key: 'nk_dang_ve',
+    header: 'Hàng NK đang về',
+    group: G_STOCK,
+    width: 15,
+    default: true,
+    value: (r) => r.nk_dang_ve,
+  },
+  {
+    key: 'ck_dang_ve',
+    header: 'Chuyển kho đang về',
+    group: G_STOCK,
+    width: 17,
+    default: true,
+    value: (r) => r.ck_dang_ve,
+  },
+  {
+    key: 'dm_ton_min_15',
+    header: 'ĐM tồn MIN 15 ngày',
+    group: G_ADVICE,
+    width: 17,
+    default: true,
+    value: (r) => r.dm_ton_min_15,
+  },
+  {
+    key: 'can_nhap_15',
+    header: 'Cần nhập đủ bán 15 ngày',
+    group: G_ADVICE,
+    width: 20,
+    default: true,
+    value: (r) => r.can_nhap_15,
+  },
+  {
+    key: 'isr',
+    header: 'Tồn/Bán (ISR)',
+    group: G_ADVICE,
+    width: 12,
+    default: true,
+    value: (r) => r.isr ?? '',
+  },
+  {
+    key: 'tinh_trang',
+    header: 'Tình trạng',
+    group: G_ADVICE,
+    width: 24,
+    default: true,
+    value: (r) => r.tinh_trang,
+  },
+  {
+    key: 'ncc',
+    header: 'NCC',
+    group: G_PRODUCT,
+    width: 24,
+    default: true,
+    value: (r) => r.ncc ?? '',
+  },
+  {
+    key: 'nhom_hang_1',
+    header: 'Nhóm hàng 1',
+    group: G_PRODUCT,
+    width: 16,
+    default: true,
+    value: (r) => r.nhom_hang_1 ?? '',
+  },
+  {
+    key: 'nhom_hang_2',
+    header: 'Nhóm hàng 2',
+    group: G_PRODUCT,
+    width: 16,
+    default: true,
+    value: (r) => r.nhom_hang_2 ?? '',
+  },
+  {
+    key: 'nhom_hang_3',
+    header: 'Nhóm hàng 3',
+    group: G_PRODUCT,
+    width: 16,
+    default: true,
+    value: (r) => r.nhom_hang_3 ?? '',
+  },
+  {
+    key: 'packed',
+    header: 'Đang đóng gói',
+    group: G_STOCK,
+    width: 14,
+    default: true,
+    value: (r) => r.packed,
+  },
+  {
+    key: 'unavailable',
+    header: 'Không thể bán',
+    group: G_STOCK,
+    width: 14,
+    default: true,
+    value: (r) => r.unavailable,
+  },
+
+  {
+    key: 'location_name',
+    header: 'Kho',
+    group: G_STOCK,
+    width: 24,
+    value: (r) => r.location_name,
+  },
+  {
+    key: 'location_code',
+    header: 'Mã kho',
+    group: G_STOCK,
+    width: 14,
+    value: (r) => r.location_code,
+  },
+  {
+    key: 'incoming',
+    header: 'Hàng đang về',
+    group: G_STOCK,
+    width: 14,
+    value: (r) => r.incoming,
+  },
+  {
+    key: 'xep_loai_ban',
+    header: 'Xếp loại bán',
+    group: G_ADVICE,
+    width: 16,
+    value: (r) => r.xep_loai_ban,
+  },
+  {
+    key: 'variant_id',
+    header: 'ID phiên bản',
+    group: G_PRODUCT,
+    width: 16,
+    value: (r) => r.variant_id,
+  },
 ];
 
 const IMPORT_HEADERS: Record<string, string> = {
@@ -69,50 +319,29 @@ function cellNum(row: ExcelJS.Row, col?: number): number {
 export class InventoryExportService {
   constructor(private queryService: InventoryQueryService) {}
 
-  async exportExcel(
-    query: ListInventoryQueryDto,
+  /** Danh sách trường cho dialog "Tùy chọn trường dữ liệu xuất" */
+  fields() {
+    return { data: describeFields(INVENTORY_FIELDS) };
+  }
+
+  async export(
+    query: ExportInventoryQueryDto,
     user: AuthUser,
-  ): Promise<Buffer> {
-    const rows = await this.queryService.exportRows(query, user);
+    res: Response,
+  ): Promise<void> {
+    // Tồn kho nạp trọn tập rồi mới ghi (NXT phải enrich theo lô) — chặn trần ở
+    // tầng truy vấn thay vì chỉ cắt lúc ghi, để không kéo về dữ liệu thừa.
+    const rows = await this.queryService.exportRows(
+      { ...query, page: 1, page_size: EXPORT_ROW_LIMIT },
+      user,
+    );
 
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Ton kho');
-    sheet.columns = EXPORT_COLUMNS;
-
-    for (const r of rows) {
-      sheet.addRow({
-        ma_sp: r.ma_sp,
-        sku: r.sku,
-        product_name: r.product_name,
-        price: Number(r.price),
-        cost: Number(r.cost),
-        unit: r.unit ?? '',
-        ton_dau_ky: r.ton_dau_ky,
-        sl_nhap: r.sl_nhap,
-        sl_xuat: r.sl_xuat,
-        on_hand: r.on_hand,
-        available: r.available,
-        ban_15: r.ban_15,
-        ban_30: r.ban_30,
-        ban_90: r.ban_90,
-        committed: r.committed,
-        nk_dang_ve: r.nk_dang_ve,
-        ck_dang_ve: r.ck_dang_ve,
-        dm_ton_min_15: r.dm_ton_min_15,
-        can_nhap_15: r.can_nhap_15,
-        isr: r.isr ?? '',
-        tinh_trang: r.tinh_trang,
-        ncc: r.ncc ?? '',
-        nhom_hang_1: r.nhom_hang_1 ?? '',
-        nhom_hang_2: r.nhom_hang_2 ?? '',
-        nhom_hang_3: r.nhom_hang_3 ?? '',
-        packed: r.packed,
-        unavailable: r.unavailable,
-      });
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    return Buffer.from(buffer);
+    await streamXlsx(res, {
+      filename: exportFilename('ton-kho'),
+      sheetName: 'Ton kho',
+      fields: resolveFields(INVENTORY_FIELDS, query.fields),
+      batches: singleBatch(rows),
+    });
   }
 }
 

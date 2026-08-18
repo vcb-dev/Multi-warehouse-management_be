@@ -3,7 +3,11 @@
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- --config ./test/jest-e2e.json customer-debt
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { InventoryBucket, MovementType, OrderFinancialStatus } from '@prisma/client';
+import {
+  InventoryBucket,
+  MovementType,
+  OrderFinancialStatus,
+} from '@prisma/client';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { OrdersModule } from '../src/modules/orders/orders.module';

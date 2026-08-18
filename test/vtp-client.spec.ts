@@ -68,7 +68,12 @@ describe('VTP client', () => {
         SENDER_ADDRESS: { PROVINCE_ID: 2 },
         RECEIVER_ADDRESS: { PROVINCE_ID: 1 },
         RESULT: [
-          { MA_DV_CHINH: 'LCOD', TEN_DICHVU: 'Tiết kiệm', GIA_CUOC: 38708, THOI_GIAN: '72 giờ' },
+          {
+            MA_DV_CHINH: 'LCOD',
+            TEN_DICHVU: 'Tiết kiệm',
+            GIA_CUOC: 38708,
+            THOI_GIAN: '72 giờ',
+          },
         ],
       }),
     } as Response);
@@ -92,7 +97,12 @@ describe('VTP client', () => {
     );
 
     expect(quotes).toEqual([
-      { MA_DV_CHINH: 'LCOD', TEN_DICHVU: 'Tiết kiệm', GIA_CUOC: 38708, THOI_GIAN: '72 giờ' },
+      {
+        MA_DV_CHINH: 'LCOD',
+        TEN_DICHVU: 'Tiết kiệm',
+        GIA_CUOC: 38708,
+        THOI_GIAN: '72 giờ',
+      },
     ]);
   });
 

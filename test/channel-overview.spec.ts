@@ -95,7 +95,10 @@ describeIfDb('ChannelOverviewService.getOverview', () => {
     const tiktokFromAll = all.channels.find((c) => c.key === 'tiktok');
     expect(tiktokFromAll).toBeDefined();
 
-    const only = await service.getOverview({ from, to, channel: 'tiktok' }, user);
+    const only = await service.getOverview(
+      { from, to, channel: 'tiktok' },
+      user,
+    );
     expect(only.channels).toHaveLength(1);
     expect(only.channels[0].key).toBe('tiktok');
     expect(only.totals.order_count).toBe(tiktokFromAll!.order_count);
@@ -105,7 +108,9 @@ describeIfDb('ChannelOverviewService.getOverview', () => {
   it('doanh số không tính đơn huỷ nhưng số đơn thì có', async () => {
     const r = await service.getOverview({ from, to }, user);
     // Có đơn huỷ trong kỳ thì mẫu số phải lớn hơn số đơn không huỷ
-    expect(r.totals.order_count).toBeGreaterThanOrEqual(r.totals.cancelled_count);
+    expect(r.totals.order_count).toBeGreaterThanOrEqual(
+      r.totals.cancelled_count,
+    );
     expect(r.totals.revenue).toBeGreaterThanOrEqual(0);
   });
 

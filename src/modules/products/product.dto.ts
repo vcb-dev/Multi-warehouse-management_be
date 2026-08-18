@@ -231,6 +231,18 @@ export class ListProductsQueryDto {
   page_size?: number;
 }
 
+export class ExportProductsQueryDto extends ListProductsQueryDto {
+  /** Các key cột cách nhau bởi dấu phẩy; thứ tự trong chuỗi là thứ tự cột file */
+  @IsOptional()
+  @IsString()
+  fields?: string;
+
+  /** Giới hạn về đúng các sản phẩm được chọn / đang hiển thị */
+  @IsOptional()
+  @IsString()
+  ids?: string;
+}
+
 export class ProductInventoryQueryDto {
   @IsOptional()
   @IsString()

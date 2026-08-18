@@ -127,10 +127,9 @@ describe('VTP-3 tạo vận đơn', () => {
     expect(client.loginVtp).toHaveBeenCalledWith('secret-token');
     expect(result.trackingNumber).toBe('VTP123');
     expect(result.shippingFee).toBe(16500);
-    const createPayload = (client.createOrderNlp.mock.calls[0] as unknown[])[0] as Record<
-      string,
-      unknown
-    >;
+    const createPayload = (
+      client.createOrderNlp.mock.calls[0] as unknown[]
+    )[0] as Record<string, unknown>;
     expect(createPayload.ORDER_SERVICE).toBe('PHS'); // rẻ nhất theo mặc định
     expect(createPayload.ORDER_PAYMENT).toBe(2); // khach_tra + COD>0 -> thu hộ hàng+cước
   });

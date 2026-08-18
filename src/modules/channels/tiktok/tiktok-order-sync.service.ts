@@ -1,11 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  FulfillmentDeliveryMethod,
+  NotificationTopic,
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
+  PackingStatus,
   Prisma,
+  ShipmentStatus,
 } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   TiktokApiClient,
@@ -13,6 +18,22 @@ import {
   TiktokOrderLine,
 } from './tiktok-api.client';
 import { TiktokAuthService } from './tiktok-auth.service';
+
+/**
+ * Đơn đặt cách đây quá số giờ này thì kéo về im lặng, không sinh thông báo.
+ * Mục đích duy nhất: sync bù khoảng đã hụt không làm ngập chuông bằng đơn cũ.
+ */
+/**
+ * Hạn cho giao dịch ghi một đơn. Mặc định của Prisma là 5 giây — quá ngắn cho DB dùng
+ * chung: đo 2026-08-18, một lượt backfill tháng 5 chết giữa chừng với
+ * "Transaction already closed ... 67905 ms passed since the start of the transaction"
+ * vì phải xếp hàng chờ connection với cron 15 phút đang chạy song song.
+ */
+const ORDER_TX_OPTIONS = { maxWait: 15_000, timeout: 30_000 };
+
+const SYNC_NOTIFY_MAX_AGE_HOURS = Number(
+  process.env.SYNC_NOTIFY_MAX_AGE_HOURS ?? 24,
+);
 
 /**
  * Kéo đơn thẳng từ TikTok Shop Open API vào bảng `orders` — KHÔNG đi qua Sapo.
@@ -42,6 +63,7 @@ export class TiktokOrderSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: TiktokAuthService,
+    private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -111,6 +133,8 @@ export class TiktokOrderSyncService {
         created: 0,
         updated: 0,
         skipped_lines: 0,
+        kept_existing_lines: 0,
+        failed: 0,
         unmatched_skus: 0,
       };
 
@@ -173,19 +197,33 @@ export class TiktokOrderSyncService {
     let created = 0;
     let updated = 0;
     let skippedLines = 0;
+    let keptExistingLines = 0;
+    let failed = 0;
     const gaps = new Map<string, SkuGap>();
 
     for (const order of orders) {
-      const outcome = await this.upsertOrder({
-        order,
-        locationId: ctx.locationId,
-        createdById,
-        variantBySku,
-        gaps,
-      });
-      if (outcome.created) created++;
-      else updated++;
-      skippedLines += outcome.skippedLines;
+      // Bọc từng đơn: một đơn hỏng (giao dịch quá hạn, dữ liệu lạ) mà ném ra ngoài là mất
+      // trọn phần còn lại của khoảng quét. Đo 2026-08-18: đúng một giao dịch quá hạn đã
+      // giết cả lượt backfill tháng 5. Ghi log rồi đi tiếp; lượt quét sau sẽ vá lại vì
+      // sync là idempotent.
+      try {
+        const outcome = await this.upsertOrder({
+          order,
+          locationId: ctx.locationId,
+          createdById,
+          variantBySku,
+          gaps,
+        });
+        if (outcome.created) created++;
+        else updated++;
+        skippedLines += outcome.skippedLines;
+        if (outcome.keptExistingLines) keptExistingLines++;
+      } catch (e) {
+        failed++;
+        this.logger.error(
+          `Ghi đơn TikTok ${order.id} lỗi: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
 
     await this.recordSkuGaps(gaps);
@@ -195,6 +233,10 @@ export class TiktokOrderSyncService {
       created,
       updated,
       skipped_lines: skippedLines,
+      /** Đơn giữ nguyên dòng hàng cũ vì khớp SKU chưa đủ — xem `upsertOrder()`. */
+      kept_existing_lines: keptExistingLines,
+      /** Đơn ghi hỏng — đã bỏ qua để lượt quét đi tiếp, xem log để biết đơn nào. */
+      failed,
       unmatched_skus: gaps.size,
     };
   }
@@ -317,29 +359,117 @@ export class TiktokOrderSyncService {
       select: { id: true },
     });
 
+    const fulfillment = mapFulfillmentRecord(order, locationId, createdById);
+    let newOrderId: bigint | null = null;
+
+    const replaceItems = shouldReplaceLineItems(skippedLines, items.length);
+    let keptExistingLines = false;
+
     await this.prisma.$transaction(async (tx) => {
       let orderId: bigint;
       if (existing) {
         await tx.order.update({ where: { id: existing.id }, data });
         orderId = existing.id;
-        // Thay toàn bộ dòng hàng: đơn sàn có thể đổi/huỷ từng dòng, ghép từng dòng một
-        // sẽ để lại rác của lần đồng bộ trước.
-        await tx.orderItem.deleteMany({ where: { orderId } });
+        if (replaceItems) {
+          await tx.orderItem.deleteMany({ where: { orderId } });
+        } else {
+          keptExistingLines = true;
+        }
       } else {
         const row = await tx.order.create({
           data: { ...data, name: order.id, createdById },
           select: { id: true },
         });
         orderId = row.id;
+        newOrderId = orderId;
       }
-      if (items.length) {
+      // Đơn mới thì cứ ghi phần khớp được (có còn hơn không); đơn cũ chỉ ghi khi đã xoá.
+      if (items.length && (!existing || replaceItems)) {
         await tx.orderItem.createMany({
           data: items.map((i) => ({ ...i, orderId })),
         });
       }
-    });
 
-    return { created: !existing, skippedLines };
+      // Vận đơn: chỉ có khi TikTok đã tạo kiện và giao cho hãng.
+      //
+      // KHÔNG dùng `upsert` theo `name` được: DB có partial unique index
+      // `fulfillments_one_open_per_order` (order_id WHERE closed_at IS NULL) — mỗi đơn chỉ
+      // được một vận đơn đang mở. Ràng buộc này KHÔNG có trong schema.prisma nên `tsc` không
+      // thấy; tạo thêm dòng mới cho đơn đã có vận đơn Sapo (mã FUN...) sẽ vỡ ở tầng DB.
+      // Vì vậy: ưu tiên khớp theo `name` của mình, không có thì ghi đè lên vận đơn đang mở
+      // sẵn của đơn đó (cùng một kiện hàng thật, chỉ khác nguồn tạo), cuối cùng mới tạo mới.
+      if (fulfillment) {
+        const { name, ...rest } = fulfillment;
+        // Chỉ những trường TikTok là nguồn thật; giữ nguyên `name`/`createdById`/`createdOn`
+        // của bản ghi cũ để không xoá dấu vết ai tạo nó lần đầu.
+        const shippingFields = {
+          status: rest.status,
+          shipmentStatus: rest.shipmentStatus,
+          packedStatus: rest.packedStatus,
+          deliveryMethod: rest.deliveryMethod,
+          trackingNumber: rest.trackingNumber,
+          carrierName: rest.carrierName,
+          trackingCompany: rest.trackingCompany,
+          shipmentCreatedOn: rest.shipmentCreatedOn,
+          pickedUpAt: rest.pickedUpAt,
+          deliveredOn: rest.deliveredOn,
+          cancelledOn: rest.cancelledOn,
+          codAmount: rest.codAmount,
+          totalQuantity: rest.totalQuantity,
+        };
+
+        const target = await tx.fulfillment.findFirst({
+          where: { OR: [{ name }, { orderId, closedAt: null }] },
+          select: { id: true },
+        });
+
+        if (target) {
+          await tx.fulfillment.update({
+            where: { id: target.id },
+            data: shippingFields,
+          });
+        } else {
+          await tx.fulfillment.create({ data: { ...rest, name, orderId } });
+        }
+      }
+    }, ORDER_TX_OPTIONS);
+
+    if (newOrderId !== null) {
+      this.notifyNewSyncedOrder(newOrderId, order, data, locationId);
+    }
+
+    return { created: !existing, skippedLines, keptExistingLines };
+  }
+
+  /**
+   * Thông báo "đơn hàng mới" cho đơn TikTok vừa kéo về. Đây là NGUỒN ĐƠN LỚN NHẤT của
+   * hệ thống — trước đây im lặng hoàn toàn vì sync ghi thẳng `tx.order.create()`, không
+   * đi qua `OrderService.create()` (nơi duy nhất có `emit`).
+   *
+   * ⚠️ Chốt chặn backfill: chỉ báo đơn ĐẶT TRONG {@link SYNC_NOTIFY_MAX_AGE_HOURS} giờ
+   * gần đây. Sync bù các khoảng đã hụt (hiện còn ~3.043 đơn Sapo chưa về) sẽ tạo hàng
+   * nghìn đơn cũ một lúc — không có chặn này thì mỗi nhân viên nhận vài nghìn thông báo
+   * về đơn từ tháng trước, chuông thành vô dụng vĩnh viễn.
+   */
+  private notifyNewSyncedOrder(
+    orderId: bigint,
+    order: TiktokOrder,
+    data: { createdOn?: Date | null },
+    locationId: bigint,
+  ) {
+    const placedAt = data.createdOn ?? null;
+    if (!placedAt) return;
+
+    const ageHours = (Date.now() - placedAt.getTime()) / 3_600_000;
+    if (ageHours > SYNC_NOTIFY_MAX_AGE_HOURS) return;
+
+    void this.notifications.emit(NotificationTopic.orders_create, {
+      subjectType: 'order',
+      subjectId: orderId,
+      locationId,
+      title: `Đơn TikTok mới ${order.id}`,
+      payload: { code: order.id, source_name: 'tiktok' },
+    });
   }
 
   /** Cộng dồn SKU chưa khớp vào `channel_sku_gaps` để UI hiển thị được. */
@@ -433,6 +563,23 @@ function groupLineItems(lines: TiktokOrderLine[]): OrderUnit[] {
   return [...bySkuId.values()];
 }
 
+/**
+ * Có được phép thay toàn bộ dòng hàng của một đơn ĐÃ CÓ trong DB không.
+ *
+ * Đơn sàn có thể đổi/huỷ từng dòng nên cách đúng là thay cả cụm, không ghép từng dòng —
+ * ghép sẽ để lại rác của lần đồng bộ trước. Nhưng thay khi đang khớp SKU thiếu thì còn tệ
+ * hơn nhiều: lệnh xoá vẫn chạy, phần ghi lại thì thiếu, kết quả là đơn trơ mỗi tổng tiền.
+ * Đo 2026-08-18: **90 đơn** có từ trước ngày bật sync trực tiếp đã mất sạch dòng hàng theo
+ * đúng đường này — dòng cũ do Sapo map đúng bị xoá, dòng mới không chèn được vì
+ * `seller_sku` không có trong `product_variants`.
+ *
+ * Vế `matched > 0` không thừa: TikTok thỉnh thoảng trả `line_items` rỗng, khi đó
+ * `skipped` cũng bằng 0 và một mình vế đầu vẫn cho phép xoá sạch.
+ */
+export function shouldReplaceLineItems(skipped: number, matched: number) {
+  return skipped === 0 && matched > 0;
+}
+
 function trackGap(
   gaps: Map<string, SkuGap>,
   unit: OrderUnit,
@@ -512,11 +659,91 @@ function mapOrderFields(order: TiktokOrder, locationId: bigint) {
     gateway: order.payment_method_name ?? null,
     shippingMethod:
       order.delivery_option_name ?? order.shipping_provider ?? null,
-    // TikTok che sạch thông tin người nhận với app chỉ có `seller.order.info` (mọi trường
-    // về chuỗi rỗng), nên các cột `shipping_*` cố tình để trống thay vì ghi rỗng giả.
+    ...mapRecipientAddress(order),
     note: order.buyer_message?.trim() || null,
     email: order.buyer_email ?? null,
   } satisfies Prisma.OrderUncheckedUpdateInput & Record<string, unknown>;
+}
+
+/**
+ * Địa chỉ người nhận → các cột `shipping_*`.
+ *
+ * Dữ liệu này **bị che một phần** và vẫn ghi nguyên phần che: tên `đ** đ** q***g`, SĐT
+ * `0947****98`, số nhà `Ph********************` — nhưng tỉnh/quận thì thật. Ghi vào còn
+ * hơn để trống như trước: nhân viên CSKH cần biết đơn đi tỉnh nào, và 4 số cuối SĐT đủ để
+ * đối chiếu khi khách gọi lên. Xem `TiktokOrder.recipient_address` về vì sao bị che.
+ *
+ * Cấp hành chính đọc theo `address_level` (`L0`..`L3`), **không** theo `address_level_name`:
+ * trường tên cấp trả về không nhất quán trên dữ liệu thật — cùng là L2 mà đơn này ghi
+ * `district` ("Tiên Lãng"), đơn kia ghi `city` ("Phường Hai Bà Trưng") sau đợt gộp đơn vị
+ * hành chính. Mã `L0..L3` thì luôn đúng thứ tự nước → tỉnh → quận/huyện → phường/xã.
+ *
+ * Trả về `{}` khi TikTok không đưa gì (đơn đang giữ — `is_on_hold_order` — trả object
+ * rỗng). Phải là `{}` chứ không phải một loạt `null`: `upsertOrder()` dùng chung object
+ * này cho nhánh `update`, ghi `null` đè lên sẽ xoá mất địa chỉ đã lấy được ở lần đồng bộ
+ * trước mỗi khi đơn chuyển sang trạng thái bị che.
+ */
+export function mapRecipientAddress(
+  order: TiktokOrder,
+): Partial<ShippingAddressFields> {
+  const a = order.recipient_address;
+  if (!a) return {};
+
+  const level = (code: string) =>
+    a.district_info?.find((d) => d.address_level === code);
+  const country = level('L0');
+  const province = level('L1');
+  const district = level('L2');
+  const ward = level('L3');
+
+  const fields: ShippingAddressFields = {
+    shippingName: clean(a.name),
+    shippingPhone: normalizePhone(a.phone_number),
+    // `address_detail` là bản dài nhất — đo được nó chính là `address_line1` ghép
+    // `address_line2`, nên lấy một mình nó là đủ, không cần đổ sang `shipping_address2`.
+    shippingAddress1: clean(a.address_detail) ?? clean(a.address_line1),
+    shippingWard: clean(ward?.address_name),
+    shippingDistrict: clean(district?.address_name),
+    shippingProvince: clean(province?.address_name),
+    shippingProvinceCode: clean(province?.iso_code),
+    shippingCountry: clean(country?.address_name),
+    shippingCountryCode: clean(a.region_code),
+  };
+
+  // Không có lấy một trường nào = đơn bị giữ, để nguyên dữ liệu cũ
+  return Object.values(fields).some((v) => v !== null) ? fields : {};
+}
+
+/** Các cột `orders.shipping_*` mà TikTok là nguồn. Khai riêng để `mapRecipientAddress()`
+ *  trả `Partial<>` — nhánh "không có gì" trả `{}` nhưng vẫn giữ được kiểu của từng cột. */
+type ShippingAddressFields = {
+  shippingName: string | null;
+  shippingPhone: string | null;
+  shippingAddress1: string | null;
+  shippingWard: string | null;
+  shippingDistrict: string | null;
+  shippingProvince: string | null;
+  shippingProvinceCode: string | null;
+  shippingCountry: string | null;
+  shippingCountryCode: string | null;
+};
+
+function clean(v?: string | null): string | null {
+  return v?.trim() || null;
+}
+
+/**
+ * `(+84)947****98` → `0947****98`, cho khớp định dạng SĐT của 16k đơn TikTok cũ về qua
+ * Sapo (`036*****68`) để cột SĐT trên màn đơn hàng không lẫn hai kiểu.
+ *
+ * Phần sau `(+84)` KHÔNG nhất quán: có số đã sẵn số 0 đầu (`(+84)096*****31`), có số thì
+ * không (`(+84)947****98`). Cứ thêm `0` sẽ ra `0096*****31`.
+ */
+function normalizePhone(v?: string | null): string | null {
+  const raw = clean(v);
+  if (!raw?.startsWith('(+84)')) return raw;
+  const local = raw.slice(5).trim();
+  return local.startsWith('0') ? local : `0${local}`;
 }
 
 /**
@@ -540,6 +767,81 @@ function mapFulfillment(status?: string): OrderFulfillmentStatus | null {
     return OrderFulfillmentStatus.fulfilled;
   }
   return null;
+}
+
+/**
+ * Vận đơn cho đơn sàn. TikTok tự chỉ định hãng và tự sinh mã vận đơn, mình chỉ chép lại —
+ * khác hẳn đơn tự đẩy sang GHN/ViettelPost (ở đó mình gọi API tạo vận đơn và có
+ * `provider_id`).
+ *
+ * Theo quy ước sẵn có của dự án cho đơn sàn: `delivery_method = 'ecommerce'`,
+ * `provider_id` để NULL (hãng không phải đối tác tích hợp trong app), tên hãng thật nằm ở
+ * `carrier_name` để `carrierDisplayName()` đọc được.
+ *
+ * Trả null khi TikTok chưa tạo kiện — đơn mới đặt chưa có mã vận đơn thì không nên dựng
+ * sẵn một vận đơn rỗng, vì màn Vận chuyển sẽ hiện đầy dòng trắng không thao tác được.
+ */
+function mapFulfillmentRecord(
+  order: TiktokOrder,
+  locationId: bigint,
+  createdById: bigint,
+) {
+  const packageId = order.packages?.[0]?.id;
+  // `|| null` chứ không `?? null`: đơn huỷ trả `tracking_number` là chuỗi RỖNG chứ không
+  // phải thiếu trường, `??` sẽ để nguyên '' và cột mã vận đơn hiện ô trắng khó hiểu.
+  const tracking = order.tracking_number?.trim() || null;
+  if (!packageId && !tracking) return null;
+
+  const shipmentStatus = mapShipmentStatus(order.status);
+  const at = (unix?: number) => (unix ? new Date(unix * 1000) : null);
+
+  return {
+    // Tiền tố để không đụng dải mã vận đơn nội bộ (FUN...) lẫn của Sapo
+    name: `TTS-${packageId ?? tracking}`,
+    status: order.status === 'CANCELLED' ? 'cancelled' : 'success',
+    shipmentStatus,
+    deliveryMethod: FulfillmentDeliveryMethod.ecommerce,
+    // Sàn đã đóng gói xong mới sinh được mã vận đơn
+    packedStatus: PackingStatus.packed,
+    trackingNumber: tracking,
+    carrierName: order.shipping_provider?.trim() || null,
+    trackingCompany: order.delivery_option_name?.trim() || null,
+    locationId,
+    createdById,
+    // `rts_time` = sẵn sàng giao, `collection_time` = hãng đã lấy hàng
+    shipmentCreatedOn: at(order.rts_time),
+    pickedUpAt: at(order.collection_time),
+    deliveredOn: at(order.delivery_time),
+    cancelledOn: order.status === 'CANCELLED' ? at(order.update_time) : null,
+    codAmount: order.is_cod
+      ? toDecimal(order.payment?.total_amount)
+      : new Prisma.Decimal(0),
+    // Đếm theo `line_items` của TikTok (mỗi phần tử là 1 đơn vị hàng), KHÔNG theo dòng đã
+    // ghi được vào đơn: kiện hàng thật vẫn chứa cả món có SKU chưa khớp, đếm theo dòng khớp
+    // sẽ ra 0 ở những đơn toàn SKU lạ và làm vận đơn trông như rỗng hàng.
+    totalQuantity: order.line_items?.length ?? 0,
+  };
+}
+
+/**
+ * Trạng thái TikTok → `shipment_status` nội bộ. `AWAITING_SHIPMENT` và
+ * `AWAITING_COLLECTION` đều là "hãng chưa cầm hàng" nên cùng về `pending` ("Chờ lấy hàng").
+ */
+function mapShipmentStatus(status?: string): ShipmentStatus | null {
+  switch (status) {
+    case 'AWAITING_SHIPMENT':
+    case 'AWAITING_COLLECTION':
+      return ShipmentStatus.pending;
+    case 'IN_TRANSIT':
+      return ShipmentStatus.delivering;
+    case 'DELIVERED':
+    case 'COMPLETED':
+      return ShipmentStatus.delivered;
+    case 'CANCELLED':
+      return ShipmentStatus.cancelled;
+    default:
+      return null;
+  }
 }
 
 function toDecimal(v?: string | null): Prisma.Decimal {

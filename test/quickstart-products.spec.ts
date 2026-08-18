@@ -2,7 +2,9 @@
  * Quickstart KC1–KC6 — specs/005-san-pham/quickstart.md
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/quickstart-products.spec.ts
  */
+import { Writable } from 'node:stream';
 import { Test, TestingModule } from '@nestjs/testing';
+import type { Response } from 'express';
 import { CategoriesModule } from '../src/modules/categories/categories.module';
 import { CategoryService } from '../src/modules/categories/category.service';
 import { PricingModule } from '../src/modules/pricing/pricing.module';
@@ -39,10 +41,13 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     categories = module.get(CategoryService);
     pricing = module.get(PriceListService);
     prisma = module.get(PrismaService);
-    const { ProductRepository } = await import('../src/modules/products/product.repository');
+    const { ProductRepository } =
+      await import('../src/modules/products/product.repository');
     productRepo = module.get(ProductRepository);
 
-    const user = await prisma.user.findFirst({ where: { email: 'admin@local.dev' } });
+    const user = await prisma.user.findFirst({
+      where: { email: 'admin@local.dev' },
+    });
     const branch = await prisma.location.findFirst();
     const cg = await prisma.customerGroup.findFirst();
     if (!user || !branch || !cg) throw new Error('Run seed first');
@@ -165,13 +170,31 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
     expect(link).toBeTruthy();
   });
 
-  it('KC6 — export trả buffer Excel', async () => {
+  it('KC6 — export ghi file Excel xuống response', async () => {
     const { ProductExportService } = await import(
-      '../src/modules/products/product-import.service'
+      '../src/modules/products/product-export.service'
     );
     const exporter = new ProductExportService(products, productRepo);
-    const buf = await exporter.exportExcel({});
-    expect(buf.length).toBeGreaterThan(100);
+
+    // Export stream thẳng vào response: giả một Writable có setHeader để hứng byte
+    const chunks: Buffer[] = [];
+    const headers: Record<string, string> = {};
+    const res = new Writable({
+      write(chunk: Buffer, _enc, cb) {
+        chunks.push(Buffer.from(chunk));
+        cb();
+      },
+    }) as Writable & {
+      setHeader: (k: string, v: string) => void;
+    };
+    res.setHeader = (k, v) => {
+      headers[k] = v;
+    };
+
+    await exporter.export({}, res as unknown as Response);
+
+    expect(headers['Content-Disposition']).toContain('san-pham');
+    expect(Buffer.concat(chunks).length).toBeGreaterThan(100);
   });
 });
 

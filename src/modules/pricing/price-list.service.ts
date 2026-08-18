@@ -120,9 +120,7 @@ export class PriceListService {
   ) {
     return this.resolvePrice(BigInt(variantId), {
       location_id: locationId ? BigInt(locationId) : undefined,
-      customer_group_id: customerGroupId
-        ? BigInt(customerGroupId)
-        : undefined,
+      customer_group_id: customerGroupId ? BigInt(customerGroupId) : undefined,
     });
   }
 
@@ -131,7 +129,11 @@ export class PriceListService {
       where: { id },
       include: {
         items: {
-          include: { variant: { select: { sku: true, product: { select: { name: true } } } } },
+          include: {
+            variant: {
+              select: { sku: true, product: { select: { name: true } } },
+            },
+          },
           orderBy: { id: 'asc' },
         },
       },

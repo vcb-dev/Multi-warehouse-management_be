@@ -229,6 +229,12 @@ export class InventoryQueryService {
           { inventoryLevels: { some: { locationId, available: { lte: 0 } } } },
         ],
       });
+    } else if (query.stock_status === 'negative') {
+      // Âm THẬT (< 0), không gộp dòng bằng 0 như out_of_stock — và không lấy dòng
+      // chưa có bản ghi tồn ở kho này (chưa nhập bao giờ, không phải âm kho).
+      appendAnd(where, {
+        inventoryLevels: { some: { locationId, available: { lt: 0 } } },
+      });
     }
 
     return where;
@@ -302,6 +308,8 @@ export class InventoryQueryService {
       where.available = { gt: 0 };
     } else if (query.stock_status === 'out_of_stock') {
       where.available = { lte: 0 };
+    } else if (query.stock_status === 'negative') {
+      where.available = { lt: 0 };
     }
 
     if (query.q?.trim()) {

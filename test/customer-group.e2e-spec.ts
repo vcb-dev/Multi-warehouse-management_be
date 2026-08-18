@@ -43,7 +43,11 @@ describeIfDb('nhóm khách hàng (integration)', () => {
   let autoGroupId: bigint;
   let manualGroupId: bigint;
 
-  async function newCustomer(name: string, tags: string[], phoneSuffix: string) {
+  async function newCustomer(
+    name: string,
+    tags: string[],
+    phoneSuffix: string,
+  ) {
     const res = await customers.create({
       first_name: name,
       phone: `0999${runId.slice(-6)}${phoneSuffix}`,
@@ -98,7 +102,9 @@ describeIfDb('nhóm khách hàng (integration)', () => {
       where: { OR: [{ id: { in: customerIds } }, { tags: { has: MARKER } }] },
     });
     await prisma.customerGroup.deleteMany({
-      where: { OR: [{ id: { in: groupIds } }, { code: { startsWith: runId } }] },
+      where: {
+        OR: [{ id: { in: groupIds } }, { code: { startsWith: runId } }],
+      },
     });
     await prisma.$disconnect();
   });
@@ -187,9 +193,9 @@ describeIfDb('nhóm khách hàng (integration)', () => {
     await expect(
       groups.addMembers(autoGroupId, [chi.toString()]),
     ).rejects.toBeInstanceOf(ConflictException);
-    await expect(groups.removeMember(autoGroupId, alice)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      groups.removeMember(autoGroupId, alice),
+    ).rejects.toBeInstanceOf(ConflictException);
 
     expect(await memberIds(autoGroupId)).toEqual(before);
   });
@@ -277,7 +283,12 @@ describeIfDb('nhóm khách hàng (integration)', () => {
 
   it('nhóm tự động không có điều kiện bị từ chối', async () => {
     await expect(
-      groups.create({ name: `Rỗng ${runId}`, code: `${runId}-empty`, type: 'auto', rules: [] }),
+      groups.create({
+        name: `Rỗng ${runId}`,
+        code: `${runId}-empty`,
+        type: 'auto',
+        rules: [],
+      }),
     ).rejects.toThrow();
     // Không được để lại nhóm hỏng trong DB
     expect(
@@ -299,7 +310,9 @@ describeIfDb('nhóm khách hàng (integration)', () => {
     expect(await memberIds(autoGroupId)).toEqual(before);
 
     // Giờ là nhóm thủ công nên sửa tay được
-    await expect(groups.removeMember(autoGroupId, alice)).resolves.toMatchObject({
+    await expect(
+      groups.removeMember(autoGroupId, alice),
+    ).resolves.toMatchObject({
       removed: true,
     });
   });

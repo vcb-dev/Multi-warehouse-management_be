@@ -9,6 +9,7 @@ import {
 import { ChannelSyncService } from './channel-sync.service';
 import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
+import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
 
 /**
  * Cửa sổ quét của cron TikTok, tính bằng phút. Phải RỘNG HƠN chu kỳ chạy để hai lần quét
@@ -23,6 +24,12 @@ const SHOPEE_WINDOW_MINUTES = Number(
   process.env.SHOPEE_SYNC_WINDOW_MINUTES ?? 45,
 );
 
+/**
+ * Số ngày quét lại của lượt tổng vệ sinh hằng ngày. Xem `sweepTiktokOrders()` về lý do
+ * cần lượt này bên cạnh cron 15 phút.
+ */
+const TIKTOK_SWEEP_DAYS = Number(process.env.TIKTOK_SWEEP_DAYS ?? 7);
+
 @Injectable()
 export class ChannelSyncScheduler {
   private readonly logger = new Logger(ChannelSyncScheduler.name);
@@ -34,6 +41,7 @@ export class ChannelSyncScheduler {
     private readonly sync: ChannelSyncService,
     private readonly tiktokOrders: TiktokOrderSyncService,
     private readonly shopeeSync: ShopeeSyncService,
+    private readonly tiktokReturns: TiktokReturnSyncService,
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
   ) {}
@@ -116,6 +124,79 @@ export class ChannelSyncScheduler {
       );
     } finally {
       this.shopeeRunning = false;
+    }
+  }
+
+  /**
+   * Lưới an toàn hằng ngày: quét lại {@link TIKTOK_SWEEP_DAYS} ngày theo `update_time`.
+   *
+   * Vì sao cần dù đã có cron 15 phút: cửa sổ của cron chỉ {@link TIKTOK_WINDOW_MINUTES}
+   * phút, nên **mỗi lần server nghỉ lâu hơn thế là mất vĩnh viễn** số đơn đổi trạng thái
+   * trong khoảng đó — không có gì quay lại đọc chúng nữa. Đây không phải rủi ro lý thuyết:
+   * đo 2026-08-18 thấy tháng 5 và tháng 6 có **0/1.719 đơn ở trạng thái đóng**, lấy mẫu 15
+   * đơn mà DB ghi "đang mở" thì TikTok trả 13 COMPLETED + 2 CANCELLED — sai 15/15.
+   *
+   * Chạy đêm vì tốn ~0,7 giây/đơn (7 ngày ≈ 900 đơn ≈ 10 phút) và dùng chung cờ
+   * `tiktokRunning` với cron 15 phút để hai lượt không giẫm chân nhau.
+   */
+  @Cron(process.env.TIKTOK_SWEEP_CRON ?? '0 30 3 * * *')
+  async sweepTiktokOrders() {
+    if (process.env.TIKTOK_SYNC_CRON_ENABLED !== 'true') return;
+    if (this.tiktokRunning) {
+      this.logger.warn('Quét ngày TikTok: cron 15 phút đang chạy, bỏ lượt này');
+      return;
+    }
+
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) {
+      this.logger.warn(
+        'Quét ngày TikTok: không tìm thấy user đồng bộ (CHANNEL_SYNC_ACTOR_* hoặc admin active)',
+      );
+      return;
+    }
+
+    this.tiktokRunning = true;
+    try {
+      const r = await this.tiktokOrders.syncRecent(
+        TIKTOK_SWEEP_DAYS * 24 * 60,
+        actorId,
+      );
+      this.logger.log(
+        `Quét ngày TikTok (${TIKTOK_SWEEP_DAYS} ngày): ${r.fetched} đơn — ${r.created} mới, ${r.updated} cập nhật`,
+      );
+    } catch (e) {
+      this.logger.error(
+        `Quét ngày TikTok thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      this.tiktokRunning = false;
+    }
+  }
+
+  /**
+   * Phiếu hoàn/trả TikTok. Chạy thưa hơn đơn (mặc định 1 giờ) vì hoàn hàng diễn ra theo
+   * ngày chứ không theo phút — khách gửi hàng về rồi chờ kho sàn nhận, không có gì gấp.
+   * Cửa sổ rộng 3 giờ để các lượt chồng lấn nhau; upsert theo `order_returns.code` nên
+   * quét trùng không sinh phiếu ma.
+   */
+  @Cron(process.env.TIKTOK_RETURN_CRON ?? CronExpression.EVERY_HOUR)
+  async pollTiktokReturns() {
+    if (process.env.TIKTOK_SYNC_CRON_ENABLED !== 'true') return;
+
+    const actorId = await resolveChannelSyncActorId(this.prisma);
+    if (!actorId) return;
+
+    try {
+      const r = await this.tiktokReturns.syncRecent(180, actorId);
+      if (r.fetched) {
+        this.logger.log(
+          `Cron hoàn hàng TikTok: ${r.fetched} phiếu — ${r.orders_updated} đơn đổi trạng thái`,
+        );
+      }
+    } catch (e) {
+      this.logger.error(
+        `Cron hoàn hàng TikTok thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

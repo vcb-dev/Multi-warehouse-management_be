@@ -39,6 +39,13 @@ export type NxtExtras = {
   nhom_hang_3: string | null;
 };
 
+/**
+ * Số dòng tối đa mỗi lượt gọi DB khi tính NXT. Trần cứng là 32.767 bind variable
+ * của Postgres chia cho 2 (mỗi dòng là một cặp `(variant_id, location_id)`) ≈ 16.000;
+ * lấy 5.000 để còn biên an toàn cho các tham số khác trong cùng câu lệnh.
+ */
+const NXT_CHUNK_SIZE = 5_000;
+
 const EMPTY_EXTRAS: Omit<
   NxtExtras,
   'ton_dau_ky' | 'tinh_trang' | 'tinh_trang_code' | 'xep_loai_ban'
@@ -141,6 +148,26 @@ export class InventoryNxtService {
    * tháng hiện tại); kỳ luôn kết thúc ở hiện tại nên tồn cuối kỳ = on_hand.
    */
   async enrich(
+    rows: NxtRowInput[],
+    from?: Date,
+  ): Promise<Map<string, NxtExtras>> {
+    const result = new Map<string, NxtExtras>();
+    if (!rows.length) return result;
+
+    // Chia lô rồi gộp: mỗi dòng tốn 2 bind variable cho `(variant_id, location_id) IN (...)`,
+    // mà Postgres chỉ nhận tối đa 32.767 mỗi prepared statement. Xuất file toàn bộ tồn kho
+    // (17.7k dòng → 35.422 biến) làm vỡ truy vấn, nên phải cắt trước khi xuống DB.
+    for (let i = 0; i < rows.length; i += NXT_CHUNK_SIZE) {
+      const chunk = await this.enrichChunk(
+        rows.slice(i, i + NXT_CHUNK_SIZE),
+        from,
+      );
+      for (const [key, value] of chunk) result.set(key, value);
+    }
+    return result;
+  }
+
+  private async enrichChunk(
     rows: NxtRowInput[],
     from?: Date,
   ): Promise<Map<string, NxtExtras>> {

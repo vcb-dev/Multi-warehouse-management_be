@@ -3,6 +3,7 @@ import {
   CustomerLedgerReferenceType,
   InventoryBucket,
   MovementType,
+  NotificationTopic,
   RestockType,
   OrderFulfillmentStatus,
   OrderStatus,
@@ -16,6 +17,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
+import { NotificationService } from '../notifications/notification.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../orders/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
@@ -34,6 +36,7 @@ export class OrderReturnService {
     private inventory: InventoryService,
     private vouchers: VoucherService,
     private customerDebt: CustomerDebtService,
+    private notifications: NotificationService,
   ) {}
 
   async list(query: ListOrderReturnsQueryDto, user: AuthUser) {
@@ -269,6 +272,24 @@ export class OrderReturnService {
       await recomputeOrderRefundStatuses(tx, orderId);
 
       return { ret, refund, voucher };
+    });
+
+    // subjectId là id của REFUND (khớp topic `refunds/create` bên Sapo), nên phải kèm
+    // `order_id` trong payload — không có nó thì serializer không dựng được link.
+    void this.notifications.emit(NotificationTopic.refunds_create, {
+      subjectType: 'order_refund',
+      subjectId: record.refund.id,
+      locationId: order.locationId,
+      title: `Trả hàng ${record.ret.code} — hoàn ${Number(
+        record.refund.totalRefunded,
+      ).toLocaleString('vi-VN')}đ (đơn ${order.name})`,
+      payload: {
+        code: record.ret.code,
+        order_id: orderId.toString(),
+        order_code: order.name,
+        refund_amount: Number(record.refund.totalRefunded),
+        deduct_from_debt: deductFromDebt,
+      },
     });
 
     return {

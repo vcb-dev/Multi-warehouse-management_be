@@ -237,6 +237,41 @@ enum OrderDeliveryMode {
   da_giao_hang
 }
 
+/// Chủ đề thông báo. Giá trị lưu trong DB dùng ĐÚNG vocabulary topic webhook của Sapo
+/// (`orders/create`, `fulfillments/update`...) — xác nhận qua `/admin/webhooks.json`
+/// (endpoint duy nhất của mảng thông báo mà Open API mở; `/admin/notifications.json`
+/// trả 401, `email_templates`/`notification_templates`/`alerts` trả 403).
+///
+/// Hiện sự kiện sinh 100% từ domain nội bộ, KHÔNG có webhook Sapo nào được đăng ký.
+/// Đặt tên trùng Sapo từ đầu để sau này bật webhook thật thì không phải đổi tên sự kiện,
+/// không phải migrate dữ liệu cũ.
+enum NotificationTopic {
+  orders_create       @map("orders/create")
+  orders_paid         @map("orders/paid")
+  orders_cancelled    @map("orders/cancelled")
+  orders_fulfilled    @map("orders/fulfilled")
+  fulfillments_create @map("fulfillments/create")
+  fulfillments_update @map("fulfillments/update")
+  refunds_create      @map("refunds/create")
+  customers_create    @map("customers/create")
+
+  // --- MỞ RỘNG NGOÀI SAPO — hai giá trị dưới KHÔNG phải topic webhook Sapo ---
+  //
+  // Sapo không có topic nào cho cảnh báo tồn kho. Gần nhất là `inventory_levels/update`
+  // nhưng nó nghĩa là "mọi thay đổi tồn" (bắn mỗi lần xuất/nhập một cái) — dùng cho
+  // cảnh báo sẽ sai nghĩa VÀ đụng nhau nếu sau này đăng ký webhook Sapo thật.
+  // Vì vậy đặt tiền tố `inventory/` riêng, không lẫn với `inventory_levels/` của Sapo.
+
+  /// Cần nhập hàng — theo công thức định mức của khách trong inventory-nxt.service.ts
+  /// (`can_nhap_15 > 0`), KHÔNG phải ngưỡng cứng `available <= 5`: đo trên dữ liệu thật
+  /// 17/08/2026, ngưỡng cứng khớp 17.001/17.710 dòng (96%) nên vô dụng làm cảnh báo,
+  /// còn `can_nhap_15 > 0` chỉ khớp 175 dòng.
+  inventory_low_stock @map("inventory/low_stock")
+
+  /// Âm kho (`available < 0`) — bán quá tay hoặc lệch sổ. 756 dòng lúc đo.
+  inventory_negative  @map("inventory/negative")
+}
+
 // --- Auth & config ---
 
 // --- CQA multi-tenant ---
@@ -317,6 +352,7 @@ model User {
   createdFulfillments    Fulfillment[]               @relation("FulfillmentCreatedBy")
   createdCarrierTickets  CarrierTicket[]             @relation("CarrierTicketCreatedBy")
   savedReports           SavedReport[]               @relation("SavedReportUser")
+  notifications          NotificationRecipient[]     @relation("NotificationRecipient")
   apiKeysCreated         ApiKey[]                    @relation("ApiKeyCreatedBy")
   apiKeysActingAs        ApiKey[]                    @relation("ApiKeyActingUser")
   variantPriceHistories  VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
@@ -477,6 +513,7 @@ model Location {
   vouchers            Voucher[]
   fulfillments        Fulfillment[]
   channelConnections  ChannelConnection[]
+  notifications       Notification[]           @relation("NotificationLocation")
 
   @@index([status])
   @@map("locations")
@@ -1560,6 +1597,11 @@ model Fulfillment {
   items          FulfillmentLineItem[]
   carrierTickets CarrierTicket[]
 
+  // CẢNH BÁO: DB còn một partial unique index mà Prisma KHÔNG mô tả được nên không có ở
+  // đây — `fulfillments_one_open_per_order` trên (order_id) WHERE closed_at IS NULL: mỗi
+  // đơn chỉ được có MỘT vận đơn đang mở. Vì Prisma không thấy nó, `tsc` cũng không thấy;
+  // code tạo vận đơn phải tự kiểm tra vận đơn đang mở của đơn trước khi `create`, nếu không
+  // sẽ vỡ ở tầng DB lúc chạy thật (đã gặp khi đồng bộ TikTok 2026-08-15).
   @@index([orderId])
   @@index([shipmentStatus])
   @@map("fulfillments")
@@ -2161,4 +2203,84 @@ model CskhPageAdSpendDaily {
   @@index([statDate])
   @@index([tenantId, statDate])
   @@map("cskh_page_ad_spend_daily")
+}
+
+// --- Thông báo in-app ---
+
+/// Một dòng = MỘT sự kiện đã xảy ra, không gắn user. Người nhận nằm ở
+/// `NotificationRecipient` (fan-out), vì một đơn mới cần hiện cho N nhân viên của kho
+/// đó — gộp chung một bảng sẽ nhân bản `title`/`payload` N lần.
+model Notification {
+  id BigInt @id @default(autoincrement())
+
+  topic NotificationTopic
+
+  /// Loại đối tượng: `order` | `fulfillment` | `customer` | `order_refund`.
+  /// Chuỗi tự do chứ không phải FK — thông báo trỏ tới nhiều bảng khác nhau.
+  subjectType String @map("subject_type")
+  subjectId   BigInt @map("subject_id")
+
+  /// Kho phát sinh sự kiện — dùng để fan-out đúng người theo scope kho.
+  /// NULL = sự kiện không thuộc kho nào (vd khách hàng mới) ⇒ gửi cho mọi user có quyền.
+  locationId BigInt? @map("location_id")
+
+  /// Câu tiếng Việt render sẵn lúc emit, vd "Đơn HK93656 đã được thanh toán".
+  title String
+
+  /// Snapshot dữ liệu tại thời điểm emit (mã đơn, tiền, tên khách, hãng vận chuyển...).
+  /// Render sẵn + snapshot để danh sách thông báo KHÔNG phải join sang `orders` —
+  /// bảng đó đang ~88k dòng, join mỗi lần mở chuông là phí vô ích.
+  payload Json?
+
+  createdOn DateTime @default(now()) @map("created_on")
+
+  location   Location?               @relation("NotificationLocation", fields: [locationId], references: [id])
+  recipients NotificationRecipient[]
+
+  @@index([subjectType, subjectId])
+  @@index([createdOn])
+  @@map("notifications")
+}
+
+/// Fan-out: ai nhận thông báo nào, và đã đọc chưa.
+model NotificationRecipient {
+  notificationId BigInt @map("notification_id")
+  userId         BigInt @map("user_id")
+
+  /// Giai đoạn 1 luôn `app`. Cột dựng sẵn cho `email` — chưa có code nào ghi giá trị khác.
+  channel String @default("app")
+
+  readOn DateTime? @map("read_on")
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, userId, channel])
+  /// Index chủ lực: đếm badge chưa đọc + phân trang keyset theo user (mới nhất trước)
+  @@index([userId, readOn, notificationId(sort: Desc)])
+  @@map("notification_recipients")
+}
+
+/// Cấu hình theo từng topic — nguồn dữ liệu của trang `/cau-hinh/thong-bao`.
+model NotificationSetting {
+  id BigInt @id @default(autoincrement())
+
+  topic NotificationTopic @unique
+
+  /// Tắt = `emit` không sinh dòng nào cho topic này.
+  appEnabled Boolean @default(true) @map("app_enabled")
+
+  /// Dựng sẵn cho giai đoạn email — hiện KHÔNG có code nào đọc field này.
+  emailEnabled Boolean @default(false) @map("email_enabled")
+
+  /// Ai nhận: mảng permission key (vd `["order:view"]`), user phải có ĐỦ mọi key.
+  /// Mảng rỗng = mọi user đang hoạt động đều nhận.
+  /// Dùng permission thay vì role vì RBAC dự án là động (admin tự tạo/xoá role),
+  /// hard-code tên role vào đây sẽ vỡ ngay khi ai đó đổi tên role.
+  recipientPermissions String[] @default([]) @map("recipient_permissions")
+
+  createdOn  DateTime @default(now()) @map("created_on")
+  modifiedOn DateTime @updatedAt @map("modified_on")
+
+  @@map("notification_settings")
 }

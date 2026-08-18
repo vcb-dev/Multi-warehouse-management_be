@@ -3,10 +3,7 @@
  * Chạy: DATABASE_URL=... npm run test -- test/inventory-ledger.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  InventoryBucket,
-  MovementType,
-} from '@prisma/client';
+import { InventoryBucket, MovementType } from '@prisma/client';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
@@ -187,7 +184,11 @@ describe('INV-2 bucket sums (unit)', () => {
     expect(buckets.committed).toBe(2);
     expect(buckets.packed).toBe(3);
     expect(buckets.on_hand).toBe(10);
-    const available = buckets.on_hand - buckets.committed - buckets.packed - buckets.unavailable;
+    const available =
+      buckets.on_hand -
+      buckets.committed -
+      buckets.packed -
+      buckets.unavailable;
     expect(available).toBe(5);
   });
 
