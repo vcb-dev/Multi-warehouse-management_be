@@ -21,18 +21,16 @@ import {
   LocationOptional,
   RequirePermission,
 } from '../../common/decorators/permissions.decorator';
-import { sendXlsx } from '../../common/utils/send-xlsx';
 import {
   CreateProductDto,
+  ExportProductsQueryDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
   UpdateProductDto,
   VariantPriceHistoryQueryDto,
 } from './product.dto';
-import {
-  ProductExportService,
-  ProductImportService,
-} from './product-import.service';
+import { ProductExportService } from './product-export.service';
+import { ProductImportService } from './product-import.service';
 import { ProductService } from './product.service';
 
 @ApiTags('products')
@@ -58,11 +56,16 @@ export class ProductsController {
     return this.products.create(dto, user);
   }
 
+  @Get('export/fields')
+  @RequirePermission('product:manage')
+  exportFields() {
+    return this.exporter.fields();
+  }
+
   @Get('export')
   @RequirePermission('product:manage')
-  async export(@Query() query: ListProductsQueryDto, @Res() res: Response) {
-    const buffer = await this.exporter.exportExcel(query);
-    sendXlsx(res, buffer, 'san-pham.xlsx');
+  async export(@Query() query: ExportProductsQueryDto, @Res() res: Response) {
+    await this.exporter.export(query, res);
   }
 
   @Post('import')

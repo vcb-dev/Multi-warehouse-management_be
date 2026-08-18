@@ -1,5 +1,15 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import {
   CurrentUser,
   AuthUser,
@@ -8,11 +18,13 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import {
   CreateOrderDto,
+  ExportOrdersQueryDto,
   ListOrdersQueryDto,
   OrderTransitionDto,
   PayOrderDto,
   UpdateOrderDto,
 } from './order.dto';
+import { OrderExportService } from './order-export.service';
 import { OrderService } from './order.service';
 
 @ApiTags('orders')
@@ -21,6 +33,7 @@ import { OrderService } from './order.service';
 export class OrdersController {
   constructor(
     private orders: OrderService,
+    private exporter: OrderExportService,
     private activityLog: ActivityLogService,
   ) {}
 
@@ -34,6 +47,24 @@ export class OrdersController {
   @RequirePermission('order:create')
   create(@Body() dto: CreateOrderDto, @CurrentUser() user: AuthUser) {
     return this.orders.create(dto, user);
+  }
+
+  // Hai route 'export*' phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
+  // 'export' thành id và trả 404.
+  @Get('export/fields')
+  @RequirePermission('order:view')
+  exportFields(@Query() query: ExportOrdersQueryDto) {
+    return this.exporter.fields(query.mode ?? 'order');
+  }
+
+  @Get('export')
+  @RequirePermission('order:view')
+  async export(
+    @Query() query: ExportOrdersQueryDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    await this.exporter.export(query, user, res);
   }
 
   @Get(':id')
