@@ -197,7 +197,7 @@ export class UserAdminService {
       },
     });
     // Khoá tài khoản phải chặn được request kế tiếp ngay, không đợi hết TTL.
-    this.authCache.invalidate(user.id);
+    this.authCache.invalidateUser(user.id);
     return this.findOne(id);
   }
 
@@ -257,7 +257,7 @@ export class UserAdminService {
         });
       }
     });
-    this.authCache.invalidate(user.id);
+    this.authCache.invalidateUser(user.id);
     return this.findOne(id);
   }
 
@@ -280,7 +280,7 @@ export class UserAdminService {
     await this.prisma.userLocationRole.deleteMany({
       where: { userId, locationId: BigInt(locationId) },
     });
-    this.authCache.invalidate(userId);
+    this.authCache.invalidateUser(userId);
   }
 
   private async getWarehouseRoleAssignment(id: string, locationId: string) {
@@ -403,7 +403,7 @@ export class UserAdminService {
       }
     });
 
-    this.authCache.invalidate(assignment.userId);
+    this.authCache.invalidateUser(assignment.userId);
     return this.getWarehousePermissions(id, locationId);
   }
 }

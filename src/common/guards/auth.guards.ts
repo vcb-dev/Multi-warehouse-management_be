@@ -1,11 +1,11 @@
 import {
+  CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AuthGuard } from '@nestjs/passport';
-import { CanActivate, ForbiddenException } from '@nestjs/common';
 import { PermissionScope } from '@prisma/client';
 import {
   hasLocationPermission,
@@ -21,24 +21,43 @@ import {
 import { BusinessException } from '../exceptions/business.exception';
 import { PERMISSION_SCOPE } from '../../modules/rbac/permission-catalog';
 import { ApiKeyService } from '../../modules/api-keys/api-key.service';
+import { SessionService } from '../../modules/auth/session.service';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+type AuthRequest = {
+  headers: Record<string, string | string[] | undefined>;
+  user?: AuthUser;
+};
+
+function readHeader(
+  req: AuthRequest,
+  name: string,
+): string | undefined {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 /**
  * Cổng xác thực duy nhất của toàn hệ thống — chấp nhận HAI cách:
- * - `Authorization: Bearer <jwt>` (đăng nhập bình thường, qua passport-jwt).
- * - `x-api-key: <key>` (đối tác server-to-server, không đăng nhập). Key xác thực THAY
- *   một user có sẵn (`ApiKey.actingUserId`) nên `req.user` dựng ra có đúng shape/quyền như
- *   JWT — `PermissionGuard` phía sau không cần biết request đến từ đường nào.
+ * - `Authorization: Bearer <token phiên>` (đăng nhập bình thường).
+ * - `x-api-key: <key>` (đối tác server-to-server, không đăng nhập).
+ *
+ * Cả hai đều là chuỗi ngẫu nhiên không mang thông tin, chỉ hợp lệ khi đối chiếu ra một
+ * dòng còn sống trong database. Không có gì tự chứng minh được tính hợp lệ, nên không có
+ * khoá ký nào để dò ngược, và thu hồi là xoá/đánh dấu một dòng chứ không phải chờ hết hạn.
+ *
+ * Key đối tác xác thực THAY một user có sẵn (`ApiKey.actingUserId`) nên `req.user` dựng ra
+ * có đúng shape/quyền như phiên người dùng — `PermissionGuard` phía sau không cần biết
+ * request đến từ đường nào.
  */
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {
+export class JwtAuthGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
     private apiKeys: ApiKeyService,
-  ) {
-    super();
-  }
+    private sessions: SessionService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, [
@@ -47,12 +66,9 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     ]);
     if (isPublic) return true;
 
-    const req = context.switchToHttp().getRequest<{
-      headers: Record<string, string | string[] | undefined>;
-      user?: AuthUser;
-    }>();
-    const apiKeyHeader = req.headers['x-api-key'];
-    const rawKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+    const req = context.switchToHttp().getRequest<AuthRequest>();
+
+    const rawKey = readHeader(req, 'x-api-key');
     if (rawKey) {
       const authUser = await this.apiKeys.resolveAuthUser(rawKey);
       if (!authUser) {
@@ -62,7 +78,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    return super.canActivate(context) as Promise<boolean>;
+    const authorization = readHeader(req, 'authorization');
+    const token = authorization?.replace(/^Bearer\s+/i, '').trim();
+    if (!token) throw new UnauthorizedException();
+
+    const authUser = await this.sessions.resolveAuthUser(token);
+    // Cố ý không phân biệt "token sai" với "phiên đã thu hồi": nói rõ là xác nhận giúp
+    // kẻ tấn công rằng token họ nhặt được từng là thật.
+    if (!authUser) throw new UnauthorizedException();
+
+    req.user = authUser;
+    return true;
   }
 }
 

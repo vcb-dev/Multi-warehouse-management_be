@@ -2,6 +2,11 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export type AuthUser = {
   userId: bigint;
+  /**
+   * Phiên đang dùng. Có với người đăng nhập, KHÔNG có với đường API key đối tác — key
+   * không thuộc phiên nào nên không tự đăng xuất hay tự liệt kê thiết bị được.
+   */
+  sessionId?: bigint;
   email: string;
   roles: string[];
   locationIds: bigint[];
