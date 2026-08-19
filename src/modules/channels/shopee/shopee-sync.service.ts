@@ -515,39 +515,20 @@ export class ShopeeSyncService {
     return [...seen];
   }
 
+  /**
+   * Chỉ gắn khách đã tồn tại khi SĐT thật (không bị sàn che).
+   * Không tạo khách mới từ Shopee — giống TikTok sync.
+   */
   private async resolveCustomer(
     order: ShopeeOrderDetail,
   ): Promise<bigint | null> {
-    const addr = order.recipient_address;
-    const phone = (addr?.phone ?? '').trim();
-    const name = (addr?.name ?? order.buyer_username ?? '').trim();
-
-    if (phone) {
-      const existing = await this.prisma.customer.findFirst({
-        where: { phone },
-      });
-      if (existing) return existing.id;
-      // const created = await this.prisma.customer.create({
-      //   data: {
-      //     phone,
-      //     firstName: name || null,
-      //   },
-      // });
-      // return created.id;
-    }
-
-    const pseudoPhone = `shopee-${order.buyer_user_id ?? order.order_sn}`;
+    const phone = (order.recipient_address?.phone ?? '').trim();
+    if (!phone || phone.includes('*')) return null;
     const existing = await this.prisma.customer.findFirst({
-      where: { phone: pseudoPhone },
+      where: { phone },
+      select: { id: true },
     });
-    if (existing) return existing.id;
-    const created = await this.prisma.customer.create({
-      data: {
-        phone: pseudoPhone,
-        firstName: name || order.buyer_username || 'Shopee buyer',
-      },
-    });
-    return created.id;
+    return existing?.id ?? null;
   }
 
   private async resolveLocationId(conn: ChannelConnection): Promise<bigint> {
