@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { marketplaceOrderUrl } from '../channel-order-link';
 import { ShopeeAuthService } from './shopee-auth.service';
 import {
   ShopeeClient,
@@ -157,12 +158,10 @@ export class ShopeeSyncService {
     );
 
     const orders = detail.order_list ?? [];
-    const result = await this.applyOrders(
-      orders,
-      locationId,
-      createdById,
-      fresh.shopId,
-    );
+    const result = await this.applyOrders(orders, locationId, createdById, {
+      id: fresh.shopId,
+      name: fresh.shopName,
+    });
     return result;
   }
 
@@ -245,12 +244,10 @@ export class ShopeeSyncService {
       orders.push(...(detail.order_list ?? []));
     }
 
-    const result = await this.applyOrders(
-      orders,
-      locationId,
-      createdById,
-      fresh.shopId,
-    );
+    const result = await this.applyOrders(orders, locationId, createdById, {
+      id: fresh.shopId,
+      name: fresh.shopName,
+    });
 
     this.logger.log(
       `Shopee sync shop ${fresh.shopId}: ${result.fetched} đơn — ${result.created} mới, ${result.updated} cập nhật`,
@@ -262,7 +259,7 @@ export class ShopeeSyncService {
     orders: ShopeeOrderDetail[],
     locationId: bigint,
     createdById: bigint,
-    shopId: string,
+    shop: { id: string; name: string | null },
   ) {
     const variantBySku = await this.loadVariants(orders);
     const gaps = new Map<string, SkuGap>();
@@ -277,6 +274,7 @@ export class ShopeeSyncService {
           order,
           locationId,
           createdById,
+          shop,
           variantBySku,
           gaps,
         });
@@ -297,7 +295,9 @@ export class ShopeeSyncService {
             : e instanceof Error
               ? e.message
               : 'Lỗi không xác định';
-        this.logger.warn(`Shopee đơn ${order.order_sn} shop ${shopId}: ${msg}`);
+        this.logger.warn(
+          `Shopee đơn ${order.order_sn} shop ${shop.id}: ${msg}`,
+        );
         results.push({ order_sn: order.order_sn ?? '', error: msg });
       }
     }
@@ -318,10 +318,11 @@ export class ShopeeSyncService {
     order: ShopeeOrderDetail;
     locationId: bigint;
     createdById: bigint;
+    shop: { id: string; name: string | null };
     variantBySku: Map<string, VariantRef>;
     gaps: Map<string, SkuGap>;
   }) {
-    const { order, locationId, createdById, variantBySku, gaps } = args;
+    const { order, locationId, createdById, shop, variantBySku, gaps } = args;
     const orderSn = order.order_sn;
     if (!orderSn) {
       throw new BusinessException('VALIDATION_ERROR', 'Thiếu order_sn', 422);
@@ -356,7 +357,7 @@ export class ShopeeSyncService {
     }
 
     const customerId = await this.resolveCustomer(order);
-    const data = mapOrderFields(order, locationId, customerId);
+    const data = mapOrderFields(order, locationId, customerId, shop);
 
     const existing = await this.prisma.order.findUnique({
       where: { name: orderSn },
@@ -620,6 +621,7 @@ function mapOrderFields(
   order: ShopeeOrderDetail,
   locationId: bigint,
   customerId: bigint | null,
+  shop: { id: string; name: string | null },
 ) {
   const status = mapShopeeStatus(order.order_status);
   const shippingFee = toDecimal(
@@ -661,6 +663,11 @@ function mapOrderFields(
     locationId,
     customerId,
     sourceName: 'shopee',
+    // "Mã tham chiếu" — Shopee dùng `order_sn`, trùng luôn `orders.name` (xem `upsertOrder`).
+    sourceIdentifier: order.order_sn,
+    sourceUrl: marketplaceOrderUrl('shopee', order.order_sn),
+    channelShopId: shop.id,
+    channelShopName: shop.name,
     status,
     financialStatus: paidOn
       ? OrderFinancialStatus.paid

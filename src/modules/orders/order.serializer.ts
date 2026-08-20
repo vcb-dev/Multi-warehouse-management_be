@@ -131,6 +131,11 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     name: o.name,
     status: o.status,
     source_name: o.sourceName,
+    // "Mã tham chiếu" — mã đơn bên sàn + link mở đơn gốc + gian hàng đã bán. Gian hàng phải
+    // đi kèm: link không mang định danh gian, mà shop bán trên nhiều gian TikTok cùng lúc.
+    source_identifier: o.sourceIdentifier,
+    source_url: o.sourceUrl,
+    channel_shop_name: o.channelShopName,
     financial_status: o.financialStatus,
     fulfillment_status: o.fulfillmentStatus,
     return_status: o.returnStatus,
