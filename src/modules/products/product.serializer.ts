@@ -16,15 +16,26 @@ export function serializeProductListItem(
     productType: string | null;
     tags: string[];
     status: string;
-    variants: { sku: string; price: Prisma.Decimal; unit: string | null }[];
+    variants: {
+      sku: string;
+      barcode: string | null;
+      price: Prisma.Decimal;
+      unit: string | null;
+    }[];
   },
   opts?: { searchQuery?: string },
 ) {
   const skus = p.variants.map((v) => v.sku);
   const prices = p.variants.map((v) => Number(v.price));
   const searchQ = opts?.searchQuery?.trim().toLowerCase();
+  // Tìm kiếm khớp cả barcode (mã thật của đợt import SKU giả) — trả về đúng mã
+  // đã khớp để giao diện tô sáng, nếu không người dùng thấy kết quả mà không
+  // hiểu vì sao nó khớp.
   const matchedSku = searchQ
-    ? (skus.find((sku) => sku.toLowerCase().includes(searchQ)) ?? null)
+    ? (skus.find((sku) => sku.toLowerCase().includes(searchQ)) ??
+      p.variants.find((v) => v.barcode?.toLowerCase().includes(searchQ))
+        ?.barcode ??
+      null)
     : null;
 
   return {

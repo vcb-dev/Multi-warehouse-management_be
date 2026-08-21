@@ -24,5 +24,19 @@ pnpm-allowBuilds.local.yaml
 # Output tạm cục bộ từ các script vận hành trong scripts/ (không commit)
 scripts-tmp/
 
+# Đợt dọn dữ liệu sản phẩm 20/08/2026 (xem memory sapo_product_field_drift) —
+# script một-lần và bản sao lưu JSON của chúng, không phải tooling lâu dài,
+# không commit theo yêu cầu.
+data/*-backup-*.json
+data/merge-batch2-*.json
+scripts/restore-sapo-variant-skus.js
+scripts/restore-sapo-product-aliases.js
+scripts/sync-sapo-product-fields.js
+scripts/sync-sapo-product-images.js
+scripts/sync-sapo-final-fields.js
+scripts/merge-duplicate-products.js
+scripts/merge-duplicate-products-phase2.js
+scripts/merge-duplicate-products-batch2.js
+
 # State cục bộ của Claude Code (kể cả git worktree con) — không commit
 .claude/

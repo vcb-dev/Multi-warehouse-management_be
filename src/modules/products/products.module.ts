@@ -5,6 +5,9 @@ import { ProductImportService } from './product-import.service';
 import { ProductRepository } from './product.repository';
 import { ProductService } from './product.service';
 import { ProductsController } from './products.controller';
+import { SapoClient } from './sapo-sync/sapo-client';
+import { SapoProductSyncScheduler } from './sapo-sync/sapo-product-sync.scheduler';
+import { SapoProductSyncService } from './sapo-sync/sapo-product-sync.service';
 import { VariantService } from './variant.service';
 import { VariantPriceHistoryService } from './variant-price-history.service';
 
@@ -18,12 +21,16 @@ import { VariantPriceHistoryService } from './variant-price-history.service';
     ProductImportService,
     ProductExportService,
     VariantPriceHistoryService,
+    SapoClient,
+    SapoProductSyncService,
+    SapoProductSyncScheduler,
   ],
   exports: [
     ProductService,
     ProductRepository,
     VariantService,
     VariantPriceHistoryService,
+    SapoProductSyncService,
   ],
 })
 export class ProductsModule {}
