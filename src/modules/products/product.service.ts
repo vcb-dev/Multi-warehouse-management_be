@@ -82,7 +82,7 @@ export class ProductService {
           variants: {
             where: { enabled: true },
             orderBy: { id: 'asc' },
-            select: { sku: true, price: true, unit: true },
+            select: { sku: true, barcode: true, price: true, unit: true },
           },
         },
       }),

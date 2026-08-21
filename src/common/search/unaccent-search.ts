@@ -6,7 +6,11 @@ import { PrismaService } from '../../prisma/prisma.service';
  * `unaccent` của Postgres (bật ở migration `enable_unaccent_extension`).
  */
 
-/** Product.id khớp tên, nhãn hiệu, hoặc SKU của 1 trong các biến thể */
+/**
+ * Product.id khớp tên, nhãn hiệu, SKU hoặc barcode của 1 trong các biến thể.
+ * Phải tìm cả `barcode`: đợt import Sapo cũ ghi SKU giả (`SAPO-V-<id>`) và đẩy
+ * mã thật xuống `barcode`, nên bỏ cột này là mất hẳn khả năng tìm theo mã hàng.
+ */
 export async function findProductIdsByQuery(
   prisma: PrismaService,
   q: string,
@@ -19,11 +23,12 @@ export async function findProductIdsByQuery(
     WHERE unaccent(p.name) ILIKE unaccent(${pattern})
        OR unaccent(COALESCE(p.vendor, '')) ILIKE unaccent(${pattern})
        OR unaccent(v.sku) ILIKE unaccent(${pattern})
+       OR unaccent(COALESCE(v.barcode, '')) ILIKE unaccent(${pattern})
   `;
   return rows.map((r) => r.id);
 }
 
-/** ProductVariant.id khớp SKU của chính nó hoặc tên sản phẩm */
+/** ProductVariant.id khớp SKU/barcode của chính nó hoặc tên sản phẩm */
 export async function findVariantIdsByQuery(
   prisma: PrismaService,
   q: string,
@@ -34,6 +39,7 @@ export async function findVariantIdsByQuery(
     FROM product_variants v
     JOIN products p ON p.id = v.product_id
     WHERE unaccent(v.sku) ILIKE unaccent(${pattern})
+       OR unaccent(COALESCE(v.barcode, '')) ILIKE unaccent(${pattern})
        OR unaccent(p.name) ILIKE unaccent(${pattern})
   `;
   return rows.map((r) => r.id);

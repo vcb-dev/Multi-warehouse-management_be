@@ -14,9 +14,9 @@ describe('serializeProductListItem', () => {
     tags: [] as string[],
     status: 'active',
     variants: [
-      { sku: 'SKU-A', price: dec(100), unit: null },
-      { sku: 'SKU-B', price: dec(80), unit: null },
-      { sku: 'SKU-C', price: dec(120), unit: null },
+      { sku: 'SKU-A', barcode: null, price: dec(100), unit: null },
+      { sku: 'SKU-B', barcode: null, price: dec(80), unit: null },
+      { sku: 'SKU-C', barcode: null, price: dec(120), unit: null },
     ],
   };
 
@@ -32,5 +32,38 @@ describe('serializeProductListItem', () => {
   it('matched_sku khi tìm theo SKU phụ', () => {
     const row = serializeProductListItem(base, { searchQuery: 'sku-b' });
     expect(row.matched_sku).toBe('SKU-B');
+  });
+
+  // Đợt import Sapo cũ ghi SKU giả và đẩy mã thật xuống barcode — tìm theo mã
+  // thật vẫn phải chỉ ra được mã đã khớp.
+  it('matched_sku lấy barcode khi SKU là mã giả', () => {
+    const row = serializeProductListItem(
+      {
+        ...base,
+        variants: [
+          {
+            sku: 'SAPO-V-205911101',
+            barcode: 'N610390',
+            price: dec(100),
+            unit: null,
+          },
+        ],
+      },
+      { searchQuery: 'n610390' },
+    );
+    expect(row.matched_sku).toBe('N610390');
+  });
+
+  it('ưu tiên SKU thật hơn barcode khi cả hai cùng khớp', () => {
+    const row = serializeProductListItem(
+      {
+        ...base,
+        variants: [
+          { sku: 'N610390', barcode: 'N610390', price: dec(100), unit: null },
+        ],
+      },
+      { searchQuery: 'n610390' },
+    );
+    expect(row.matched_sku).toBe('N610390');
   });
 });
