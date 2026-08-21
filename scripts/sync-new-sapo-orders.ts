@@ -196,6 +196,13 @@ async function main() {
         customerId: cusBySapo.get(String(o.customer?.id)) ?? null,
         createdById: fallbackUser.id,
         sourceName: o.source_name || null,
+        // "Mã tham chiếu" + link đơn gốc: Sapo trả sẵn `source_identifier`/`source_url`.
+        // Với đơn chat (facebook/instagram/zalo-oa/tiktok-for-business) đây là conversationId
+        // của Sapo Chat OmniAI — KHÔNG suy ra được từ `name`, nên đây là đường duy nhất lấy được.
+        sourceIdentifier: o.source_identifier || null,
+        sourceUrl: o.source_url || null,
+        channelShopId: o.channel_definition?.branch_external_id || null,
+        channelShopName: o.channel_definition?.branch_name || null,
         status,
         financialStatus: enumOr(o.financial_status, FIN, 'pending'),
         fulfillmentStatus,

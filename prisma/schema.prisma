@@ -1317,6 +1317,18 @@ model Order {
   /// Sapo `source_name` — kênh bán (facebook/tiktokshop/shopee/web/pos/zalo/...).
   /// Là chuỗi tự do (không enum) vì Sapo liên tục thêm kênh mới.
   sourceName        String?                 @map("source_name")
+  /// Sapo `source_identifier` — mã đơn bên sàn, Sapo hiển thị là "Mã tham chiếu". Với
+  /// TikTok/Shopee trùng luôn `name`; với đơn chat (facebook/instagram/zalo-oa/
+  /// tiktok-for-business) là conversationId của Sapo Chat OmniAI, KHÔNG suy ra được từ `name`.
+  sourceIdentifier  String?                 @map("source_identifier")
+  /// Sapo `source_url` — link mở đơn gốc. Đơn kéo thẳng từ sàn phải tự ghép: API sàn không
+  /// trả URL (xem `channel-order-link.ts`).
+  sourceUrl         String?                 @map("source_url")
+  /// Gian hàng trên sàn — Sapo để ở `channel_definition.branch_external_id` / `branch_name`.
+  /// Một `source_name` gom nhiều gian (đo 20/08/2026: 3 gian TikTok, 1 gian Shopee), nên
+  /// riêng tên kênh không đủ để biết đơn về từ gian nào.
+  channelShopId     String?                 @map("channel_shop_id")
+  channelShopName   String?                 @map("channel_shop_name")
   status            OrderStatus             @default(open)
   financialStatus   OrderFinancialStatus    @default(pending) @map("financial_status")
   fulfillmentStatus OrderFulfillmentStatus? @map("fulfillment_status")
@@ -1444,6 +1456,7 @@ model Order {
   @@index([createdOn])
   @@index([customerId])
   @@index([assignedToId])
+  @@index([sourceIdentifier])
   @@map("orders")
 }
 

@@ -12,6 +12,7 @@ import {
 import { BusinessException } from '../../../common/exceptions/business.exception';
 import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { marketplaceOrderUrl } from '../channel-order-link';
 import {
   TiktokApiClient,
   TiktokOrder,
@@ -181,6 +182,7 @@ export class TiktokOrderSyncService {
     return {
       client,
       shopCipher: shop.cipher,
+      shopId: shop.id,
       shopName: shop.name,
       locationId: conn.locationId,
     };
@@ -211,6 +213,7 @@ export class TiktokOrderSyncService {
           order,
           locationId: ctx.locationId,
           createdById,
+          shop: { id: ctx.shopId, name: ctx.shopName },
           variantBySku,
           gaps,
         });
@@ -318,10 +321,11 @@ export class TiktokOrderSyncService {
     order: TiktokOrder;
     locationId: bigint;
     createdById: bigint;
+    shop: { id: string; name: string };
     variantBySku: Map<string, VariantRef>;
     gaps: Map<string, SkuGap>;
   }) {
-    const { order, locationId, createdById, variantBySku, gaps } = args;
+    const { order, locationId, createdById, shop, variantBySku, gaps } = args;
 
     const units = groupLineItems(order.line_items ?? []);
     const items: Prisma.OrderItemCreateManyOrderInput[] = [];
@@ -352,7 +356,7 @@ export class TiktokOrderSyncService {
       });
     }
 
-    const data = mapOrderFields(order, locationId);
+    const data = mapOrderFields(order, locationId, shop);
 
     const existing = await this.prisma.order.findUnique({
       where: { name: order.id },
@@ -506,6 +510,8 @@ export class TiktokOrderSyncService {
 type SyncContext = {
   client: TiktokApiClient;
   shopCipher: string;
+  /** Mã gian hàng trên TikTok (`shops[].id`) — ghi vào `orders.channel_shop_id`. */
+  shopId: string;
   shopName: string;
   locationId: bigint;
 };
@@ -607,7 +613,11 @@ function trackGap(
   });
 }
 
-function mapOrderFields(order: TiktokOrder, locationId: bigint) {
+function mapOrderFields(
+  order: TiktokOrder,
+  locationId: bigint,
+  shop: { id: string; name: string },
+) {
   const p = order.payment ?? {};
   const status = mapStatus(order.status);
   const totalPrice = toDecimal(p.total_amount);
@@ -618,6 +628,12 @@ function mapOrderFields(order: TiktokOrder, locationId: bigint) {
     // Giữ đúng chuỗi Sapo vẫn dùng để đơn kéo trực tiếp và đơn cũ nằm chung một kênh trên
     // báo cáo — `CHANNEL_DEFS` gom `tiktokshop` vào kênh `tiktok`.
     sourceName: 'tiktokshop',
+    // "Mã tham chiếu" — với TikTok, mã đơn sàn trùng luôn `orders.name`; vẫn ghi cột riêng
+    // để mọi kênh tra cứu cùng một chỗ, không phải biết trước kênh nào lấy mã ở đâu.
+    sourceIdentifier: order.id,
+    sourceUrl: marketplaceOrderUrl('tiktok', order.id),
+    channelShopId: shop.id,
+    channelShopName: shop.name,
     status,
     financialStatus: paidOn
       ? OrderFinancialStatus.paid
