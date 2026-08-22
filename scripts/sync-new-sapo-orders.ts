@@ -22,6 +22,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { normalizeChannelShopName } from '../src/modules/channels/channel-order-link';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { sortForLocking } from '../src/modules/inventory/inventory.types';
 import { NotificationService } from '../src/modules/notifications/notification.service';
@@ -202,7 +203,12 @@ async function main() {
         sourceIdentifier: o.source_identifier || null,
         sourceUrl: o.source_url || null,
         channelShopId: o.channel_definition?.branch_external_id || null,
-        channelShopName: o.channel_definition?.branch_name || null,
+        // Cắt đuôi kênh Sapo gắn thêm ("Viễn Chí Bảo - Tiktokshop") để khớp tên trần mà sync
+        // trực tiếp từ sàn ghi — không chuẩn hoá thì cùng một gian ra hai chuỗi trên UI.
+        channelShopName: normalizeChannelShopName(
+          o.source_name,
+          o.channel_definition?.branch_name,
+        ),
         status,
         financialStatus: enumOr(o.financial_status, FIN, 'pending'),
         fulfillmentStatus,

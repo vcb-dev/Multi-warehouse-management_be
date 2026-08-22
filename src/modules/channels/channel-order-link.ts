@@ -53,6 +53,38 @@ export function marketplaceOrderUrl(
   }
 }
 
+/**
+ * Đuôi kênh mà Sapo gắn vào `channel_definition.branch_name`, theo từng kênh.
+ *
+ * Sapo ghi tên gian hàng kèm đuôi ("Viễn Chí Bảo - Tiktokshop", "Miêu Bạc - Shopee") còn API
+ * sàn trả tên trần ("Viễn Chí Bảo"). Hai nguồn cùng đổ vào một cột `orders.channel_shop_name`
+ * nên không cắt đuôi thì cùng một gian hàng hiện thành hai dòng khác nhau trên UI.
+ */
+const SHOP_NAME_SUFFIX: Record<LinkableChannel, RegExp> = {
+  tiktok: /\s*-\s*tiktok\s*shop\s*$/i,
+  shopee: /\s*-\s*shopee\s*$/i,
+};
+
+/**
+ * Tên gian hàng chuẩn hoá — bỏ đuôi kênh do Sapo gắn thêm.
+ *
+ * Chỉ cắt đúng đuôi của kênh đang xét, KHÔNG cắt mọi cụm " - X" cuối chuỗi: gian hàng hoàn
+ * toàn có thể tên thật là "Minco Accessories - Outlet", cắt bừa là hỏng tên. Kênh không dựng
+ * được link (đơn chat, pos, web...) thì trả nguyên chuỗi.
+ *
+ * Đuôi kênh là thừa trên UI vì màn đơn hàng đã hiện "Nguồn đơn" ngay phía trên "Gian hàng".
+ */
+export function normalizeChannelShopName(
+  sourceName: string | null | undefined,
+  rawName: string | null | undefined,
+): string | null {
+  const name = rawName?.trim();
+  if (!name) return null;
+  const channel = linkableChannelOf(sourceName);
+  if (!channel) return name;
+  return name.replace(SHOP_NAME_SUFFIX[channel], '').trim() || name;
+}
+
 /** Tiện dụng cho backfill: từ `source_name` + mã đơn ra link, `null` nếu kênh không mở được. */
 export function orderUrlFromSourceName(
   sourceName: string | null | undefined,
