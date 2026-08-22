@@ -369,29 +369,6 @@ export class PayOrderDto {
   amount?: number;
 }
 
-export class CreateCustomerDebtAdjustmentDto {
-  @IsNumber()
-  amount!: number;
-
-  @IsString()
-  @MinLength(1)
-  reason!: string;
-}
-
-export class ListCustomerLedgerQueryDto {
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Type(() => Number)
-  page?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Type(() => Number)
-  page_size?: number;
-}
-
 export class CreateOrderReturnDto {
   @IsString()
   order_id!: string;

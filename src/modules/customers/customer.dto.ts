@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -163,4 +164,27 @@ export class SetGroupMembersDto {
   @IsArray()
   @IsString({ each: true })
   customer_ids!: string[];
+}
+
+export class CreateCustomerDebtAdjustmentDto {
+  @IsNumber()
+  amount!: number;
+
+  @IsString()
+  @MinLength(1)
+  reason!: string;
+}
+
+export class ListCustomerLedgerQueryDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page_size?: number;
 }
