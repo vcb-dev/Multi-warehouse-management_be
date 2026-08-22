@@ -7,7 +7,7 @@ import { userDisplayName } from '../../common/utils/user-display-name';
 import {
   CreateCustomerDebtAdjustmentDto,
   ListCustomerLedgerQueryDto,
-} from './order.dto';
+} from './customer.dto';
 
 export type CustomerLedgerInput = {
   customerId: bigint;

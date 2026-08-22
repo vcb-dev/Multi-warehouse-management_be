@@ -25,7 +25,7 @@ import { sortForLocking } from '../inventory/inventory.types';
 import { NotificationService } from '../notifications/notification.service';
 import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
-import { CustomerDebtService } from './customer-debt.service';
+import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
 import { recomputeOrderRefundStatuses } from './order-refund-status';
 import {

@@ -4,7 +4,7 @@ import {
   buildCustomerGroupWhere,
   parseRules,
   ruleCatalog,
-} from '../src/modules/orders/customer-group-rules';
+} from '../src/modules/customers/customer-group-rules';
 
 /** Chỉ `birthday_month` mới chạm tới prisma (raw SQL), còn lại thuần logic. */
 const noPrisma = null as unknown as PrismaService;

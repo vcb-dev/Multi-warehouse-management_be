@@ -19,14 +19,12 @@ import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
 import { CustomerDebtService } from './customer-debt.service';
 import { CustomerService } from './customer.service';
 import {
+  CreateCustomerDebtAdjustmentDto,
   CreateCustomerDto,
+  ListCustomerLedgerQueryDto,
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './customer.dto';
-import {
-  CreateCustomerDebtAdjustmentDto,
-  ListCustomerLedgerQueryDto,
-} from './order.dto';
 
 @ApiTags('customers')
 @ApiBearerAuth()

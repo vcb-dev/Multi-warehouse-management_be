@@ -8,10 +8,10 @@
  */
 import { ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { OrdersModule } from '../src/modules/orders/orders.module';
+import { CustomersModule } from '../src/modules/customers/customers.module';
 import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
-import { CustomerService } from '../src/modules/orders/customer.service';
-import { CustomerGroupService } from '../src/modules/orders/customer-group.service';
+import { CustomerService } from '../src/modules/customers/customer.service';
+import { CustomerGroupService } from '../src/modules/customers/customer-group.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -70,7 +70,7 @@ describeIfDb('nhóm khách hàng (integration)', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [PrismaModule, VouchersModule, OrdersModule],
+      imports: [PrismaModule, VouchersModule, CustomersModule],
     }).compile();
 
     customers = module.get(CustomerService);

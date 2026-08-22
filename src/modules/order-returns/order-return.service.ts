@@ -19,7 +19,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { NotificationService } from '../notifications/notification.service';
 import { VoucherService } from '../vouchers/voucher.service';
-import { CustomerDebtService } from '../orders/customer-debt.service';
+import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateReturnCode } from '../orders/order-code';
 import {
   CreateOrderReturnDto,
