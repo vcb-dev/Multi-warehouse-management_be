@@ -41,11 +41,13 @@ const resolved = {
   isAdmin: false,
 };
 
-function build(opts: {
-  key?: unknown;
-  user?: unknown;
-  cached?: AuthUser;
-} = {}) {
+function build(
+  opts: {
+    key?: unknown;
+    user?: unknown;
+    cached?: AuthUser;
+  } = {},
+) {
   const prisma = {
     apiKey: {
       findUnique: jest
@@ -158,11 +160,11 @@ describe('resolveAuthUser — chấp nhận', () => {
   });
 
   it('nhớ cache theo actingUserId — API key không thuộc phiên nào', async () => {
-    // Khác người dùng: key không có sessionId, nên không tự đăng xuất hay tự liệt kê
-    // thiết bị được. Khoá cache vì thế vẫn là userId chứ không phải hash phiên.
+    // Khác người dùng: key không có familyId, nên không tự đăng xuất được. Khoá cache vì
+    // thế vẫn là userId chứ không phải họ refresh token.
     const { service } = build();
     const user = await service.resolveAuthUser(RAW_KEY);
-    expect(user?.sessionId).toBeUndefined();
+    expect(user?.familyId).toBeUndefined();
   });
 
   it('quyền lấy từ RBAC thật của user, không tự chế cho key', async () => {

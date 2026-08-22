@@ -10,7 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from '../src/modules/auth/auth.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import type { RbacService } from '../src/modules/rbac/rbac.service';
-import type { SessionService } from '../src/modules/auth/session.service';
+import type { TokenService } from '../src/modules/auth/token.service';
 
 const activeUser = {
   id: 7n,
@@ -40,14 +40,16 @@ function build(userRow: unknown = activeUser) {
   const rbac = {
     resolvePermissions: jest.fn().mockResolvedValue(resolved),
   } as unknown as RbacService;
-  const sessions = {
-    create: jest.fn().mockResolvedValue({
-      token: 'ses_token-moi',
-      sessionId: 42n,
-      expiresAt: new Date('2026-08-25T00:00:00.000Z'),
+  const tokens = {
+    issueForLogin: jest.fn().mockResolvedValue({
+      accessToken: 'access.jwt.moi',
+      accessExpiresAt: new Date('2026-08-22T00:15:00.000Z'),
+      refreshToken: 'refresh.jwt.moi',
+      refreshExpiresAt: new Date('2026-08-29T00:00:00.000Z'),
+      familyId: 'ho-1',
     }),
-  } as unknown as SessionService;
-  return { auth: new AuthService(prisma, rbac, sessions), sessions, rbac };
+  } as unknown as TokenService;
+  return { auth: new AuthService(prisma, rbac, tokens), tokens, rbac };
 }
 
 function allowPassword(ok: boolean) {
@@ -107,11 +109,11 @@ describe('AuthService.login — từ chối', () => {
     await expect(auth.login('u@test', 'pw')).rejects.toThrow(/kích hoạt/i);
   });
 
-  it('không tạo phiên ở bất kỳ đường từ chối nào', async () => {
+  it('không phát token ở bất kỳ đường từ chối nào', async () => {
     allowPassword(false);
-    const { auth, sessions } = build();
+    const { auth, tokens } = build();
     await auth.login('u@test', 'pw').catch(() => undefined);
-    expect(sessions.create).not.toHaveBeenCalled();
+    expect(tokens.issueForLogin).not.toHaveBeenCalled();
   });
 
   it('không tra quyền cho tài khoản đã bị khoá — hỏng sớm, đỡ tốn query', async () => {
@@ -124,13 +126,12 @@ describe('AuthService.login — từ chối', () => {
 describe('AuthService.login — thành công', () => {
   beforeEach(() => allowPassword(true));
 
-  it('trả access_token kèm payload quyền đúng shape FE parse', async () => {
+  it('trả payload quyền đúng shape FE parse', async () => {
     const { auth } = build();
     const result = await auth.login('u@test', 'pw');
 
-    expect(result).toEqual({
-      access_token: 'ses_token-moi',
-      expires_at: '2026-08-25T00:00:00.000Z',
+    expect(result.body).toEqual({
+      expires_at: '2026-08-29T00:00:00.000Z',
       user: {
         id: '7',
         email: 'u@test',
@@ -145,38 +146,61 @@ describe('AuthService.login — thành công', () => {
     });
   });
 
-  it('id kiểu BigInt được đổi sang chuỗi — JSON không tuần tự hoá được BigInt', async () => {
+  it('KHÔNG trả token trong body — cả hai chỉ đi bằng cookie httpOnly', async () => {
+    // Trả thêm một bản trong body là tự tay huỷ lợi ích của httpOnly: chỉ cần một lỗ XSS
+    // là token bị đọc và mang đi.
     const { auth } = build();
     const result = await auth.login('u@test', 'pw');
-    expect(typeof result.user.id).toBe('string');
-    expect(result.user.location_ids.every((v) => typeof v === 'string')).toBe(
-      true,
-    );
-    expect(() => JSON.stringify(result)).not.toThrow();
+
+    expect(JSON.stringify(result.body)).not.toContain('access.jwt.moi');
+    expect(JSON.stringify(result.body)).not.toContain('refresh.jwt.moi');
+    expect(result.body).not.toHaveProperty('access_token');
+    expect(result.body).not.toHaveProperty('refresh_token');
+  });
+
+  it('token đi kèm riêng để controller đặt cookie', async () => {
+    const { auth } = build();
+    const result = await auth.login('u@test', 'pw');
+    expect(result.tokens).toMatchObject({
+      accessToken: 'access.jwt.moi',
+      refreshToken: 'refresh.jwt.moi',
+      familyId: 'ho-1',
+    });
+  });
+
+  it('id kiểu BigInt được đổi sang chuỗi — JSON không tuần tự hoá được BigInt', async () => {
+    const { auth } = build();
+    const { body } = await auth.login('u@test', 'pw');
+    expect(typeof body.user.id).toBe('string');
+    expect(
+      body.user.location_ids.every((v: string) => typeof v === 'string'),
+    ).toBe(true);
+    expect(() => JSON.stringify(body)).not.toThrow();
   });
 
   it('KHÔNG trả passwordHash ra ngoài', async () => {
     const { auth } = build();
     const result = await auth.login('u@test', 'pw');
-    expect(JSON.stringify(result)).not.toContain('hash-that-bcrypt');
+    expect(JSON.stringify(result.body)).not.toContain('hash-that-bcrypt');
   });
 
-  it('token là chuỗi đục gắn với phiên, không phải JWT mang dữ liệu', async () => {
-    // Đây là điểm mấu chốt của mô hình phiên: token không tự chứng minh được gì, nên
-    // không có khoá ký nào để dò ngược, và thu hồi là đánh dấu một dòng chứ không
-    // phải chờ hết hạn.
-    const { auth, sessions } = build();
-    const result = await auth.login('u@test', 'pw');
-
-    expect(sessions.create).toHaveBeenCalledWith(7n, {});
-    expect(result.access_token).toBe('ses_token-moi');
-    // Không mang thông tin: tách bằng dấu chấm kiểu JWT sẽ không ra 3 phần.
-    expect(result.access_token.split('.')).toHaveLength(1);
-  });
-
-  it('trả kèm hạn phiên để FE khớp thời gian sống của cookie', async () => {
+  it('`expires_at` là hạn của REFRESH token, không phải access token', async () => {
+    // Đây là mốc người dùng thật sự phải gõ lại mật khẩu. Lấy nhầm hạn access token là
+    // FE tưởng phiên chết sau 15 phút và đá người dùng ra oan.
     const { auth } = build();
-    const result = await auth.login('u@test', 'pw');
-    expect(result.expires_at).toBe('2026-08-25T00:00:00.000Z');
+    const { body } = await auth.login('u@test', 'pw');
+    expect(body.expires_at).toBe('2026-08-29T00:00:00.000Z');
+  });
+
+  it('phát token gắn với đúng user và mang theo thông tin thiết bị', async () => {
+    const { auth, tokens } = build();
+    await auth.login('u@test', 'pw', {
+      userAgent: 'Chrome',
+      ipAddress: '1.2.3.4',
+    });
+    expect(tokens.issueForLogin).toHaveBeenCalledWith(7n, {
+      userAgent: 'Chrome',
+      ipAddress: '1.2.3.4',
+    });
   });
 });

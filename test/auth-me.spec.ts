@@ -1,6 +1,6 @@
 /**
- * AuthService.me() — dùng cho FE refresh quyền định kỳ (xem
- * frontend/src/lib/auth-options.ts). Phải trả đúng field mà FE parse
+ * AuthService.me() — FE gọi lúc mở app (khôi phục phiên từ cookie) và định kỳ sau đó
+ * (xem frontend/src/lib/auth.tsx). Phải trả đúng field mà FE parse
  * (`MePayload`), và khớp shape với `login()` — hai đường lệch nhau là FE parse
  * sai sau lần refresh đầu tiên mà không lỗi rõ ràng ở đâu.
  */
@@ -8,7 +8,7 @@ import { NotFoundException } from '@nestjs/common';
 import { AuthService } from '../src/modules/auth/auth.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import type { RbacService } from '../src/modules/rbac/rbac.service';
-import type { SessionService } from '../src/modules/auth/session.service';
+import type { TokenService } from '../src/modules/auth/token.service';
 
 const baseUser = {
   id: 7n,
@@ -37,14 +37,10 @@ function build(userRow: unknown = baseUser) {
   const rbac = {
     resolvePermissions: jest.fn().mockResolvedValue(resolved),
   } as unknown as RbacService;
-  const sessions = {
-    create: jest.fn().mockResolvedValue({
-      token: 'ses_token-moi',
-      sessionId: 42n,
-      expiresAt: new Date('2026-08-25T00:00:00.000Z'),
-    }),
-  } as unknown as SessionService;
-  return new AuthService(prisma, rbac, sessions);
+  const tokens = {
+    issueForLogin: jest.fn(),
+  } as unknown as TokenService;
+  return new AuthService(prisma, rbac, tokens);
 }
 
 describe('AuthService.me', () => {
@@ -66,10 +62,11 @@ describe('AuthService.me', () => {
     });
   });
 
-  it('không trả access_token — không phát hành token mới ở đây', async () => {
+  it('không phát token mới ở đây — cookie hiện tại vẫn dùng tiếp', async () => {
     const auth = build();
     const result = await auth.me(7n);
     expect(result).not.toHaveProperty('access_token');
+    expect(result).not.toHaveProperty('tokens');
   });
 
   it('user không tồn tại -> NotFoundException', async () => {

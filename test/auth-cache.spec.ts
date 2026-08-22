@@ -1,5 +1,5 @@
 /**
- * AuthCacheService — cache quyền dùng chung giữa SessionService/ApiKeyService (đọc) và
+ * AuthCacheService — cache quyền dùng chung giữa TokenService/ApiKeyService (đọc) và
  * các service RBAC (ghi, để invalidate ngay khi đổi quyền/khoá tài khoản).
  *
  * Khoá cache là thông tin xác thực (hash token phiên, hoặc userId cho API key) chứ không

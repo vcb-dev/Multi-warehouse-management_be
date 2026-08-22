@@ -311,9 +311,6 @@ model User {
   roles           UserRole[]    @default([])
   status          AccountStatus @default(active)
   active          Boolean       @default(true)
-  // Tăng lên để vô hiệu hoá MỌI token đã phát của user (đăng xuất toàn bộ thiết
-  // bị, đổi mật khẩu, nghi lộ token). JWT mang `ver` lúc ký; `JwtStrategy` đối
-  // chiếu trong đúng lượt tra DB vốn đã chạy mỗi request nên không tốn thêm query.
   // Tham chiếu thô từ /admin/users.json — KHÔNG điều khiển nghiệp vụ (RBAC
   // nội bộ vẫn là nguồn thật duy nhất). Bảng users hiện không đồng bộ với
   // Sapo (không có sapo_id nào khớp thật), nên các field này luôn NULL cho
@@ -328,7 +325,7 @@ model User {
   locations              UserLocation[]
   locationRoles          UserLocationRole[]
   permissionOverrides    UserPermissionOverride[]
-  sessions               UserSession[]
+  refreshTokens          RefreshToken[]
   invitations            UserInvitation[]
   inventoryMoves         InventoryMovement[]         @relation("MovementCreatedBy")
   activityLogs           ActivityLog[]
@@ -452,31 +449,44 @@ model UserPermissionOverride {
   @@map("user_permission_overrides")
 }
 
-/// Phiên đăng nhập. Token phát cho client là chuỗi ngẫu nhiên không mang thông tin
-/// (opaque), chỉ có ý nghĩa khi đối chiếu được với một dòng ở đây — khác JWT ở chỗ
-/// không tự chứng minh được tính hợp lệ, nên xoá dòng là token chết ngay lập tức.
+/// Refresh token — nửa có state của mô hình JWT ở đây.
+///
+/// Access token là JWT ngắn hạn, tự chứng minh, KHÔNG tra bảng này. Refresh token thì
+/// ngược lại: mỗi lần dùng phải khớp một dòng còn sống, và dùng xong dòng đó chết
+/// (xoay vòng). Đó là chỗ duy nhất còn thu hồi được — logout, đổi mật khẩu, hay phát
+/// hiện token bị đánh cắp đều là ghi vào bảng này.
 ///
 /// Chỉ lưu SHA-256 của token, không lưu bản thô: rò database không kéo theo mạo danh
 /// được người dùng.
-model UserSession {
-  id         BigInt    @id @default(autoincrement())
-  userId     BigInt    @map("user_id")
-  /// SHA-256 của token thô. Token thô chỉ tồn tại ở lần trả về lúc đăng nhập.
-  tokenHash  String    @unique @map("token_hash")
-  /// Để người dùng nhận ra thiết bị nào là của mình trong màn quản lý phiên.
-  userAgent  String?   @map("user_agent")
-  ipAddress  String?   @map("ip_address")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
-  expiresAt  DateTime  @map("expires_at")
-  /// Đánh dấu thay vì xoá hẳn, để còn tra được lịch sử khi điều tra sự cố.
-  revokedAt  DateTime? @map("revoked_at")
+model RefreshToken {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  /// SHA-256 của refresh token thô. Token thô chỉ tồn tại trong cookie của client.
+  tokenHash String   @unique @map("token_hash")
+  /// Gom mọi token sinh ra từ cùng MỘT lần đăng nhập. Xoay vòng tạo dòng mới cùng
+  /// `familyId`; phát hiện tái sử dụng thì giết cả họ chứ không chỉ dòng bị lộ.
+  /// Access token mang giá trị này ở claim `sid` để đăng xuất có hiệu lực ngay.
+  familyId  String   @map("family_id")
+  /// Để nhận ra thiết bị khi điều tra sự cố (không có màn quản lý phiên cho người dùng).
+  userAgent String?  @map("user_agent")
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  /// Đã đổi lấy cặp token mới. Dùng lại một dòng đã `usedAt` = token bị đánh cắp.
+  usedAt    DateTime? @map("used_at")
+  /// Đăng xuất, hoặc bị giết theo họ khi phát hiện tái sử dụng.
+  revokedAt DateTime? @map("revoked_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([familyId])
   @@index([expiresAt])
-  @@map("user_sessions")
+  /// KHÔNG đặt tên trần `refresh_tokens`: Supabase đã có sẵn `auth.refresh_tokens` của
+  /// riêng nó. Khác schema nên database không xung đột, nhưng hai cái trùng tên trong
+  /// Studio và trong SQL thô là mời gọi nhầm lẫn. Tiền tố `user_` cũng khớp các bảng
+  /// cùng họ: `user_invitations`, `user_locations`, `user_permission_overrides`.
+  @@map("user_refresh_tokens")
 }
 
 model UserInvitation {

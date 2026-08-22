@@ -7,7 +7,9 @@ import { GoneException, NotFoundException } from '@nestjs/common';
 import { RbacModule } from '../src/modules/rbac/rbac.module';
 import { InvitationService } from '../src/modules/rbac/invitation.service';
 import { AuthService } from '../src/modules/auth/auth.service';
-import { SessionService } from '../src/modules/auth/session.service';
+import { JwtModule } from '@nestjs/jwt';
+import { TokenService } from '../src/modules/auth/token.service';
+import { JWT_ISSUER } from '../src/modules/auth/jwt.config';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -31,9 +33,14 @@ describeIfDb('invitation flow (integration)', () => {
       imports: [
         PrismaModule,
         RbacModule,
+        // Khoá riêng cho test: không đụng JWT_SECRET thật, và test vẫn chạy được trên máy
+        // chưa khai biến đó.
+        JwtModule.register({
+          secret: 'e2e-secret-du-dai-de-khong-bi-tu-choi',
+          signOptions: { issuer: JWT_ISSUER },
+        }),
       ],
-      // Không còn JwtModule: token là phiên lưu ở bảng `user_sessions`, không phải JWT.
-      providers: [AuthService, SessionService],
+      providers: [AuthService, TokenService],
     }).compile();
     invitations = module.get(InvitationService);
     auth = module.get(AuthService);
@@ -86,9 +93,10 @@ describeIfDb('invitation flow (integration)', () => {
   it('accept → kích hoạt và cho phép login', async () => {
     await invitations.accept(token, 'secret123');
     const login = await auth.login(testEmail, 'secret123');
-    expect(login.access_token).toBeDefined();
-    expect(login.user.email).toBe(testEmail);
-    expect(login.user.is_admin).toBe(false);
+    expect(login.tokens.accessToken).toBeDefined();
+    expect(login.tokens.refreshToken).toBeDefined();
+    expect(login.body.user.email).toBe(testEmail);
+    expect(login.body.user.is_admin).toBe(false);
   });
 
   it('token đã dùng không accept lại', async () => {
