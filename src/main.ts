@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import * as compression from 'compression';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -20,11 +21,18 @@ async function bootstrap() {
   app.set('trust proxy', 1);
 
   app.use(compression());
+  // Access/refresh token đi bằng cookie `httpOnly` do chính API này đặt, nên guard cần
+  // `req.cookies`. Không ký cookie ở tầng này: nội dung đã là JWT có chữ ký riêng, ký
+  // thêm một lớp nữa chỉ tốn cấu hình mà không thêm bảo đảm nào.
+  app.use(cookieParser());
 
   const uploadDir = process.env.UPLOAD_DIR ?? join(process.cwd(), 'uploads');
   app.useStaticAssets(uploadDir, { prefix: '/uploads' });
 
   app.setGlobalPrefix('api');
+  // `credentials: true` + danh sách origin tường minh là bắt buộc để trình duyệt gửi
+  // cookie phiên đi: với `Access-Control-Allow-Origin: *` thì cookie bị bỏ lại, và triệu
+  // chứng là "đăng nhập xong mọi request vẫn 401" chứ không phải lỗi CORS dễ thấy.
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
       'http://localhost:3000',

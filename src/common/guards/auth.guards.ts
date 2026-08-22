@@ -21,31 +21,38 @@ import {
 import { BusinessException } from '../exceptions/business.exception';
 import { PERMISSION_SCOPE } from '../../modules/rbac/permission-catalog';
 import { ApiKeyService } from '../../modules/api-keys/api-key.service';
-import { SessionService } from '../../modules/auth/session.service';
+import { TokenService } from '../../modules/auth/token.service';
+import { ACCESS_COOKIE } from '../auth/cookies';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 type AuthRequest = {
   headers: Record<string, string | string[] | undefined>;
+  cookies?: Record<string, string | undefined>;
   user?: AuthUser;
 };
 
-function readHeader(
-  req: AuthRequest,
-  name: string,
-): string | undefined {
+function readHeader(req: AuthRequest, name: string): string | undefined {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
 
+function readAccessToken(req: AuthRequest): string | undefined {
+  const fromCookie = req.cookies?.[ACCESS_COOKIE]?.trim();
+  if (fromCookie) return fromCookie;
+  const authorization = readHeader(req, 'authorization');
+  return authorization?.replace(/^Bearer\s+/i, '').trim() || undefined;
+}
+
 /**
- * Cổng xác thực duy nhất của toàn hệ thống — chấp nhận HAI cách:
- * - `Authorization: Bearer <token phiên>` (đăng nhập bình thường).
+ * Cổng xác thực duy nhất của toàn hệ thống — chấp nhận BA cách, theo đúng thứ tự này:
  * - `x-api-key: <key>` (đối tác server-to-server, không đăng nhập).
+ * - Cookie `vcb_access_token` (trình duyệt — đường chính của người dùng thật).
+ * - `Authorization: Bearer <access token>` (Swagger, script, test — không có cookie jar).
  *
- * Cả hai đều là chuỗi ngẫu nhiên không mang thông tin, chỉ hợp lệ khi đối chiếu ra một
- * dòng còn sống trong database. Không có gì tự chứng minh được tính hợp lệ, nên không có
- * khoá ký nào để dò ngược, và thu hồi là xoá/đánh dấu một dòng chứ không phải chờ hết hạn.
+ * Cookie đứng TRƯỚC header vì đó là đường mà trình duyệt tự gửi; header chỉ là lối vào
+ * cho những client không có cookie. Hai đường mang cùng một access token nên xử lý giống
+ * hệt nhau — chỉ khác chỗ đọc ra chuỗi.
  *
  * Key đối tác xác thực THAY một user có sẵn (`ApiKey.actingUserId`) nên `req.user` dựng ra
  * có đúng shape/quyền như phiên người dùng — `PermissionGuard` phía sau không cần biết
@@ -56,7 +63,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
     private apiKeys: ApiKeyService,
-    private sessions: SessionService,
+    private tokens: TokenService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -78,13 +85,12 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const authorization = readHeader(req, 'authorization');
-    const token = authorization?.replace(/^Bearer\s+/i, '').trim();
+    const token = readAccessToken(req);
     if (!token) throw new UnauthorizedException();
 
-    const authUser = await this.sessions.resolveAuthUser(token);
-    // Cố ý không phân biệt "token sai" với "phiên đã thu hồi": nói rõ là xác nhận giúp
-    // kẻ tấn công rằng token họ nhặt được từng là thật.
+    const authUser = await this.tokens.resolveAuthUser(token);
+    // Cố ý không phân biệt "chữ ký sai" với "hết hạn" hay "phiên đã thu hồi": nói rõ là
+    // xác nhận giúp kẻ tấn công rằng token họ nhặt được từng là thật.
     if (!authUser) throw new UnauthorizedException();
 
     req.user = authUser;

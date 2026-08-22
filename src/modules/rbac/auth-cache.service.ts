@@ -2,17 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
- * Cache quyền đã resolve — dùng chung giữa `SessionService`/`ApiKeyService` (đọc) và các
+ * Cache quyền đã resolve — dùng chung giữa `TokenService`/`ApiKeyService` (đọc) và các
  * service RBAC (ghi, để invalidate ngay khi đổi quyền).
  *
- * Khoá cache là **thông tin xác thực**, không phải userId: hash token phiên, hoặc userId
- * cho đường API key. Lý do là thu hồi phải làm được ở hai mức khác nhau:
+ * Khoá cache là **thông tin xác thực**, không phải userId: họ refresh token (`sid` trong
+ * access token), hoặc userId cho đường API key. Lý do là thu hồi phải làm được ở hai mức
+ * khác nhau:
  *
  *   - `invalidateKey` — thu hồi ĐÚNG một phiên, không đụng các thiết bị khác của cùng người.
  *   - `invalidateUser` — đổi role/khoá tài khoản, phải quét sạch mọi phiên của người đó.
  *
- * Mức thứ hai cần một chỉ mục ngược userId -> các khoá, vì không thể suy ngược từ hash
- * token ra userId.
+ * Mức thứ hai cần một chỉ mục ngược userId -> các khoá, vì không thể suy ngược từ họ
+ * refresh token ra userId.
  *
  * TTL ngắn (30s) đã đủ an toàn cho hầu hết trường hợp, nhưng "khoá tài khoản / thu hồi
  * phiên có hiệu lực ngay" là yêu cầu nghiệp vụ rõ ràng — invalidate chủ động mới đảm bảo
