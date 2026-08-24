@@ -93,16 +93,16 @@ describe('đặt cookie', () => {
     );
   });
 
-  it('mặc định SameSite=Strict — cookie phiên chỉ phục vụ fetch cùng site', () => {
-    // `lax` là mặc định quen thuộc nhưng nó tồn tại cho web app render phía server (link
-    // từ email phải mở ra trang đã đăng nhập). App này không có luồng nào cần điều hướng
-    // từ site khác mang theo cookie, nên `strict` không chặn mất gì.
+  it('mặc định SameSite=Lax — chặn POST/fetch cross-site, vẫn để ngỏ link từ email', () => {
+    // `lax` chặn đúng vector CSRF chính. `strict` chặt hơn ở chỗ chặn thêm điều hướng GET
+    // từ site khác, nhưng phần thêm đó cũng chính là thứ làm hỏng link email trỏ thẳng
+    // vào endpoint API — chọn `lax` để không khoá trước cánh cửa đó.
     const { res, setOf } = fakeRes();
     setAuthCookies(res, tokens);
-    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('strict');
+    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('lax');
   });
 
-  it.each(['lax', 'none'])(
+  it.each(['strict', 'none'])(
     'khai "%s" tường minh thì vẫn được tôn trọng',
     (value) => {
       // Deploy khác tên miền gốc BẮT BUỘC dùng `none` — mặc định chặt hơn không được
@@ -132,7 +132,7 @@ describe('đặt cookie', () => {
     expect(setOf(ACCESS_COOKIE).options.secure).toBe(true);
   });
 
-  it.each(['yes-please', '', '  ', 'None ', 'STRICT'])(
+  it.each(['yes-please', '', '  ', 'None ', 'STRICT', 'lax'])(
     'giá trị SameSite "%s" không lọt thẳng vào header',
     (raw) => {
       // Express ném `TypeError` với giá trị lạ, và nó ném lúc CÓ NGƯỜI ĐĂNG NHẬP chứ
@@ -143,7 +143,7 @@ describe('đặt cookie', () => {
       setAuthCookies(res, tokens);
       const expected = raw.trim().toLowerCase();
       expect(setOf(ACCESS_COOKIE).options.sameSite).toBe(
-        ['lax', 'strict', 'none'].includes(expected) ? expected : 'strict',
+        ['lax', 'strict', 'none'].includes(expected) ? expected : 'lax',
       );
     },
   );

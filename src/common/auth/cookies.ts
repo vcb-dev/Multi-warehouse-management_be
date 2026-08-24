@@ -22,24 +22,30 @@ type SameSite = 'lax' | 'strict' | 'none';
  * nhận đúng ba giá trị này và ném `TypeError` với mọi thứ khác. Gõ nhầm `nonee` mà thả
  * thẳng xuống thì app không chết lúc khởi động — nó chết lúc có người đăng nhập.
  *
- * Mặc định `strict`, không phải `lax`. `lax` là mặc định quen thuộc vì nó cần cho web app
- * render phía server: link từ email phải mở ra trang đã đăng nhập, mà `strict` chặn đúng
- * điều đó. App này không có luồng nào như vậy — cookie phiên chỉ được `fetch` dùng, phát
- * từ trang đang mở trên origin của FE, nên `strict` không chặn mất gì:
+ * Mặc định `lax`. Nó chặn đúng vector CSRF chính — POST/`fetch` từ site khác không được
+ * mang cookie đi — và đó cũng là mặc định mà trình duyệt tự áp cho cookie không khai
+ * `SameSite`, nên khai tường minh chỉ là nói rõ ra thứ vốn đã xảy ra.
  *
- *   - callback OAuth Shopee/TikTok là `@Public()` và nhận diện shop qua `code`, không đọc
- *     cookie phiên;
- *   - link kích hoạt trong email trỏ vào host FE, lúc đó người dùng còn chưa có phiên;
- *   - xuất Excel/tải file đi qua `fetch`, không phải điều hướng trình duyệt.
+ * `strict` chặt hơn một chút: nó chặn thêm cả điều hướng GET từ site khác. Với app hiện
+ * tại thì phần thêm đó gần như không có tác dụng thật (không có endpoint GET nào đổi
+ * trạng thái), nhưng nó lại đóng mất một cánh cửa: link trong email trỏ THẲNG vào một
+ * endpoint API và dựa vào cookie phiên sẽ không hoạt động dưới `strict`. Chọn `lax` để
+ * luồng gửi mail sau này không bị chặn bởi một quyết định đặt từ hôm nay.
  *
- * Và hướng rơi phải là hướng an toàn: quên khai biến này mà rơi vào `none` là mất sạch
- * chống CSRF trong im lặng — không hỏng gì, không ai biết. Rơi vào `strict` thì cùng lắm
- * là hỏng ầm ĩ, và hỏng ầm ĩ thì sửa được.
+ * (Nếu làm link tải file qua email, mẫu bền hơn vẫn là token ký một lần trong URL —
+ * không phụ thuộc cookie, nên link bị forward hay bị proxy quét cũng không lộ dữ liệu của
+ * người khác. Lúc đó `SameSite` không còn liên quan.)
+ *
+ * Điều KHÔNG bao giờ được rơi vào là `none`: quên khai biến này mà rơi xuống đó là mất
+ * sạch chống CSRF trong im lặng — không hỏng gì, không ai biết. `lax` và `strict` thì cùng
+ * lắm là hỏng ầm ĩ, mà hỏng ầm ĩ thì sửa được.
+ *
+ * Dù chọn cái nào, `CsrfGuard` vẫn gác mọi lệnh ghi — `SameSite` chỉ là lớp thứ hai.
  */
 function readSameSite(): SameSite {
   const raw = process.env.AUTH_COOKIE_SAMESITE?.trim().toLowerCase();
   if (raw === 'none' || raw === 'strict' || raw === 'lax') return raw;
-  return 'strict';
+  return 'lax';
 }
 
 /**

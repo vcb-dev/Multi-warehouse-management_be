@@ -55,7 +55,7 @@ Hai biến này KHÔNG có giá trị mặc định trên production — thiếu
 |---|---|---|
 | `JWT_SECRET` | ✅ | `openssl rand -base64 32`. Tối thiểu 32 ký tự, không nhận giá trị mẫu. **Đổi nó là đăng xuất toàn bộ người dùng.** |
 | `CORS_ORIGIN` | ✅ | Origin của FE, phân tách bằng dấu phẩy. Không kèm dấu `/` cuối, không dùng `*` (cookie sẽ bị trình duyệt bỏ lại). Dùng chung cho cả CORS lẫn `CsrfGuard`. |
-| `AUTH_COOKIE_SAMESITE` | ⚠️ | Mặc định `strict`. Đặt `none` **bắt buộc** khi FE và BE nằm hai tên miền gốc khác nhau — đọc kỹ mục Safari bên dưới trước khi dùng. |
+| `AUTH_COOKIE_SAMESITE` | ⚠️ | Mặc định `lax`. Đặt `none` **bắt buộc** khi FE và BE nằm hai tên miền gốc khác nhau — đọc kỹ mục Safari bên dưới trước khi dùng. |
 | `AUTH_COOKIE_SECURE` | — | Tự bật khi `NODE_ENV=production` hoặc `SameSite=none`. Thường không cần khai. |
 | `AUTH_COOKIE_DOMAIN` | — | Chỉ khai khi muốn chia cookie giữa các subdomain. Sai domain = cookie im lặng không được gửi. |
 | `JWT_ACCESS_TTL_MINUTES` | — | Mặc định 15. |
@@ -64,14 +64,18 @@ Hai biến này KHÔNG có giá trị mặc định trên production — thiếu
 ### Chọn `AUTH_COOKIE_SAMESITE`
 
 - **Cùng tên miền gốc** (`app.vienchibao.vn` + `api.vienchibao.vn`) → để trống. Mặc định
-  `strict` chạy tốt: cookie phiên ở đây chỉ phục vụ `fetch` phát từ trang FE, mà `fetch`
-  đó vẫn là same-site nên cookie vẫn được gửi.
+  `lax` chạy tốt: nó chặn POST/`fetch` từ site khác (vector CSRF chính), còn `fetch` từ
+  trang FE sang API vẫn là same-site nên cookie vẫn được gửi bình thường.
+
+  Muốn chặt hơn thì đặt `strict` — nó chặn thêm cả điều hướng GET từ site khác. Đổi lại,
+  link trong email trỏ THẲNG vào một endpoint API sẽ không mang được cookie phiên. Mặc
+  định để `lax` chính là để không khoá trước cánh cửa đó.
 - **Khác tên miền gốc** (FE trên `*.vercel.app`, BE trên `*.up.railway.app`) → bắt buộc
   `AUTH_COOKIE_SAMESITE=none`, nếu không trình duyệt không gửi cookie đi và mọi request
   401 ngay sau khi đăng nhập thành công. **Nhưng cấu hình này không chạy trên Safari** —
   xem mục dưới.
 
-Mất `SameSite=strict/lax` là mất một lớp chống CSRF, nên `CsrfGuard` gánh phần đó ở cả hai
+Mất `SameSite=lax/strict` là mất một lớp chống CSRF, nên `CsrfGuard` gánh phần đó ở cả hai
 cấu hình: mọi lệnh ghi đi kèm cookie phiên phải có header `X-Requested-With` và `Origin`
 nằm trong `CORS_ORIGIN`. Client nào gọi API bằng cookie mà không qua FE thì phải tự gắn
 header đó; đường `x-api-key` và `Bearer` không bị ảnh hưởng.
@@ -99,7 +103,7 @@ Thêm một điểm: `vercel.app` và `up.railway.app` nằm trong Public Suffix
 
 **Cách thoát duy nhất là đưa hai bên về cùng một tên miền gốc** — gắn custom domain
 `app.vienchibao.vn` cho FE và `api.vienchibao.vn` cho BE. Vercel/Railway vẫn dùng được,
-chỉ là không dùng tên miền mặc định của họ. Sau đó bỏ `AUTH_COOKIE_SAMESITE` để về `strict`.
+chỉ là không dùng tên miền mặc định của họ. Sau đó bỏ `AUTH_COOKIE_SAMESITE` để về `lax`.
 
 Chừng nào chưa làm được, hãy coi **Safari (macOS + iOS) là không được hỗ trợ** và nói rõ
 với người dùng, thay vì để họ tự gặp màn hình đăng nhập lặp vô tận. iOS không có ngoại lệ:
