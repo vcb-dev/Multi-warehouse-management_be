@@ -17,19 +17,39 @@ const REFRESH_COOKIE_PATH = '/api/auth';
 
 type SameSite = 'lax' | 'strict' | 'none';
 
+/**
+ * Danh sách trắng, không phải ép kiểu: `process.env` là `string` bất kỳ, còn Express chỉ
+ * nhận đúng ba giá trị này và ném `TypeError` với mọi thứ khác. Gõ nhầm `nonee` mà thả
+ * thẳng xuống thì app không chết lúc khởi động — nó chết lúc có người đăng nhập.
+ *
+ * Mặc định `strict`, không phải `lax`. `lax` là mặc định quen thuộc vì nó cần cho web app
+ * render phía server: link từ email phải mở ra trang đã đăng nhập, mà `strict` chặn đúng
+ * điều đó. App này không có luồng nào như vậy — cookie phiên chỉ được `fetch` dùng, phát
+ * từ trang đang mở trên origin của FE, nên `strict` không chặn mất gì:
+ *
+ *   - callback OAuth Shopee/TikTok là `@Public()` và nhận diện shop qua `code`, không đọc
+ *     cookie phiên;
+ *   - link kích hoạt trong email trỏ vào host FE, lúc đó người dùng còn chưa có phiên;
+ *   - xuất Excel/tải file đi qua `fetch`, không phải điều hướng trình duyệt.
+ *
+ * Và hướng rơi phải là hướng an toàn: quên khai biến này mà rơi vào `none` là mất sạch
+ * chống CSRF trong im lặng — không hỏng gì, không ai biết. Rơi vào `strict` thì cùng lắm
+ * là hỏng ầm ĩ, và hỏng ầm ĩ thì sửa được.
+ */
 function readSameSite(): SameSite {
   const raw = process.env.AUTH_COOKIE_SAMESITE?.trim().toLowerCase();
   if (raw === 'none' || raw === 'strict' || raw === 'lax') return raw;
-  return 'lax';
+  return 'strict';
 }
 
 /**
  * `SameSite=None` bắt buộc đi kèm `Secure` (trình duyệt vứt cookie nếu thiếu) — ép ở đây
  * để không phải phát hiện qua triệu chứng "đăng nhập xong vẫn 401" trên môi trường thật.
  *
- * Dev: FE `localhost:3002` và BE `localhost:3001` khác origin nhưng CÙNG site (cổng không
- * tính vào "site"), nên `Lax` mặc định vẫn gửi cookie đi bình thường. Chỉ khi deploy hai
- * bên lên hai domain khác nhau mới cần đặt `AUTH_COOKIE_SAMESITE=none`.
+ * Dev: FE `localhost:4002` và BE `localhost:4001` khác origin nhưng CÙNG site (cổng không
+ * tính vào "site"), nên mặc định vẫn gửi cookie đi bình thường. Chỉ khi deploy hai bên lên
+ * hai tên miền gốc khác nhau mới cần `AUTH_COOKIE_SAMESITE=none` — và lúc đó Safari chặn
+ * cookie bất kể khai gì, xem `docs/RAILWAY_CICD.md`.
  */
 function readSecure(sameSite: SameSite): boolean {
   const raw = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();

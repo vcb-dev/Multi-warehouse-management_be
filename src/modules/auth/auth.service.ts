@@ -116,16 +116,20 @@ export class AuthService {
   }
 
   /**
-   * Đăng xuất. Nhận `familyId` từ hai nguồn vì hai nguồn hỏng ở hai kiểu khác nhau:
-   * access token có thể đã hết hạn (guard chặn trước khi tới đây), còn refresh cookie thì
-   * còn hạn nhưng chỉ được gửi cho `/api/auth`. Có cái nào dùng cái đó.
+   * Đăng xuất. Thử LẦN LƯỢT mọi token người dùng còn cầm, vì hai cookie hỏng ở hai kiểu
+   * khác nhau và hiếm khi hỏng cùng lúc: refresh cookie chỉ được gửi cho `/api/auth` nên
+   * dễ vắng mặt, còn access cookie thì luôn được gửi nhưng hay đã hết hạn. Cả hai đều
+   * chở cùng một `familyId`, nên còn cái nào đọc được là thu hồi được cả họ.
+   *
+   * Chỉ xoá cookie mà không tới được đây là đăng xuất giả: trình duyệt NÀY quên token,
+   * còn bản token thì sống tiếp tới hết 7 ngày và ai copy được vẫn dùng bình thường.
    */
-  async logout(rawRefreshToken?: string, familyId?: string): Promise<boolean> {
-    const family =
-      familyId ??
-      (rawRefreshToken ? this.tokens.familyOf(rawRefreshToken) : null);
-    if (!family) return false;
-    return (await this.tokens.revokeFamily(family)) > 0;
+  async logout(...rawTokens: (string | undefined)[]): Promise<boolean> {
+    for (const raw of rawTokens) {
+      const family = raw ? this.tokens.familyOf(raw) : null;
+      if (family) return (await this.tokens.revokeFamily(family)) > 0;
+    }
+    return false;
   }
 
   /**

@@ -17,6 +17,7 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import {
+  ACCESS_COOKIE,
   REFRESH_COOKIE,
   clearAuthCookies,
   setAuthCookies,
@@ -121,6 +122,10 @@ export class AuthController {
    *
    * Thu hồi cả họ refresh token chứ không chỉ xoá cookie: xoá cookie chỉ làm trình duyệt
    * NÀY quên token, bản token vẫn sống tới lúc hết hạn.
+   *
+   * Đưa CẢ HAI cookie xuống service. Refresh đứng trước vì nó là đường chính, nhưng nó
+   * chỉ được gửi cho `/api/auth` nên có lúc vắng mặt trong khi access cookie vẫn còn —
+   * và cả hai đều chở cùng `familyId`, nên cái nào còn đọc được cũng thu hồi được cả họ.
    */
   @Public()
   @Post('logout')
@@ -129,7 +134,10 @@ export class AuthController {
     @Req() req: RequestWithClient,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const loggedOut = await this.auth.logout(req.cookies?.[REFRESH_COOKIE]);
+    const loggedOut = await this.auth.logout(
+      req.cookies?.[REFRESH_COOKIE],
+      req.cookies?.[ACCESS_COOKIE],
+    );
     clearAuthCookies(res);
     return { data: { logged_out: loggedOut } };
   }

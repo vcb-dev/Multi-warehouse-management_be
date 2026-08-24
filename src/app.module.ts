@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { JwtAuthGuard, PermissionGuard } from './common/guards/auth.guards';
+import { CsrfGuard } from './common/guards/csrf.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConfigModule } from './modules/config/config.module';
@@ -64,6 +65,9 @@ import { StorageModule } from './common/storage/storage.module';
   providers: [
     AppService,
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // Thứ tự đăng ký là thứ tự chạy. CSRF đứng đầu: request giả mạo phải bị chặn trước
+    // khi kịp chạm tới database để tra token hay quyền.
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },

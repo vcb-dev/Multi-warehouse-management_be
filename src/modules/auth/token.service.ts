@@ -209,9 +209,28 @@ export class TokenService {
     return count;
   }
 
-  /** Đọc `familyId` từ một refresh token thô mà KHÔNG cần nó còn hiệu lực (dùng cho logout). */
+  /**
+   * Đọc `familyId` để đăng xuất, từ access HOẶC refresh token, và chấp nhận cả token đã
+   * hết hạn.
+   *
+   * Rộng tay ở đây là có chủ ý, vì đăng xuất là hành động THU HỒI: sai lầm tệ nhất có thể
+   * gây ra là chấm dứt một phiên đáng ra còn sống — thua xa việc bỏ sót một phiên đáng ra
+   * phải chết. Người bấm nút thường ở đúng trạng thái mà token của họ vừa hỏng:
+   *
+   *   - refresh cookie chỉ được gửi cho `/api/auth`, nên đổi `AUTH_COOKIE_DOMAIN` hay xoá
+   *     cookie chọn lọc là nó biến mất trong khi access token vẫn còn;
+   *   - để máy qua đêm thì access token hết hạn từ lâu, mà nó lại là thứ duy nhất còn.
+   *
+   * Bắt token phải còn hiệu lực trong hai tình huống đó nghĩa là xoá cookie trên máy này
+   * xong coi như đã đăng xuất, còn họ token thì vẫn sống tiếp tới hết 7 ngày.
+   *
+   * Vẫn phải đúng chữ ký và đúng `iss` — nghĩa là do chính hệ này phát ra.
+   */
   familyOf(rawToken: string): string | null {
-    return this.verify(rawToken, REFRESH_TYPE)?.sid ?? null;
+    const claims =
+      this.verify(rawToken, REFRESH_TYPE, { ignoreExpiration: true }) ??
+      this.verify(rawToken, ACCESS_TYPE, { ignoreExpiration: true });
+    return claims?.sid ?? null;
   }
 
   private async issuePair(
@@ -275,11 +294,21 @@ export class TokenService {
     return alive !== null;
   }
 
-  /** Chữ ký sai, hết hạn, sai `iss`, hay nhầm loại token đều ra `null`. */
-  private verify(rawToken: string, expectedType: string): TokenClaims | null {
+  /**
+   * Chữ ký sai, hết hạn, sai `iss`, hay nhầm loại token đều ra `null`.
+   *
+   * `ignoreExpiration` CHỈ dành cho logout (xem `familyOf`). Mọi đường cấp quyền —
+   * `resolveAuthUser`, `rotate` — đều phải để mặc định, nếu không thì TTL mất hết ý nghĩa.
+   */
+  private verify(
+    rawToken: string,
+    expectedType: string,
+    opts: { ignoreExpiration?: boolean } = {},
+  ): TokenClaims | null {
     try {
       const claims = this.jwt.verify<TokenClaims>(rawToken, {
         issuer: JWT_ISSUER,
+        ignoreExpiration: opts.ignoreExpiration ?? false,
       });
       if (claims.typ !== expectedType) return null;
       if (!claims.sub || !claims.sid) return null;

@@ -93,11 +93,26 @@ describe('đặt cookie', () => {
     );
   });
 
-  it('mặc định SameSite=Lax — đủ cho dev localhost:3002 -> :3001 (cùng site)', () => {
+  it('mặc định SameSite=Strict — cookie phiên chỉ phục vụ fetch cùng site', () => {
+    // `lax` là mặc định quen thuộc nhưng nó tồn tại cho web app render phía server (link
+    // từ email phải mở ra trang đã đăng nhập). App này không có luồng nào cần điều hướng
+    // từ site khác mang theo cookie, nên `strict` không chặn mất gì.
     const { res, setOf } = fakeRes();
     setAuthCookies(res, tokens);
-    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('lax');
+    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('strict');
   });
+
+  it.each(['lax', 'none'])(
+    'khai "%s" tường minh thì vẫn được tôn trọng',
+    (value) => {
+      // Deploy khác tên miền gốc BẮT BUỘC dùng `none` — mặc định chặt hơn không được
+      // phép chặn mất đường đó.
+      process.env.AUTH_COOKIE_SAMESITE = value;
+      const { res, setOf } = fakeRes();
+      setAuthCookies(res, tokens);
+      expect(setOf(ACCESS_COOKIE).options.sameSite).toBe(value);
+    },
+  );
 
   it('SameSite=None thì Secure BẬT theo, kể cả khi env bảo tắt', () => {
     // Trình duyệt vứt thẳng cookie `SameSite=None` không kèm `Secure`. Để lọt cấu hình
@@ -117,12 +132,21 @@ describe('đặt cookie', () => {
     expect(setOf(ACCESS_COOKIE).options.secure).toBe(true);
   });
 
-  it('giá trị SameSite lạ rơi về `lax` chứ không lọt thẳng vào header', () => {
-    process.env.AUTH_COOKIE_SAMESITE = 'yes-please';
-    const { res, setOf } = fakeRes();
-    setAuthCookies(res, tokens);
-    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('lax');
-  });
+  it.each(['yes-please', '', '  ', 'None ', 'STRICT'])(
+    'giá trị SameSite "%s" không lọt thẳng vào header',
+    (raw) => {
+      // Express ném `TypeError` với giá trị lạ, và nó ném lúc CÓ NGƯỜI ĐĂNG NHẬP chứ
+      // không phải lúc khởi động — nên phải chặn ở đây. Giá trị hợp lệ viết hoa hay dính
+      // khoảng trắng (rất hay gặp khi copy từ dashboard) thì vẫn phải nhận.
+      process.env.AUTH_COOKIE_SAMESITE = raw;
+      const { res, setOf } = fakeRes();
+      setAuthCookies(res, tokens);
+      const expected = raw.trim().toLowerCase();
+      expect(setOf(ACCESS_COOKIE).options.sameSite).toBe(
+        ['lax', 'strict', 'none'].includes(expected) ? expected : 'strict',
+      );
+    },
+  );
 
   it('không tự đặt domain — sai domain là cookie im lặng không được gửi', () => {
     const { res, setOf } = fakeRes();

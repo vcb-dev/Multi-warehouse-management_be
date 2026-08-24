@@ -6,6 +6,7 @@ import { join } from 'path';
 import * as compression from 'compression';
 import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { allowedOrigins } from './common/auth/cors-origins';
 
 async function bootstrap() {
   // `rawBody` cần cho webhook TikTok Shop: chữ ký ký trên đúng chuỗi JSON gốc, nên
@@ -34,12 +35,11 @@ async function bootstrap() {
   // cookie phiên đi: với `Access-Control-Allow-Origin: *` thì cookie bị bỏ lại, và triệu
   // chứng là "đăng nhập xong mọi request vẫn 401" chứ không phải lỗi CORS dễ thấy.
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-    ],
+    origin: allowedOrigins(),
     credentials: true,
+    // FE gắn `X-Warehouse-Id` và `X-Requested-With` vào mọi lời gọi, nên trình duyệt
+    // preflight trước mỗi request. Nhớ kết quả 1 tiếng để không phải hỏi lại liên tục.
+    maxAge: 3600,
   });
   app.useGlobalPipes(
     new ValidationPipe({

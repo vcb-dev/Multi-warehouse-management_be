@@ -18,6 +18,12 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
  * TTL ngắn (30s) đã đủ an toàn cho hầu hết trường hợp, nhưng "khoá tài khoản / thu hồi
  * phiên có hiệu lực ngay" là yêu cầu nghiệp vụ rõ ràng — invalidate chủ động mới đảm bảo
  * được điều đó thay vì chờ hết TTL.
+ *
+ * GIỚI HẠN: đây là Map trong RAM của MỘT process. Chạy nhiều replica thì `invalidate*`
+ * chỉ tác động lên instance nhận request đó; các instance khác vẫn phục vụ quyền cũ tới
+ * hết 30 giây TTL. Không có chuyện sai lệch lâu dài (nguồn sự thật là database, cache chỉ
+ * là bản nhớ tạm), nhưng "có hiệu lực ngay" chỉ đúng tuyệt đối khi chạy một instance.
+ * Cần tức thì trên mọi instance thì phải chuyển sang Redis — xem `docs/RAILWAY_CICD.md`.
  */
 const TTL_MS = 30_000;
 

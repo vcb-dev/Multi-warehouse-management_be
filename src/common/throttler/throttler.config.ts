@@ -18,6 +18,9 @@ export function getThrottleRequest(context: ExecutionContext): ThrottleRequest {
  */
 export const LOGIN_PATH = '/api/auth/login';
 
+/** Cùng lý do với `LOGIN_PATH`: sai chuỗi là bộ đếm im lặng không chạy. */
+export const REFRESH_PATH = '/api/auth/refresh';
+
 /**
  * Đối tác bên thứ 3: API key gọi được MỌI route nên chặn lạm dụng ở tầng toàn cục.
  * Bỏ qua traffic JWT nội bộ.
@@ -49,8 +52,31 @@ export const loginThrottler: ThrottlerOptions = {
 };
 
 /**
- * Hai bộ đếm độc lập. `skipIf` và `getTracker` đọc theo TỪNG định nghĩa (xem
+ * Gia hạn. `@Public()` và có tra database, nên không đếm là để hở một đường ai cũng gọi
+ * được không giới hạn.
+ *
+ * Đếm theo IP thôi — khác login, ở đây không có `email` trong body để tách người dùng ra.
+ * Hạn mức rộng tay hơn nhiều so với login vì đây là hành vi hợp lệ, lặp lại đều đặn: mỗi
+ * tab mở nhiều là một lượt gia hạn mỗi 15 phút, cả một văn phòng ngồi sau một IP NAT thì
+ * cộng lại vẫn phải lọt. 60 lượt/phút đủ rộng cho việc đó mà vẫn chặn được vòng lặp hỏng
+ * ở client tự quay cho tới khi sập backend.
+ */
+export const refreshThrottler: ThrottlerOptions = {
+  name: 'refresh',
+  ttl: 60_000,
+  limit: 60,
+  skipIf: (context) =>
+    !getThrottleRequest(context).url?.startsWith(REFRESH_PATH),
+  getTracker: (req: ThrottleRequest) => req.ip ?? 'unknown',
+};
+
+/**
+ * Ba bộ đếm độc lập. `skipIf` và `getTracker` đọc theo TỪNG định nghĩa (xem
  * ThrottlerGuard: `namedThrottler.skipIf || commonOptions.skipIf`), nên mỗi bộ tự
  * chọn phạm vi của mình mà không cần guard riêng.
  */
-export const throttlerDefinitions = [apiKeyThrottler, loginThrottler];
+export const throttlerDefinitions = [
+  apiKeyThrottler,
+  loginThrottler,
+  refreshThrottler,
+];
