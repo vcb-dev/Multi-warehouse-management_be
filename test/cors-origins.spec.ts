@@ -34,21 +34,44 @@ describe('đọc CORS_ORIGIN', () => {
 });
 
 describe('thiếu cấu hình', () => {
-  it('dev: rơi về localhost để chạy được ngay', () => {
+  it('CHẾT lúc khởi động ở mọi môi trường, kể cả dev', () => {
+    // Không còn mặc định localhost để rơi về: một danh sách viết cứng trong code sẽ nuốt
+    // mất lỗi quên khai env, và triệu chứng lộ ra sau đó là "đăng nhập xong mọi request
+    // vẫn 401" chứ không phải lỗi CORS dễ thấy.
     process.env.NODE_ENV = 'development';
-    expect(allowedOrigins()).toContain('http://localhost:4002');
-  });
+    expect(() => allowedOrigins()).toThrow(/CORS_ORIGIN/);
 
-  it('production: CHẾT lúc khởi động thay vì rơi về localhost', () => {
-    // Rơi về localhost trên môi trường thật = mọi request từ domain thật mất cookie. Một
-    // lỗi cấu hình đội lốt lỗi xác thực, tốn hàng giờ để lần ra.
     process.env.NODE_ENV = 'production';
     expect(() => allowedOrigins()).toThrow(/CORS_ORIGIN/);
   });
 
-  it('production nhưng có cấu hình -> chạy bình thường', () => {
+  it('có cấu hình -> chạy bình thường', () => {
     process.env.NODE_ENV = 'production';
     process.env.CORS_ORIGIN = 'https://app.test';
     expect(allowedOrigins()).toEqual(['https://app.test']);
+  });
+});
+
+describe('giá trị gõ sai', () => {
+  // Origin sai không bao giờ ném lỗi lúc so khớp — nó chỉ lặng lẽ không khớp. Bắt tại
+  // lúc khởi động là cách duy nhất để nó không đội lốt lỗi xác thực.
+  it('thiếu scheme', () => {
+    process.env.CORS_ORIGIN = 'localhost:4002';
+    expect(() => allowedOrigins()).toThrow(/không hợp lệ/);
+  });
+
+  it('dính đường dẫn khi copy từ thanh địa chỉ', () => {
+    process.env.CORS_ORIGIN = 'https://app.test/dashboard';
+    expect(() => allowedOrigins()).toThrow(/https:\/\/app\.test/);
+  });
+
+  it('* — vô hiệu với credentials: true', () => {
+    process.env.CORS_ORIGIN = '*';
+    expect(() => allowedOrigins()).toThrow(/credentials/);
+  });
+
+  it('một giá trị hỏng làm hỏng cả danh sách, không im lặng bỏ qua', () => {
+    process.env.CORS_ORIGIN = 'https://a.test,ftp://b.test';
+    expect(() => allowedOrigins()).toThrow(/http/);
   });
 });

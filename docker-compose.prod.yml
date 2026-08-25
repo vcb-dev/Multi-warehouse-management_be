@@ -16,7 +16,9 @@ services:
       DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      # Không có mặc định: rơi về localhost trên môi trường thật là trình duyệt bỏ cookie
+      # lại và mọi request thành 401 — lỗi cấu hình đội lốt lỗi xác thực.
+      CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       PUBLIC_UPLOAD_URL: ${PUBLIC_UPLOAD_URL:-http://localhost:3001/uploads}
     volumes:
