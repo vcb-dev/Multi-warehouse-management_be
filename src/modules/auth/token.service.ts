@@ -16,12 +16,6 @@ import { JWT_ISSUER, accessTtlMs, refreshTtlMs } from './jwt.config';
 const ACCESS_TYPE = 'access';
 const REFRESH_TYPE = 'refresh';
 
-/**
- * Hai tab cùng phát hiện access token hết hạn và cùng gọi refresh trong tích tắc là
- * chuyện bình thường. Xử nghiêm ngay lượt thứ hai thì người dùng bị đá ra vì chính hành
- * vi hợp lệ của mình. Trong cửa sổ này, dùng lại một dòng vừa tiêu được coi là cuộc đua
- * lành tính và cấp cặp mới; quá cửa sổ mới coi là token bị đánh cắp.
- */
 const REUSE_GRACE_MS = 10_000;
 
 /** Tách khoá cache của phiên đăng nhập khỏi khoá của API key trong cùng một Map. */
@@ -209,23 +203,6 @@ export class TokenService {
     return count;
   }
 
-  /**
-   * Đọc `familyId` để đăng xuất, từ access HOẶC refresh token, và chấp nhận cả token đã
-   * hết hạn.
-   *
-   * Rộng tay ở đây là có chủ ý, vì đăng xuất là hành động THU HỒI: sai lầm tệ nhất có thể
-   * gây ra là chấm dứt một phiên đáng ra còn sống — thua xa việc bỏ sót một phiên đáng ra
-   * phải chết. Người bấm nút thường ở đúng trạng thái mà token của họ vừa hỏng:
-   *
-   *   - refresh cookie chỉ được gửi cho `/api/auth`, nên đổi `AUTH_COOKIE_DOMAIN` hay xoá
-   *     cookie chọn lọc là nó biến mất trong khi access token vẫn còn;
-   *   - để máy qua đêm thì access token hết hạn từ lâu, mà nó lại là thứ duy nhất còn.
-   *
-   * Bắt token phải còn hiệu lực trong hai tình huống đó nghĩa là xoá cookie trên máy này
-   * xong coi như đã đăng xuất, còn họ token thì vẫn sống tiếp tới hết 7 ngày.
-   *
-   * Vẫn phải đúng chữ ký và đúng `iss` — nghĩa là do chính hệ này phát ra.
-   */
   familyOf(rawToken: string): string | null {
     const claims =
       this.verify(rawToken, REFRESH_TYPE, { ignoreExpiration: true }) ??
@@ -242,10 +219,6 @@ export class TokenService {
     const accessExpiresAt = new Date(now + accessTtlMs());
     const refreshExpiresAt = new Date(now + refreshTtlMs());
 
-    // `jti` để hai token phát trong cùng MỘT giây không ra chuỗi giống hệt nhau: mọi
-    // claim còn lại đều trùng, kể cả `iat`/`exp` (đơn vị giây). Với refresh token đó là
-    // yêu cầu cứng — `token_hash` là khoá duy nhất, trùng là lỗi ghi. Với access token
-    // thì để mỗi lượt phát còn phân biệt được nhau trong log.
     const accessToken = this.jwt.sign(
       {
         sub: userId.toString(),

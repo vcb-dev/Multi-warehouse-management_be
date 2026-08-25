@@ -1,30 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 
-/**
- * Cache quyền đã resolve — dùng chung giữa `TokenService`/`ApiKeyService` (đọc) và các
- * service RBAC (ghi, để invalidate ngay khi đổi quyền).
- *
- * Khoá cache là **thông tin xác thực**, không phải userId: họ refresh token (`sid` trong
- * access token), hoặc userId cho đường API key. Lý do là thu hồi phải làm được ở hai mức
- * khác nhau:
- *
- *   - `invalidateKey` — thu hồi ĐÚNG một phiên, không đụng các thiết bị khác của cùng người.
- *   - `invalidateUser` — đổi role/khoá tài khoản, phải quét sạch mọi phiên của người đó.
- *
- * Mức thứ hai cần một chỉ mục ngược userId -> các khoá, vì không thể suy ngược từ họ
- * refresh token ra userId.
- *
- * TTL ngắn (30s) đã đủ an toàn cho hầu hết trường hợp, nhưng "khoá tài khoản / thu hồi
- * phiên có hiệu lực ngay" là yêu cầu nghiệp vụ rõ ràng — invalidate chủ động mới đảm bảo
- * được điều đó thay vì chờ hết TTL.
- *
- * GIỚI HẠN: đây là Map trong RAM của MỘT process. Chạy nhiều replica thì `invalidate*`
- * chỉ tác động lên instance nhận request đó; các instance khác vẫn phục vụ quyền cũ tới
- * hết 30 giây TTL. Không có chuyện sai lệch lâu dài (nguồn sự thật là database, cache chỉ
- * là bản nhớ tạm), nhưng "có hiệu lực ngay" chỉ đúng tuyệt đối khi chạy một instance.
- * Cần tức thì trên mọi instance thì phải chuyển cache sang Redis.
- */
 const TTL_MS = 30_000;
 
 /** Quy mô hiện tại dưới 200 tài khoản, mỗi người vài thiết bị — giới hạn rộng rãi để chặn phình vô hạn. */

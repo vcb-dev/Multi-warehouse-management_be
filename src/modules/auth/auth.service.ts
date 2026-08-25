@@ -30,15 +30,7 @@ export class AuthService {
     private rbac: RbacService,
     private tokens: TokenService,
   ) {}
-
-  /**
-   * Payload quyền trả cho FE — dùng chung cho login, refresh và `/auth/me` để ba đường
-   * không lệch shape với nhau.
-   *
-   * KHÔNG chứa token: cả access lẫn refresh đều đi bằng cookie `httpOnly`, nên JavaScript
-   * ở trình duyệt không đọc được chúng. Trả thêm một bản trong body là tự tay huỷ lợi ích
-   * đó — chỉ cần một lỗ XSS là token bị đọc và mang đi.
-   */
+  
   private buildUserPayload(user: User, resolved: ResolvedPermissions) {
     return {
       id: user.id.toString(),
@@ -114,16 +106,6 @@ export class AuthService {
       },
     };
   }
-
-  /**
-   * Đăng xuất. Thử LẦN LƯỢT mọi token người dùng còn cầm, vì hai cookie hỏng ở hai kiểu
-   * khác nhau và hiếm khi hỏng cùng lúc: refresh cookie chỉ được gửi cho `/api/auth` nên
-   * dễ vắng mặt, còn access cookie thì luôn được gửi nhưng hay đã hết hạn. Cả hai đều
-   * chở cùng một `familyId`, nên còn cái nào đọc được là thu hồi được cả họ.
-   *
-   * Chỉ xoá cookie mà không tới được đây là đăng xuất giả: trình duyệt NÀY quên token,
-   * còn bản token thì sống tiếp tới hết 7 ngày và ai copy được vẫn dùng bình thường.
-   */
   async logout(...rawTokens: (string | undefined)[]): Promise<boolean> {
     for (const raw of rawTokens) {
       const family = raw ? this.tokens.familyOf(raw) : null;
