@@ -1,9 +1,13 @@
 import type { CookieOptions, Response } from 'express';
 
 /**
- * Cookie đặt bởi CHÍNH backend, không phải Next.js: trình duyệt gọi thẳng API nên
- * không còn lớp proxy nào cầm token hộ. Tiền tố `vcb_` để không đụng cookie của app
- * khác cùng chạy trên `localhost` lúc dev.
+ * Cookie đặt bởi CHÍNH backend, không phải Next.js: FE chỉ proxy request qua chứ không
+ * cầm token hộ. Tiền tố `vcb_` để không đụng cookie của app khác cùng chạy trên
+ * `localhost` lúc dev.
+ *
+ * KHÔNG bao giờ khai `AUTH_COOKIE_DOMAIN` trong mô hình proxy: cookie phải là host-only
+ * của domain FE (Vercel). Khai domain của Railway vào đó là trình duyệt vứt cookie ngay
+ * lúc nhận, vì nó không khớp domain đang mở.
  */
 export const ACCESS_COOKIE = 'vcb_access_token';
 export const REFRESH_COOKIE = 'vcb_refresh_token';
@@ -34,6 +38,14 @@ function readSecure(sameSite: SameSite): boolean {
   }
   if (raw === 'true') return true;
   if (raw === 'false') return false;
+  // Hai lý do độc lập để bật `Secure`, và cả hai đều cần:
+  //
+  // 1. `SameSite=none` — đây là luật của trình duyệt, không phải lựa chọn: cookie khai
+  //    `None` mà thiếu `Secure` bị vứt thẳng.
+  // 2. Production — từ khi FE proxy `/api` sang đây (xem `next.config.ts` bên FE), trình
+  //    duyệt thấy cookie là first-party nên `SameSite` về lại `lax`, và vế (1) không bao
+  //    giờ bật nữa. Thiếu vế này, cookie phiên trên Railway mất cờ `Secure` mà KHÔNG có
+  //    lỗi nào báo — vẫn đăng nhập bình thường, chỉ là token chịu đi qua http.
   return sameSite === 'none' || process.env.NODE_ENV === 'production';
 }
 

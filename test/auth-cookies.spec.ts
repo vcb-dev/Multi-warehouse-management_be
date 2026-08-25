@@ -148,11 +148,35 @@ describe('đặt cookie', () => {
     expect(() => assertAuthCookieConfig()).not.toThrow();
   });
 
-  it('production mặc định Secure ngay cả khi không khai gì', () => {
+  it('production + SameSite=lax vẫn tự bật Secure', () => {
+    // Đây là hình dạng THẬT của production từ khi FE proxy `/api` sang backend: trình
+    // duyệt thấy cookie là first-party nên `SameSite` là `lax`, tức vế "suy ra Secure từ
+    // none" không bao giờ bật. Không có vế NODE_ENV này thì cookie phiên chạy không cờ
+    // `Secure` mà chẳng có lỗi nào báo.
     process.env.NODE_ENV = 'production';
     const { res, setOf } = fakeRes();
     setAuthCookies(res, tokens);
+    expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('lax');
     expect(setOf(ACCESS_COOKIE).options.secure).toBe(true);
+  });
+
+  it('dev + SameSite=lax thì KHÔNG bật Secure — dev chạy http', () => {
+    // Vế đối của test trên: bật `Secure` ở local là trình duyệt vứt cookie trên
+    // `http://localhost`, và triệu chứng là đăng nhập xong vẫn 401.
+    process.env.NODE_ENV = 'development';
+    const { res, setOf } = fakeRes();
+    setAuthCookies(res, tokens);
+    expect(setOf(ACCESS_COOKIE).options.secure).toBe(false);
+  });
+
+  it('AUTH_COOKIE_SECURE=false là đường tắt Secure khi cần chạy http', () => {
+    // Khai tay vẫn thắng suy diễn: production sau một proxy nội bộ chạy http thì đây là
+    // cách duy nhất tắt được cờ.
+    process.env.NODE_ENV = 'production';
+    process.env.AUTH_COOKIE_SECURE = 'false';
+    const { res, setOf } = fakeRes();
+    setAuthCookies(res, tokens);
+    expect(setOf(ACCESS_COOKIE).options.secure).toBe(false);
   });
 
   it.each(['yes-please', '', '  ', 'None ', 'STRICT', 'lax'])(
