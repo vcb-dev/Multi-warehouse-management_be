@@ -138,6 +138,12 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     scope: PermissionScope.location,
   },
   {
+    key: 'inventory:stocktake',
+    group: 'Quản lý kho',
+    label: 'Kiểm hàng',
+    scope: PermissionScope.location,
+  },
+  {
     key: 'purchasing:manage',
     group: 'Quản lý kho',
     label: 'Đặt hàng nhập & NCC',
@@ -188,6 +194,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'inventory:view',
       'inventory:transfer',
       'inventory:receive',
+      'inventory:stocktake',
       'customer:view',
       'customer:manage',
     ],
@@ -216,6 +223,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'inventory:view',
       'inventory:transfer',
       'inventory:receive',
+      'inventory:stocktake',
     ],
   },
   purchasing: {
