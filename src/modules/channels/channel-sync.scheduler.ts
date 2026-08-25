@@ -7,6 +7,9 @@ import {
   resolveChannelSyncActorId,
 } from './channel-sync-actor';
 import { ChannelSyncService } from './channel-sync.service';
+import { SapoInventorySyncService } from './sapo/sapo-inventory-sync.service';
+import { SapoLocationSyncService } from './sapo/sapo-location-sync.service';
+import { SapoOrderSyncService } from './sapo/sapo-order-sync.service';
 import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
 import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
@@ -36,15 +39,162 @@ export class ChannelSyncScheduler {
   /** Chặn hai lần chạy chồng nhau khi một lần quét kéo dài quá chu kỳ cron. */
   private tiktokRunning = false;
   private shopeeRunning = false;
+  private sapoRunning = false;
+  private sapoInventoryRunning = false;
+  private sapoLocationRunning = false;
 
   constructor(
     private readonly sync: ChannelSyncService,
     private readonly tiktokOrders: TiktokOrderSyncService,
     private readonly shopeeSync: ShopeeSyncService,
     private readonly tiktokReturns: TiktokReturnSyncService,
+    private readonly sapoOrders: SapoOrderSyncService,
+    private readonly sapoInventory: SapoInventorySyncService,
+    private readonly sapoLocations: SapoLocationSyncService,
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
   ) {}
+
+  /**
+   * Đồng bộ danh sách kho từ Sapo — **2h50 sáng thứ Bảy**, tức 10 phút TRƯỚC cron đơn.
+   *
+   * Thứ tự này là điều kiện đúng đắn của cả buổi sáng: kho mới phải có trong `locations`
+   * trước khi đơn của nó về, nếu không đơn bị gán tạm vào kho mặc định và mọi báo cáo theo
+   * kho lệch cho tới khi có người sửa tay từng đơn.
+   */
+  @Cron(process.env.SAPO_LOCATION_SYNC_CRON ?? '0 50 2 * * 6')
+  async pollSapoLocations() {
+    if (process.env.SAPO_LOCATION_SYNC_CRON_ENABLED !== 'true') return;
+    if (!this.sapoLocations.isConfigured()) {
+      this.logger.warn(
+        'Cron kho Sapo: thiếu SAPO_STORE/SAPO_API_KEY/SAPO_API_SECRET',
+      );
+      return;
+    }
+    if (this.sapoLocationRunning) {
+      this.logger.warn('Cron kho Sapo: lần chạy trước chưa xong, bỏ lượt này');
+      return;
+    }
+
+    this.sapoLocationRunning = true;
+    try {
+      const r = await this.sapoLocations.syncLocations();
+      this.logger.log(
+        `Cron kho Sapo: ${r.fetched} kho trên Sapo — ${r.created} thêm mới, ` +
+          `${r.updated} cập nhật, ${r.unchanged} không đổi, ` +
+          `${r.missing_in_sapo.length} kho DB có mà Sapo không trả, ` +
+          `${r.code_conflicts.length} mã kho trùng`,
+      );
+    } catch (e) {
+      this.logger.error(
+        `Cron kho Sapo thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      this.sapoLocationRunning = false;
+    }
+  }
+
+  /**
+   * Kéo đơn mới từ Sapo.
+   *
+   * Vì sao cần dù đã có cron TikTok/Shopee: hai cron kia chỉ lấy đơn của đúng hai sàn đó.
+   * Đơn POS, đơn web, đơn chat OmniAI (facebook/zalo-oa/tiktok-for-business) và mọi kênh
+   * còn lại chỉ tồn tại phía Sapo — trước đây chúng chỉ về DB khi có người chạy tay
+   * `scripts/sync-new-sapo-orders.ts`.
+   *
+   * Quét theo `created_on` chứ không phải `modified_on`: lượt này chỉ TẠO đơn mới, không
+   * cập nhật đơn cũ, nên lọc theo ngày sửa chỉ tốn thêm băng thông cho những đơn rồi cũng
+   * bị bỏ qua vì đã có `sapo_id` trong DB.
+   *
+   * Nhịp: **3h00 sáng thứ Bảy hằng tuần**, không phải mỗi nửa tiếng. Chạy được theo nhịp
+   * thưa vì mốc quét lấy từ đơn Sapo mới nhất trong DB (lùi `SAPO_ORDER_SYNC_OVERLAP_MINUTES`)
+   * chứ không phải cửa sổ cố định — một lượt tự vét trọn tuần vừa qua.
+   *
+   * Hai hệ quả của nhịp tuần, chấp nhận có chủ đích:
+   * - Phần lớn đơn về sẽ quá `SYNC_NOTIFY_MAX_AGE_HOURS` (24h) nên KHÔNG bắn thông báo —
+   *   đúng ý: chuông báo đơn mới chỉ có nghĩa với đơn vừa phát sinh.
+   * - Một tuần đơn phải lọt trong `SAPO_ORDER_SYNC_MAX_PAGES` × 250 (mặc định 10.000 đơn).
+   *   Vượt trần thì log cảnh báo, nới biến đó hoặc chạy tay `POST channels/sapo/sync`.
+   */
+  @Cron(process.env.SAPO_ORDER_SYNC_CRON ?? '0 0 3 * * 6')
+  async pollSapoOrders() {
+    if (process.env.SAPO_ORDER_SYNC_CRON_ENABLED !== 'true') return;
+    if (!this.sapoOrders.isConfigured()) {
+      this.logger.warn(
+        'Cron đơn Sapo: thiếu SAPO_STORE/SAPO_API_KEY/SAPO_API_SECRET',
+      );
+      return;
+    }
+    if (this.sapoRunning) {
+      this.logger.warn('Cron đơn Sapo: lần chạy trước chưa xong, bỏ lượt này');
+      return;
+    }
+
+    this.sapoRunning = true;
+    try {
+      const r = await this.sapoOrders.syncNewOrders();
+      if (r.created || r.failed || r.skipped_lines_no_variant) {
+        this.logger.log(
+          `Cron đơn Sapo (từ ${r.since}): ${r.fetched} đơn quét — ${r.created} tạo mới, ` +
+            `${r.reserved} giữ chỗ tồn, ${r.skipped_existing} đã có, ` +
+            `${r.skipped_lines_no_variant} dòng thiếu phiên bản, ${r.failed} lỗi`,
+        );
+      }
+    } catch (e) {
+      this.logger.error(
+        `Cron đơn Sapo thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      this.sapoRunning = false;
+    }
+  }
+
+  /**
+   * Kéo lại tồn kho từ Sapo — **3h40 sáng thứ Bảy hằng tuần**.
+   *
+   * Chạy SAU cron đơn (3h00) và cron sản phẩm (3h20) trong cùng buổi sáng, có chủ đích:
+   * phiên bản mới phải có `inventory_item_id` (do cron sản phẩm mang về) thì lượt này mới
+   * hỏi được tồn của nó, và tồn là thứ chốt cuối nên phải lấy sau khi đơn đã vào.
+   *
+   * Cảnh báo cần biết trước khi bật: lượt này coi **Sapo là nguồn chân lý và ghi đè cả
+   * `committed`**, nên phần giữ chỗ do chính app tạo ra (đơn app tự tạo, phiếu chuyển kho
+   * đang chờ) sẽ bị thay bằng con số của Sapo. Chỉ hợp khi Sapo vẫn là nơi chốt tồn thật;
+   * nếu app trở thành nguồn chân lý thì phải tắt cron này đi.
+   */
+  @Cron(process.env.SAPO_INVENTORY_SYNC_CRON ?? '0 40 3 * * 6')
+  async pollSapoInventory() {
+    if (process.env.SAPO_INVENTORY_SYNC_CRON_ENABLED !== 'true') return;
+    if (!this.sapoInventory.isConfigured()) {
+      this.logger.warn(
+        'Cron tồn kho Sapo: thiếu SAPO_STORE/SAPO_API_KEY/SAPO_API_SECRET',
+      );
+      return;
+    }
+    if (this.sapoInventoryRunning) {
+      this.logger.warn(
+        'Cron tồn kho Sapo: lần chạy trước chưa xong, bỏ lượt này',
+      );
+      return;
+    }
+
+    this.sapoInventoryRunning = true;
+    try {
+      const r = await this.sapoInventory.syncInventoryLevels();
+      this.logger.log(
+        `Cron tồn kho Sapo: ${r.scanned} dòng quét — ${r.created} tạo mới, ${r.updated} cập nhật, ` +
+          `${r.already_correct} đã đúng, ${r.movements} bút toán bù; ` +
+          `${r.unmatched_items} item lạ, ${r.unmatched_locations} kho lạ, ` +
+          `${r.local_only} dòng Sapo không trả (giữ nguyên), ` +
+          `${r.variants_without_item_id} phiên bản thiếu inventory_item_id`,
+      );
+    } catch (e) {
+      this.logger.error(
+        `Cron tồn kho Sapo thất bại: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    } finally {
+      this.sapoInventoryRunning = false;
+    }
+  }
 
   /**
    * Kéo đơn TikTok định kỳ. Quét theo `update_time` chứ không phải `create_time`: đơn
