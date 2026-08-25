@@ -8,8 +8,10 @@
 import type { ExecutionContext } from '@nestjs/common';
 import {
   LOGIN_PATH,
+  REFRESH_PATH,
   apiKeyThrottler,
   loginThrottler,
+  refreshThrottler,
   throttlerDefinitions,
   type ThrottleRequest,
 } from '../src/common/throttler/throttler.config';
@@ -27,6 +29,13 @@ const skipLogin = (req: Partial<ThrottleRequest>) =>
   loginThrottler.skipIf!(ctx(req));
 const track = (req: Partial<ThrottleRequest>) =>
   (loginThrottler.getTracker as (r: ThrottleRequest) => string)({
+    headers: {},
+    ...req,
+  });
+const skipRefresh = (req: Partial<ThrottleRequest>) =>
+  refreshThrottler.skipIf!(ctx(req));
+const trackRefresh = (req: Partial<ThrottleRequest>) =>
+  (refreshThrottler.getTracker as (r: ThrottleRequest) => string)({
     headers: {},
     ...req,
   });
@@ -110,14 +119,43 @@ describe('khoá đếm của đăng nhập', () => {
 });
 
 describe('bộ định nghĩa đăng ký vào module', () => {
-  it('đăng ký đủ cả hai, tên không trùng nhau', () => {
-    expect(throttlerDefinitions).toHaveLength(2);
+  it('đăng ký đủ cả ba, tên không trùng nhau', () => {
+    expect(throttlerDefinitions).toHaveLength(3);
     const names = throttlerDefinitions.map((d) => d.name);
-    expect(new Set(names).size).toBe(2);
-    expect(names).toEqual(['default', 'auth']);
+    // Trùng tên là ThrottlerModule chỉ giữ lại một — bộ đếm kia biến mất không báo lỗi.
+    expect(new Set(names).size).toBe(3);
+    expect(names).toEqual(['default', 'auth', 'refresh']);
   });
 
   it('đăng nhập siết chặt hơn nhiều so với đối tác', () => {
     expect(loginThrottler.limit).toBeLessThan(apiKeyThrottler.limit as number);
+  });
+
+  // Gia hạn là hành vi hợp lệ lặp đều (mỗi tab một lượt/15 phút, cả phòng chung một IP),
+  // còn dò mật khẩu thì không — hai cái không được cùng hạn mức.
+  it('gia hạn rộng tay hơn đăng nhập', () => {
+    expect(refreshThrottler.limit).toBeGreaterThan(
+      loginThrottler.limit as number,
+    );
+  });
+});
+
+describe('bộ đếm gia hạn (/auth/refresh)', () => {
+  it('đúng đường /api/auth/refresh -> ĐẾM', () => {
+    expect(skipRefresh({ url: REFRESH_PATH })).toBe(false);
+  });
+
+  it('đường khác -> bỏ qua, request nghiệp vụ không dính hạn mức của auth', () => {
+    expect(skipRefresh({ url: '/api/orders' })).toBe(true);
+    expect(skipRefresh({ url: LOGIN_PATH })).toBe(true);
+  });
+
+  it('thiếu tiền tố /api -> KHÔNG đếm (bẫy khi quên setGlobalPrefix)', () => {
+    expect(skipRefresh({ url: '/auth/refresh' })).toBe(true);
+  });
+
+  it('đếm theo IP — body không có email để tách người dùng', () => {
+    expect(trackRefresh({ ip: '9.9.9.9' })).toBe('9.9.9.9');
+    expect(trackRefresh({})).toBe('unknown');
   });
 });

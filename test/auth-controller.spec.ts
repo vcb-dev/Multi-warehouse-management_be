@@ -123,13 +123,26 @@ describe('POST /auth/logout', () => {
     const { res, cleared } = fakeRes();
 
     const out = await controller.logout(
-      req({ [REFRESH_COOKIE]: 'refresh.cu' }),
+      req({ [REFRESH_COOKIE]: 'refresh.cu', [ACCESS_COOKIE]: 'access.cu' }),
       res,
     );
 
-    expect(auth.logout).toHaveBeenCalledWith('refresh.cu');
+    // Đưa xuống CẢ HAI: refresh cookie chỉ được gửi cho `/api/auth` nên có lúc vắng mặt,
+    // và khi đó access cookie là thứ duy nhất còn đọc ra được `familyId`.
+    expect(auth.logout).toHaveBeenCalledWith('refresh.cu', 'access.cu');
     expect(cleared.sort()).toEqual([ACCESS_COOKIE, REFRESH_COOKIE].sort());
     expect(out).toEqual({ data: { logged_out: true } });
+  });
+
+  it('mất refresh cookie nhưng còn access cookie -> vẫn thu hồi được họ', async () => {
+    const { controller, auth } = buildController();
+    const { res } = fakeRes();
+
+    await controller.logout(req({ [ACCESS_COOKIE]: 'access.cu' }), res);
+
+    // Không có dòng này thì đăng xuất chỉ là xoá cookie trên máy NÀY, còn họ token sống
+    // tiếp tới hết 7 ngày.
+    expect(auth.logout).toHaveBeenCalledWith(undefined, 'access.cu');
   });
 
   it('không còn cookie nào vẫn xoá sạch và trả 200', async () => {
