@@ -27,8 +27,11 @@ export class SapoProductSyncScheduler {
   /**
    * Mặc định TẮT — bật bằng `SAPO_PRODUCT_SYNC_CRON_ENABLED=true`, giống mọi
    * cron khác trong dự án, để môi trường dev không tự ghi vào DB thật.
+   *
+   * Nhịp: **3h20 sáng thứ Bảy hằng tuần** (trước đây chạy hằng ngày). Lệch 20 phút so với
+   * cron đơn Sapo để hai lượt không cùng lúc chiếm connection pool.
    */
-  @Cron(process.env.SAPO_PRODUCT_SYNC_CRON ?? '0 20 3 * * *')
+  @Cron(process.env.SAPO_PRODUCT_SYNC_CRON ?? '0 20 3 * * 6')
   async run() {
     if (process.env.SAPO_PRODUCT_SYNC_CRON_ENABLED !== 'true') return;
     if (!this.sapo.isConfigured()) {
@@ -38,7 +41,9 @@ export class SapoProductSyncScheduler {
       return;
     }
     if (this.running) {
-      this.logger.warn('Cron đồng bộ sản phẩm Sapo: lượt trước chưa xong, bỏ lượt này');
+      this.logger.warn(
+        'Cron đồng bộ sản phẩm Sapo: lượt trước chưa xong, bỏ lượt này',
+      );
       return;
     }
 
