@@ -49,19 +49,41 @@ function readSameSite(): SameSite {
 }
 
 /**
- * `SameSite=None` bắt buộc đi kèm `Secure` (trình duyệt vứt cookie nếu thiếu) — ép ở đây
- * để không phải phát hiện qua triệu chứng "đăng nhập xong vẫn 401" trên môi trường thật.
+ * `SameSite=None` bắt buộc đi kèm `Secure`: trình duyệt vứt thẳng cookie khai `None` mà
+ * thiếu `Secure`. Đó là luật của trình duyệt chứ không phải lựa chọn ở đây — nên cấu hình
+ * mâu thuẫn bị NÉM LỖI, không bị âm thầm sửa lưng. Nuốt giá trị người vận hành khai thì
+ * thứ họ đọc trong `.env` và thứ đang thực chạy lệch nhau, mà lệch kiểu đó chỉ lộ ra sau
+ * khi đã đi dò bug ở chỗ khác.
  *
  * Dev: FE `localhost:4002` và BE `localhost:4001` khác origin nhưng CÙNG site (cổng không
  * tính vào "site"), nên mặc định vẫn gửi cookie đi bình thường. Chỉ khi deploy hai bên lên
- * hai tên miền gốc khác nhau mới cần `AUTH_COOKIE_SAMESITE=none` — và lúc đó Safari chặn
- * cookie bất kể khai gì, xem `docs/RAILWAY_CICD.md`.
+ * hai tên miền gốc khác nhau mới cần `AUTH_COOKIE_SAMESITE=none`.
+ *
+ * Biết trước một chuyện trước khi tới bước đó: Safari chặn cookie bên thứ ba theo tên miền
+ * đăng ký được (eTLD+1), nên khai đúng `SameSite=None; Secure` vẫn không chạy trên
+ * Safari/iOS — hai lớp khác nhau, lớp kia đứng trên. Lối ra duy nhất là đưa FE và BE về
+ * cùng một tên miền gốc rồi bỏ biến này về `lax`.
  */
 function readSecure(sameSite: SameSite): boolean {
   const raw = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (raw === 'false' && sameSite === 'none') {
+    throw new Error(
+      'Cấu hình mâu thuẫn: AUTH_COOKIE_SECURE=false không dùng được với ' +
+        'AUTH_COOKIE_SAMESITE=none — trình duyệt vứt cookie khai None mà thiếu Secure. ' +
+        'Bỏ trống AUTH_COOKIE_SECURE (nó tự bật) hoặc đổi SameSite về lax.',
+    );
+  }
   if (raw === 'true') return true;
-  if (raw === 'false' && sameSite !== 'none') return false;
+  if (raw === 'false') return false;
   return sameSite === 'none' || process.env.NODE_ENV === 'production';
+}
+
+/**
+ * Gọi lúc khởi động (`main.ts`) để cấu hình mâu thuẫn chết ngay tại đó thay vì chết ở lượt
+ * đăng nhập đầu tiên — cùng lý do `allowedOrigins()` và `jwtSecret()` được gọi sớm.
+ */
+export function assertAuthCookieConfig(): void {
+  readSecure(readSameSite());
 }
 
 function baseOptions(): CookieOptions {

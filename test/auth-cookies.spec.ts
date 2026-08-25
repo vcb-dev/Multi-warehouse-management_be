@@ -8,6 +8,7 @@
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
+  assertAuthCookieConfig,
   clearAuthCookies,
   setAuthCookies,
 } from '../src/common/auth/cookies';
@@ -114,15 +115,37 @@ describe('đặt cookie', () => {
     },
   );
 
-  it('SameSite=None thì Secure BẬT theo, kể cả khi env bảo tắt', () => {
-    // Trình duyệt vứt thẳng cookie `SameSite=None` không kèm `Secure`. Để lọt cấu hình
-    // này là mất cả buổi truy vì phía server không báo lỗi gì.
+  it('SameSite=None mà không khai Secure thì Secure tự bật', () => {
+    // Trình duyệt vứt thẳng cookie `SameSite=None` không kèm `Secure`, nên đây là suy diễn
+    // an toàn: không khai gì nghĩa là không có ý kiến, và chỉ có một giá trị chạy được.
     process.env.AUTH_COOKIE_SAMESITE = 'none';
-    process.env.AUTH_COOKIE_SECURE = 'false';
     const { res, setOf } = fakeRes();
     setAuthCookies(res, tokens);
     expect(setOf(ACCESS_COOKIE).options.sameSite).toBe('none');
     expect(setOf(ACCESS_COOKIE).options.secure).toBe(true);
+  });
+
+  it('SameSite=None + AUTH_COOKIE_SECURE=false thì ném lỗi, không âm thầm sửa lưng', () => {
+    // Cấu hình này không có cách nào chạy đúng. Lặng lẽ trả về `true` thì `.env` nói một
+    // đằng còn hệ thống chạy một nẻo — người đọc file cấu hình để dò bug sẽ tin nhầm.
+    process.env.AUTH_COOKIE_SAMESITE = 'none';
+    process.env.AUTH_COOKIE_SECURE = 'false';
+    const { res } = fakeRes();
+    expect(() => setAuthCookies(res, tokens)).toThrow(/AUTH_COOKIE_SECURE/);
+  });
+
+  it('assertAuthCookieConfig bắt cấu hình mâu thuẫn ngay lúc khởi động', () => {
+    // `main.ts` gọi hàm này trước khi mở cổng: chết lúc boot rẻ hơn nhiều so với chết ở
+    // lượt đăng nhập đầu tiên trên môi trường thật.
+    process.env.AUTH_COOKIE_SAMESITE = 'none';
+    process.env.AUTH_COOKIE_SECURE = 'false';
+    expect(() => assertAuthCookieConfig()).toThrow(/AUTH_COOKIE_SECURE/);
+  });
+
+  it('cấu hình hợp lệ thì assertAuthCookieConfig im lặng cho qua', () => {
+    process.env.AUTH_COOKIE_SAMESITE = 'lax';
+    process.env.AUTH_COOKIE_SECURE = 'false';
+    expect(() => assertAuthCookieConfig()).not.toThrow();
   });
 
   it('production mặc định Secure ngay cả khi không khai gì', () => {

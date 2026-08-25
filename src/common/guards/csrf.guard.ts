@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '../auth/cookies';
-import { isAllowedOrigin } from '../auth/cors-origins';
+import { isAllowedOrigin } from '../http/cors-origins';
 
 /** Chỉ lệnh ghi mới cần chặn — GET không đổi trạng thái thì có bị giả mạo cũng vô hại. */
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

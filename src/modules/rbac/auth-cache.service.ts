@@ -23,7 +23,7 @@ import { AuthUser } from '../../common/decorators/current-user.decorator';
  * chỉ tác động lên instance nhận request đó; các instance khác vẫn phục vụ quyền cũ tới
  * hết 30 giây TTL. Không có chuyện sai lệch lâu dài (nguồn sự thật là database, cache chỉ
  * là bản nhớ tạm), nhưng "có hiệu lực ngay" chỉ đúng tuyệt đối khi chạy một instance.
- * Cần tức thì trên mọi instance thì phải chuyển sang Redis — xem `docs/RAILWAY_CICD.md`.
+ * Cần tức thì trên mọi instance thì phải chuyển cache sang Redis.
  */
 const TTL_MS = 30_000;
 

@@ -5,7 +5,7 @@
 import {
   allowedOrigins,
   isAllowedOrigin,
-} from '../src/common/auth/cors-origins';
+} from '../src/common/http/cors-origins';
 
 const ORIGINAL_ENV = process.env.NODE_ENV;
 
