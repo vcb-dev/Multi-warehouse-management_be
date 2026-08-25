@@ -210,7 +210,7 @@ export class PurchaseReturnService {
       include: { supplier: true, location: true },
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
-    if (pvn.refundStatus === RefundStatus.da_hoan_tien) {
+    if (pvn.refundStatus === RefundStatus.refunded) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Phiếu trả đã nhận hoàn tiền',
@@ -224,7 +224,7 @@ export class PurchaseReturnService {
       await tx.purchaseReturn.update({
         where: { id },
         data: {
-          refundStatus: RefundStatus.da_hoan_tien,
+          refundStatus: RefundStatus.refunded,
           refundedAt: new Date(),
         },
       });
@@ -268,7 +268,7 @@ export class PurchaseReturnService {
 
     return {
       id: pvn.id.toString(),
-      refund_status: RefundStatus.da_hoan_tien,
+      refund_status: RefundStatus.refunded,
       voucher,
     };
   }
@@ -289,7 +289,7 @@ export class PurchaseReturnService {
         422,
       );
     }
-    if (rei.status !== GoodsReceiptStatus.da_nhap) {
+    if (rei.status !== GoodsReceiptStatus.received) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Chỉ trả hàng theo đơn nhập đã nhập kho',

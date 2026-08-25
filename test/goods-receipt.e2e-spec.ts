@@ -124,6 +124,6 @@ describeIfDb('US2 PO → incoming → REI confirm (integration)', () => {
     const updatedPo = await prisma.purchaseOrder.findUniqueOrThrow({
       where: { id: BigInt(po.id) },
     });
-    expect(updatedPo.status).toBe(PoStatus.da_nhap);
+    expect(updatedPo.status).toBe(PoStatus.received);
   });
 });

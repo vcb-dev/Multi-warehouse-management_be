@@ -106,22 +106,22 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
 }
 
 export const PO_STATUS_LABELS: Record<string, string> = {
-  don_nhap: 'Đơn nháp',
-  cho_nhap: 'Chờ nhập',
-  da_nhap: 'Đã nhập',
-  huy: 'Hủy',
+  draft: 'Đơn nháp',
+  pending: 'Chờ nhập',
+  received: 'Đã nhập',
+  cancelled: 'Hủy',
 };
 
 export const REI_STATUS_LABELS: Record<string, string> = {
-  chua_nhap: 'Chưa nhập',
-  da_nhap: 'Đã nhập',
-  huy: 'Đã hủy',
+  pending: 'Chưa nhập',
+  received: 'Đã nhập',
+  cancelled: 'Đã hủy',
 };
 
 export const PAYMENT_STATUS_LABELS: Record<string, string> = {
-  chua_thanh_toan: 'Chưa thanh toán',
-  mot_phan: 'Thanh toán một phần',
-  da_thanh_toan: 'Đã thanh toán',
+  unpaid: 'Chưa thanh toán',
+  partially_paid: 'Thanh toán một phần',
+  paid: 'Đã thanh toán',
 };
 
 type PvnWithRelations = PurchaseReturn & {
@@ -167,8 +167,8 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
 }
 
 export const REFUND_STATUS_LABELS: Record<string, string> = {
-  chua_hoan_tien: 'Chưa nhận hoàn tiền',
-  da_hoan_tien: 'Đã nhận hoàn tiền',
+  no_refund: 'Chưa nhận hoàn tiền',
+  refunded: 'Đã nhận hoàn tiền',
 };
 
 type LedgerEntryWithRelations = {

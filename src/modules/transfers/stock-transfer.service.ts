@@ -156,7 +156,7 @@ export class StockTransferService {
           code,
           fromLocationId: fromId,
           toLocationId: toId,
-          status: StockTransferStatus.nhap,
+          status: StockTransferStatus.draft,
           note: dto.note?.trim() || null,
           totalQuantity,
           createdById: user.userId,
@@ -192,7 +192,7 @@ export class StockTransferService {
   async update(id: bigint, dto: UpdateStockTransferDto, user: AuthUser) {
     const stn = await this.prisma.stockTransfer.findUnique({ where: { id } });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
-    if (stn.status !== StockTransferStatus.nhap) {
+    if (stn.status !== StockTransferStatus.draft) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ sửa được phiếu ở trạng thái nháp',
@@ -297,7 +297,7 @@ export class StockTransferService {
 
   /** Phiếu nháp → Chờ chuyển: giữ chỗ tồn kho (committed) ở kho chuyển */
   private async submit(stn: StnWithItems, user: AuthUser) {
-    if (stn.status !== StockTransferStatus.nhap) {
+    if (stn.status !== StockTransferStatus.draft) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ submit phiếu ở trạng thái nháp',
@@ -326,7 +326,7 @@ export class StockTransferService {
 
       await tx.stockTransfer.update({
         where: { id: stn.id },
-        data: { status: StockTransferStatus.cho_chuyen },
+        data: { status: StockTransferStatus.pending },
       });
 
       await tx.activityLog.create({
@@ -345,7 +345,7 @@ export class StockTransferService {
 
   /** Chờ chuyển → Đang chuyển: xuất kho thật, giải phóng chỗ giữ */
   private async ship(stn: StnWithItems, user: AuthUser) {
-    if (stn.status !== StockTransferStatus.cho_chuyen) {
+    if (stn.status !== StockTransferStatus.pending) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ xuất kho phiếu đang chờ chuyển',
@@ -400,7 +400,7 @@ export class StockTransferService {
       await tx.stockTransfer.update({
         where: { id: stn.id },
         data: {
-          status: StockTransferStatus.dang_chuyen,
+          status: StockTransferStatus.transferring,
           shippedAt: new Date(),
         },
       });
@@ -426,7 +426,7 @@ export class StockTransferService {
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
 
-    if (stn.status !== StockTransferStatus.dang_chuyen) {
+    if (stn.status !== StockTransferStatus.transferring) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ nhận phiếu đang chuyển',
@@ -468,7 +468,7 @@ export class StockTransferService {
       await tx.stockTransfer.update({
         where: { id },
         data: {
-          status: StockTransferStatus.da_nhan,
+          status: StockTransferStatus.received,
           receivedAt: new Date(),
           receivedById: user.userId,
         },
@@ -495,14 +495,14 @@ export class StockTransferService {
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
 
-    if (stn.status === StockTransferStatus.da_nhan) {
+    if (stn.status === StockTransferStatus.received) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Không thể hủy phiếu đã nhận',
         409,
       );
     }
-    if (stn.status === StockTransferStatus.huy) {
+    if (stn.status === StockTransferStatus.cancelled) {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã hủy', 409);
     }
 
@@ -510,7 +510,7 @@ export class StockTransferService {
 
     // Phiếu nháp chưa từng đụng tồn kho — hủy = xóa hẳn, giống quy ước hủy
     // PO/REI ở trạng thái nháp (không giữ lại bản ghi "đã hủy" vô nghĩa).
-    if (stn.status === StockTransferStatus.nhap) {
+    if (stn.status === StockTransferStatus.draft) {
       await this.prisma.$transaction(async (tx) => {
         await tx.activityLog.create({
           data: {
@@ -527,7 +527,7 @@ export class StockTransferService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      if (stn.status === StockTransferStatus.cho_chuyen) {
+      if (stn.status === StockTransferStatus.pending) {
         // Đang giữ chỗ (committed) — hủy chỉ cần giải phóng chỗ giữ, hàng
         // chưa từng rời kho chuyển nên không có gì để hoàn ở on_hand/incoming.
         for (const item of sortForLocking(stn.items)) {
@@ -546,7 +546,7 @@ export class StockTransferService {
           );
         }
       } else {
-        // dang_chuyen: hàng đã thật sự rời kho chuyển — hoàn on_hand kho
+        // transferring: hàng đã thật sự rời kho chuyển — hoàn on_hand kho
         // chuyển, gỡ "hàng đang về" tại kho nhận.
         for (const item of sortForLocking(stn.items)) {
           await this.inventory.applyMovement(
@@ -581,7 +581,7 @@ export class StockTransferService {
 
       await tx.stockTransfer.update({
         where: { id },
-        data: { status: StockTransferStatus.huy },
+        data: { status: StockTransferStatus.cancelled },
       });
 
       await tx.activityLog.create({

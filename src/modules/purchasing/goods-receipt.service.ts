@@ -166,7 +166,7 @@ export class GoodsReceiptService {
           422,
         );
       }
-      if (po.status !== PoStatus.cho_nhap) {
+      if (po.status !== PoStatus.pending) {
         throw new BusinessException(
           'VALIDATION_ERROR',
           `PO ${po.code} phải ở trạng thái chờ nhập`,
@@ -225,8 +225,8 @@ export class GoodsReceiptService {
           supplierId: BigInt(dto.supplier_id),
           locationId: BigInt(dto.location_id),
           purchaseOrderId: headerPoId ? BigInt(headerPoId) : null,
-          status: GoodsReceiptStatus.chua_nhap,
-          paymentStatus: PaymentStatus.chua_thanh_toan,
+          status: GoodsReceiptStatus.pending,
+          paymentStatus: PaymentStatus.unpaid,
           createdById: user.userId,
           assignedToId: dto.assigned_to_id ? BigInt(dto.assigned_to_id) : null,
           expectedReceiptAt: dto.expected_receipt_at
@@ -279,14 +279,14 @@ export class GoodsReceiptService {
       include: { items: true },
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
-    if (rei.status === GoodsReceiptStatus.da_nhap) {
+    if (rei.status === GoodsReceiptStatus.received) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Phiếu nhập đã xác nhận',
         409,
       );
     }
-    if (rei.status === GoodsReceiptStatus.huy) {
+    if (rei.status === GoodsReceiptStatus.cancelled) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Phiếu nhập đã hủy',
@@ -429,15 +429,15 @@ export class GoodsReceiptService {
       // nợ gì NCC, coi như đã thanh toán ngay — không cần gọi pay().
       const paymentStatus =
         amountDue <= 0 || depositApplied >= amountDue
-          ? PaymentStatus.da_thanh_toan
+          ? PaymentStatus.paid
           : depositApplied > 0
-            ? PaymentStatus.mot_phan
-            : PaymentStatus.chua_thanh_toan;
+            ? PaymentStatus.partially_paid
+            : PaymentStatus.unpaid;
 
       await tx.goodsReceipt.update({
         where: { id: rei.id },
         data: {
-          status: GoodsReceiptStatus.da_nhap,
+          status: GoodsReceiptStatus.received,
           amountDue,
           receivedAt: new Date(),
           depositApplied,
@@ -493,7 +493,7 @@ export class GoodsReceiptService {
 
     return {
       id: rei.id.toString(),
-      status: GoodsReceiptStatus.da_nhap,
+      status: GoodsReceiptStatus.received,
       movement_ids: movementIds.map((m) => m.toString()),
       amount_due: amountDue.toString(),
     };
@@ -505,17 +505,17 @@ export class GoodsReceiptService {
       include: { supplier: true, location: true },
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
-    if (rei.status !== GoodsReceiptStatus.da_nhap) {
+    if (rei.status !== GoodsReceiptStatus.received) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ thanh toán phiếu đã nhập',
         409,
       );
     }
-    if (rei.paymentStatus === PaymentStatus.da_thanh_toan) {
+    if (rei.paymentStatus === PaymentStatus.paid) {
       return {
         id: rei.id.toString(),
-        payment_status: PaymentStatus.da_thanh_toan,
+        payment_status: PaymentStatus.paid,
         paid_amount: rei.paidAmount.toString(),
       };
     }
@@ -529,11 +529,11 @@ export class GoodsReceiptService {
     if (remaining <= 0) {
       await this.prisma.goodsReceipt.update({
         where: { id },
-        data: { paymentStatus: PaymentStatus.da_thanh_toan },
+        data: { paymentStatus: PaymentStatus.paid },
       });
       return {
         id: rei.id.toString(),
-        payment_status: PaymentStatus.da_thanh_toan,
+        payment_status: PaymentStatus.paid,
         paid_amount: rei.paidAmount.toString(),
       };
     }
@@ -558,8 +558,8 @@ export class GoodsReceiptService {
     const newPaidAmount = Number(rei.paidAmount) + payAmount;
     const newStatus =
       newPaidAmount >= Number(rei.amountDue)
-        ? PaymentStatus.da_thanh_toan
-        : PaymentStatus.mot_phan;
+        ? PaymentStatus.paid
+        : PaymentStatus.partially_paid;
 
     const voucher = await this.prisma.$transaction(async (tx) => {
       await tx.goodsReceipt.update({
@@ -616,7 +616,7 @@ export class GoodsReceiptService {
   async cancel(id: bigint, user: AuthUser) {
     const rei = await this.prisma.goodsReceipt.findUnique({ where: { id } });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
-    if (rei.status !== GoodsReceiptStatus.chua_nhap) {
+    if (rei.status !== GoodsReceiptStatus.pending) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ hủy được phiếu nhập chưa nhập kho',

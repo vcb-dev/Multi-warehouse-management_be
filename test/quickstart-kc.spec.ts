@@ -149,7 +149,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       },
       auth,
     );
-    expect(po.status).toBe(PoStatus.don_nhap);
+    expect(po.status).toBe(PoStatus.draft);
 
     await poService.transition(BigInt(po.id), 'submit', auth);
 
@@ -218,8 +218,8 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       },
       auth,
     );
-    // Luồng hiện tại: nhap → submit → cho_chuyen → ship → dang_chuyen → receive
-    expect(stn.status).toBe(StockTransferStatus.nhap);
+    // Luồng hiện tại: draft → submit → pending → ship → transferring → receive
+    expect(stn.status).toBe(StockTransferStatus.draft);
 
     await transferService.transition(BigInt(stn.id), 'submit', auth);
     await transferService.transition(BigInt(stn.id), 'ship', auth);
@@ -227,7 +227,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     const shipped = await prisma.stockTransfer.findUniqueOrThrow({
       where: { id: BigInt(stn.id) },
     });
-    expect(shipped.status).toBe(StockTransferStatus.dang_chuyen);
+    expect(shipped.status).toBe(StockTransferStatus.transferring);
 
     await transferService.receive(BigInt(stn.id), auth);
 
@@ -385,7 +385,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     );
 
     // Phiếu nháp chưa đụng tồn; hàng chỉ rời kho ở bước ship. Hủy phiếu còn ở
-    // trạng thái `nhap` sẽ XOÁ hẳn phiếu nên phải đẩy qua ship trước.
+    // trạng thái `draft` sẽ XOÁ hẳn phiếu nên phải đẩy qua ship trước.
     await transferService.transition(BigInt(stn.id), 'submit', auth);
     await transferService.transition(BigInt(stn.id), 'ship', auth);
 
@@ -401,7 +401,7 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
     const cancelled = await prisma.stockTransfer.findUniqueOrThrow({
       where: { id: BigInt(stn.id) },
     });
-    expect(cancelled.status).toBe(StockTransferStatus.huy);
+    expect(cancelled.status).toBe(StockTransferStatus.cancelled);
 
     const onHandAfterCancel = (
       await prisma.inventoryLevel.findUniqueOrThrow({
