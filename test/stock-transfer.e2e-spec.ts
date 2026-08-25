@@ -126,16 +126,16 @@ describeIfDb('US3 stock transfer (integration)', () => {
       authUser,
     );
 
-    // Luồng: nhap → submit → cho_chuyen → ship → dang_chuyen → receive.
+    // Luồng: draft → submit → pending → ship → transferring → receive.
     // Hàng chỉ rời kho đi ở bước ship.
-    expect(stn.status).toBe(StockTransferStatus.nhap);
+    expect(stn.status).toBe(StockTransferStatus.draft);
     await transferService.transition(BigInt(stn.id), 'submit', authUser);
     await transferService.transition(BigInt(stn.id), 'ship', authUser);
 
     const shipped = await prisma.stockTransfer.findUniqueOrThrow({
       where: { id: BigInt(stn.id) },
     });
-    expect(shipped.status).toBe(StockTransferStatus.dang_chuyen);
+    expect(shipped.status).toBe(StockTransferStatus.transferring);
 
     const fromAfterCreate = await prisma.inventoryLevel.findUnique({
       where: {
@@ -194,7 +194,7 @@ describeIfDb('US3 stock transfer (integration)', () => {
       authUser,
     );
 
-    // Hủy phiếu còn ở trạng thái `nhap` sẽ XOÁ hẳn phiếu và chưa từng đụng tồn;
+    // Hủy phiếu còn ở trạng thái `draft` sẽ XOÁ hẳn phiếu và chưa từng đụng tồn;
     // muốn kiểm phần hoàn tồn thì phải đẩy qua ship trước.
     await transferService.transition(BigInt(stn.id), 'submit', authUser);
     await transferService.transition(BigInt(stn.id), 'ship', authUser);

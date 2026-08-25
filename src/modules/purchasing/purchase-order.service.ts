@@ -138,7 +138,7 @@ export class PurchaseOrderService {
           code,
           supplierId: BigInt(dto.supplier_id),
           locationId: BigInt(dto.location_id),
-          status: PoStatus.don_nhap,
+          status: PoStatus.draft,
           totalQuantity,
           totalAmount,
           depositAmount,
@@ -176,7 +176,7 @@ export class PurchaseOrderService {
     // Kho hiện tại của PO, chứ không chỉ kho mới trong dto — không có dòng này
     // thì sửa được PO của kho mình không có quyền, miễn là không đổi kho.
     assertLocationPermission(user, PO_WRITE, po.locationId);
-    if (po.status !== PoStatus.don_nhap) {
+    if (po.status !== PoStatus.draft) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ sửa PO ở trạng thái đơn nháp',
@@ -285,7 +285,7 @@ export class PurchaseOrderService {
     }
   }
 
-  /** Gọi sau REI confirm — tự chuyển PO → da_nhap nếu nhập đủ */
+  /** Gọi sau REI confirm — tự chuyển PO → received nếu nhập đủ */
   async tryCompleteIfFullyReceived(
     purchaseOrderId: bigint,
     userId: bigint,
@@ -295,7 +295,7 @@ export class PurchaseOrderService {
       where: { id: purchaseOrderId },
       include: { items: true },
     });
-    if (!po || po.status !== PoStatus.cho_nhap) return;
+    if (!po || po.status !== PoStatus.pending) return;
 
     const fullyReceived = po.items.every(
       (item) => item.receivedQuantity >= item.quantity,
@@ -303,7 +303,7 @@ export class PurchaseOrderService {
     if (fullyReceived) {
       await tx.purchaseOrder.update({
         where: { id: purchaseOrderId },
-        data: { status: PoStatus.da_nhap },
+        data: { status: PoStatus.received },
       });
 
       await tx.activityLog.create({
@@ -319,7 +319,7 @@ export class PurchaseOrderService {
   }
 
   private async submit(po: PoForTransition, user: AuthUser) {
-    if (po.status !== PoStatus.don_nhap) {
+    if (po.status !== PoStatus.draft) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ submit PO ở trạng thái đơn nháp',
@@ -346,7 +346,7 @@ export class PurchaseOrderService {
 
       await tx.purchaseOrder.update({
         where: { id: po.id },
-        data: { status: PoStatus.cho_nhap },
+        data: { status: PoStatus.pending },
       });
 
       await tx.activityLog.create({
@@ -382,7 +382,7 @@ export class PurchaseOrderService {
     po: Prisma.PurchaseOrderGetPayload<{ include: { items: true } }>,
     user: AuthUser,
   ) {
-    if (po.status !== PoStatus.cho_nhap) {
+    if (po.status !== PoStatus.pending) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ close PO đang chờ nhập',
@@ -394,7 +394,7 @@ export class PurchaseOrderService {
       await this.cancelRemainingIncoming(po, user.userId, tx);
       await tx.purchaseOrder.update({
         where: { id: po.id },
-        data: { status: PoStatus.da_nhap },
+        data: { status: PoStatus.received },
       });
 
       await tx.activityLog.create({
@@ -415,7 +415,7 @@ export class PurchaseOrderService {
     po: Prisma.PurchaseOrderGetPayload<{ include: { items: true } }>,
     user: AuthUser,
   ) {
-    if (po.status !== PoStatus.don_nhap) {
+    if (po.status !== PoStatus.draft) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ hủy được PO ở trạng thái đơn nháp',
@@ -425,7 +425,7 @@ export class PurchaseOrderService {
 
     // PO đơn nháp chưa từng submit nên chưa tạo incoming/công nợ gì — hủy = xóa hẳn,
     // giống logic hủy phiếu nhập (REI): không giữ lại trạng thái "đã hủy".
-    // PO đã "Chờ nhập" (cho_nhap) chỉ có thể đóng sớm qua "Chốt" (close), không hủy được nữa.
+    // PO đã "Chờ nhập" (pending) chỉ có thể đóng sớm qua "Chốt" (close), không hủy được nữa.
     await this.prisma.$transaction(async (tx) => {
       await tx.activityLog.create({
         data: {

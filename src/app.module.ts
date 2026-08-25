@@ -14,6 +14,7 @@ import { ConfigModule } from './modules/config/config.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PurchasingModule } from './modules/purchasing/purchasing.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { StocktakesModule } from './modules/stocktakes/stocktakes.module';
 import { TransfersModule } from './modules/transfers/transfers.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -46,6 +47,7 @@ import { StorageModule } from './common/storage/storage.module';
     SuppliersModule,
     PurchasingModule,
     TransfersModule,
+    StocktakesModule,
     ProductsModule,
     CategoriesModule,
     PricingModule,

@@ -68,8 +68,8 @@ export class SupplierService {
       this.prisma.goodsReceipt.groupBy({
         by: ['supplierId'],
         where: {
-          status: GoodsReceiptStatus.da_nhap,
-          paymentStatus: { not: PaymentStatus.da_thanh_toan },
+          status: GoodsReceiptStatus.received,
+          paymentStatus: { not: PaymentStatus.paid },
         },
         _count: true,
       }),
@@ -211,7 +211,7 @@ export class SupplierService {
         this.prisma.goodsReceipt.aggregate({
           where: {
             supplierId: id,
-            status: { not: GoodsReceiptStatus.huy },
+            status: { not: GoodsReceiptStatus.cancelled },
             ...(createdAtRange ? { createdAt: createdAtRange } : {}),
           },
           _count: true,
@@ -220,8 +220,8 @@ export class SupplierService {
         this.prisma.goodsReceipt.aggregate({
           where: {
             supplierId: id,
-            status: GoodsReceiptStatus.da_nhap,
-            paymentStatus: { not: PaymentStatus.da_thanh_toan },
+            status: GoodsReceiptStatus.received,
+            paymentStatus: { not: PaymentStatus.paid },
             ...(createdAtRange ? { createdAt: createdAtRange } : {}),
           },
           _count: true,
@@ -238,7 +238,7 @@ export class SupplierService {
         this.prisma.purchaseReturn.aggregate({
           where: {
             supplierId: id,
-            refundStatus: RefundStatus.chua_hoan_tien,
+            refundStatus: RefundStatus.no_refund,
             ...(createdAtRange ? { createdAt: createdAtRange } : {}),
           },
           _count: true,
@@ -498,14 +498,14 @@ export class SupplierService {
             422,
           );
         }
-        if (rei.status !== GoodsReceiptStatus.da_nhap) {
+        if (rei.status !== GoodsReceiptStatus.received) {
           throw new BusinessException(
             'INVALID_TRANSITION',
             `Phiếu ${rei.code} chưa ở trạng thái đã nhập`,
             409,
           );
         }
-        if (rei.paymentStatus === PaymentStatus.da_thanh_toan) {
+        if (rei.paymentStatus === PaymentStatus.paid) {
           throw new BusinessException(
             'INVALID_TRANSITION',
             `Phiếu ${rei.code} đã thanh toán đủ`,
@@ -524,7 +524,7 @@ export class SupplierService {
           where: { id: rei.id },
           data: {
             paidAmount: rei.amountDue,
-            paymentStatus: PaymentStatus.da_thanh_toan,
+            paymentStatus: PaymentStatus.paid,
           },
         });
       }
@@ -624,13 +624,13 @@ export class SupplierService {
       this.prisma.purchaseOrder.count({
         where: {
           supplierId,
-          status: { in: ['don_nhap', 'cho_nhap'] },
+          status: { in: ['draft', 'pending'] },
         },
       }),
       this.prisma.goodsReceipt.count({
         where: {
           supplierId,
-          status: 'chua_nhap',
+          status: 'pending',
         },
       }),
     ]);
