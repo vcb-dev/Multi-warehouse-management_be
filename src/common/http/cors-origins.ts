@@ -7,8 +7,8 @@ export function allowedOrigins(): string[] {
   if (!configured?.length) {
     throw new Error(
       'Thiếu biến môi trường bắt buộc: CORS_ORIGIN — khai origin của FE, nhiều giá trị ' +
-        'ngăn cách bằng dấu phẩy. Dev: CORS_ORIGIN="http://localhost:4002" — ' +
-        'production: CORS_ORIGIN="https://app.vienchibao.vn"',
+        'ngăn cách bằng dấu phẩy. Dev: CORS_ORIGIN="http://localhost:4002" — production: ' +
+        'CORS_ORIGIN="https://multi-warehouse-management-fe-beta.vercel.app"',
     );
   }
 

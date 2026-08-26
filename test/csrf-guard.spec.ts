@@ -9,7 +9,7 @@ import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
 import { CsrfGuard } from '../src/common/guards/csrf.guard';
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '../src/common/auth/cookies';
 
-const ALLOWED = 'https://app.vienchibao.vn';
+const ALLOWED = 'https://multi-warehouse-management-fe-beta.vercel.app';
 
 type Req = {
   method?: string;
