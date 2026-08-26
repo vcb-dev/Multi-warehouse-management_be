@@ -1,4 +1,10 @@
 packages:
   - '.'
 allowBuilds:
+  '@embedded-postgres/darwin-arm64': true
   '@embedded-postgres/darwin-x64': true
+  '@nestjs/core': false
+  '@prisma/client': true
+  '@prisma/engines': true
+  bcrypt: true
+  prisma: true
