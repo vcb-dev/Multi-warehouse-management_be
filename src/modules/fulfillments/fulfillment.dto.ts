@@ -418,9 +418,34 @@ export class ConnectProviderDto {
 export class ListShipmentsQueryDto {
   @IsOptional() @IsString() q?: string;
   @IsOptional() @IsString() tab?: string;
+  /** Trạng thái vận đơn — nhận nhiều giá trị ngăn bằng dấu phẩy */
   @IsOptional() @IsString() shipment_status?: string;
   @IsOptional() @IsString() location_id?: string;
+  /** Nhiều chi nhánh; `location_id` là tên cũ */
+  @IsOptional() @IsString() location_ids?: string;
   @IsOptional() @IsString() provider_id?: string;
+  /** Nhiều đơn vị vận chuyển; `provider_id` là tên cũ */
+  @IsOptional() @IsString() provider_ids?: string;
+
+  /** Tỉnh/thành nhận hàng, ngăn bằng dấu phẩy */
+  @IsOptional() @IsString() to_provinces?: string;
+  /** Nguồn đơn của đơn hàng gốc */
+  @IsOptional() @IsString() sources?: string;
+  /** Tag của đơn hàng gốc — khớp MỘT tag bất kỳ là đủ */
+  @IsOptional() @IsString() tags?: string;
+  /** Đã in phiếu giao hàng hay chưa */
+  @IsOptional() @IsString() printed?: string;
+
+  // --- Bốn mốc trong vòng đời vận đơn, mỗi mốc một trục riêng ---
+  @IsOptional() @IsString() created_on_min?: string;
+  @IsOptional() @IsString() created_on_max?: string;
+  @IsOptional() @IsString() delivered_on_min?: string;
+  @IsOptional() @IsString() delivered_on_max?: string;
+  @IsOptional() @IsString() cancelled_on_min?: string;
+  @IsOptional() @IsString() cancelled_on_max?: string;
+  @IsOptional() @IsString() returned_at_min?: string;
+  @IsOptional() @IsString() returned_at_max?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -431,6 +456,12 @@ export class ListShipmentsQueryDto {
   @IsInt()
   @Min(1)
   page_size?: number;
+  /** Tên theo Sapo Open API của `page_size` */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
 }
 
 export class ShipmentOverviewQueryDto {

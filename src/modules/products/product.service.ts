@@ -7,6 +7,14 @@ import {
 } from '../../common/auth/access';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { findProductIdsByQuery } from '../../common/search/unaccent-search';
+import {
+  appendAnd,
+  firstDefined,
+  parseDateRange,
+  parseIdList,
+  parseList,
+  textContainsAny,
+} from '../../common/query/filter-params';
 import { CategoryService } from '../categories/category.service';
 import {
   CreateProductDto,
@@ -47,30 +55,52 @@ export class ProductService {
       const ids = await findProductIdsByQuery(this.repo.client, query.q.trim());
       where.id = { in: ids };
     }
-    if (query.brand?.trim()) {
-      where.vendor = { contains: query.brand.trim(), mode: 'insensitive' };
+    // Khớp một phần, không phân biệt hoa thường — giao diện cho gõ tay hai
+    // tiêu chí này (chưa có endpoint trả danh sách nhãn hiệu/loại sẵn có), nên
+    // khớp chính xác sẽ ra 0 dòng chỉ vì thiếu một chữ hay sai hoa thường.
+    const vendors = parseList(firstDefined(query.vendors, query.brand));
+    if (vendors) appendAnd(where, textContainsAny('vendor', vendors));
+
+    const productTypes = parseList(
+      firstDefined(query.product_types, query.product_type),
+    );
+    if (productTypes) {
+      appendAnd(where, textContainsAny('productType', productTypes));
     }
-    if (query.product_type?.trim()) {
-      where.productType = {
-        contains: query.product_type.trim(),
-        mode: 'insensitive',
-      };
-    }
+
     if (query.is_published !== undefined)
       where.status = query.is_published ? 'active' : { not: 'active' };
-    if (query.category_id) {
-      where.categories = { some: { categoryId: BigInt(query.category_id) } };
+
+    const categoryIds = parseIdList(
+      firstDefined(query.category_ids, query.category_id),
+    );
+    if (categoryIds) {
+      where.categories = { some: { categoryId: { in: categoryIds } } };
     }
-    if (query.channel) {
-      where.salesChannels = { some: { channel: query.channel } };
+
+    const channels = parseList(firstDefined(query.channels, query.channel));
+    if (channels) {
+      where.salesChannels = { some: { channel: { in: channels } } };
     }
+
+    const tags = parseList(query.tags);
+    if (tags) where.tags = { hasSome: tags };
+
+    const vatPitCodes = parseList(query.vat_pit_category_codes);
+    if (vatPitCodes) where.vatPitCategoryCode = { in: vatPitCodes };
+
+    const createdOn = parseDateRange(
+      query.created_on_min,
+      query.created_on_max,
+    );
+    if (createdOn) where.createdOn = createdOn;
 
     return where;
   }
 
   async list(query: ListProductsQueryDto) {
     const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+    const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildListWhere(query);
     const [rows, total] = await Promise.all([
       this.repo.client.product.findMany({

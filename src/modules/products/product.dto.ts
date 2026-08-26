@@ -218,6 +218,48 @@ export class ListProductsQueryDto {
   @IsString()
   channel?: string;
 
+  // --- Chọn nhiều (ngăn bằng dấu phẩy) ---
+
+  /** Nhãn hiệu; `brand` là tên cũ, chỉ nhận một giá trị */
+  @IsOptional()
+  @IsString()
+  vendors?: string;
+
+  /** Loại sản phẩm; `product_type` là tên cũ */
+  @IsOptional()
+  @IsString()
+  product_types?: string;
+
+  /** Danh mục; `category_id` là tên cũ */
+  @IsOptional()
+  @IsString()
+  category_ids?: string;
+
+  /** Kênh bán hàng; `channel` là tên cũ */
+  @IsOptional()
+  @IsString()
+  channels?: string;
+
+  /** Tag — khớp MỘT tag bất kỳ là đủ */
+  @IsOptional()
+  @IsString()
+  tags?: string;
+
+  /** Nhóm ngành nghề tính thuế GTGT, TNCN */
+  @IsOptional()
+  @IsString()
+  vat_pit_category_codes?: string;
+
+  // --- Khoảng ngày ---
+
+  @IsOptional()
+  @IsString()
+  created_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  created_on_max?: string;
+
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -229,6 +271,13 @@ export class ListProductsQueryDto {
   @Min(1)
   @Type(() => Number)
   page_size?: number;
+
+  /** Tên theo Sapo Open API của `page_size` */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  limit?: number;
 }
 
 export class ExportProductsQueryDto extends ListProductsQueryDto {
