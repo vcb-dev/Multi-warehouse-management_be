@@ -56,9 +56,9 @@ export function serializeStockTransfer(stn: StnWithRelations) {
 }
 
 export const STN_STATUS_LABELS: Record<string, string> = {
-  nhap: 'Phiếu nháp',
-  cho_chuyen: 'Chờ chuyển',
-  dang_chuyen: 'Đang chuyển',
-  da_nhan: 'Đã nhận',
-  huy: 'Hủy',
+  draft: 'Phiếu nháp',
+  pending: 'Chờ chuyển',
+  transferring: 'Đang chuyển',
+  received: 'Đã nhận',
+  cancelled: 'Hủy',
 };

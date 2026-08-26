@@ -63,35 +63,38 @@ enum MovementType {
 }
 
 enum PoStatus {
-  don_nhap
-  cho_nhap
-  da_nhap
-  huy
+  draft
+  pending
+  received
+  cancelled
 }
 
 enum GoodsReceiptStatus {
-  chua_nhap
-  da_nhap
-  huy
+  pending
+  received
+  cancelled
 }
 
+/// Trạng thái thanh toán của GoodsReceipt (đơn nhập hàng). Đơn bán dùng
+/// `OrderFinancialStatus` theo Sapo `financial_status`, không dùng enum này.
 enum PaymentStatus {
-  chua_thanh_toan
-  mot_phan
-  da_thanh_toan
+  unpaid
+  partially_paid
+  paid
 }
 
 enum StockTransferStatus {
-  nhap
-  cho_chuyen
-  dang_chuyen
-  da_nhan
-  huy
+  draft
+  pending
+  transferring
+  received
+  cancelled
 }
 
+/// Trạng thái hoàn tiền của PurchaseReturn (trả hàng nhập cho NCC).
 enum RefundStatus {
-  chua_hoan_tien
-  da_hoan_tien
+  no_refund
+  refunded
 }
 
 enum CategoryConditionType {
@@ -335,6 +338,8 @@ model User {
   goodsReceiptsAssigned  GoodsReceipt[]              @relation("ReiAssignedTo")
   stockTransfersCreated  StockTransfer[]             @relation("StnCreatedBy")
   stockTransfersReceived StockTransfer[]             @relation("StnReceivedBy")
+  stocktakesCreated      Stocktake[]                 @relation("StocktakeCreatedBy")
+  stocktakesBalanced     Stocktake[]                 @relation("StocktakeBalancedBy")
   purchaseReturns        PurchaseReturn[]            @relation("PvnCreatedBy")
   ordersCreated          Order[]                     @relation("OrderCreatedBy")
   ordersAssigned         Order[]                     @relation("OrderAssignedTo")
@@ -459,19 +464,19 @@ model UserPermissionOverride {
 /// Chỉ lưu SHA-256 của token, không lưu bản thô: rò database không kéo theo mạo danh
 /// được người dùng.
 model RefreshToken {
-  id        BigInt   @id @default(autoincrement())
-  userId    BigInt   @map("user_id")
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
   /// SHA-256 của refresh token thô. Token thô chỉ tồn tại trong cookie của client.
-  tokenHash String   @unique @map("token_hash")
+  tokenHash String    @unique @map("token_hash")
   /// Gom mọi token sinh ra từ cùng MỘT lần đăng nhập. Xoay vòng tạo dòng mới cùng
   /// `familyId`; phát hiện tái sử dụng thì giết cả họ chứ không chỉ dòng bị lộ.
   /// Access token mang giá trị này ở claim `sid` để đăng xuất có hiệu lực ngay.
-  familyId  String   @map("family_id")
+  familyId  String    @map("family_id")
   /// Để nhận ra thiết bị khi điều tra sự cố (không có màn quản lý phiên cho người dùng).
-  userAgent String?  @map("user_agent")
-  ipAddress String?  @map("ip_address")
-  createdAt DateTime @default(now()) @map("created_at")
-  expiresAt DateTime @map("expires_at")
+  userAgent String?   @map("user_agent")
+  ipAddress String?   @map("ip_address")
+  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime  @map("expires_at")
   /// Đã đổi lấy cặp token mới. Dùng lại một dòng đã `usedAt` = token bị đánh cắp.
   usedAt    DateTime? @map("used_at")
   /// Đăng xuất, hoặc bị giết theo họ khi phát hiện tái sử dụng.
@@ -546,6 +551,7 @@ model Location {
   goodsReceipts       GoodsReceipt[]
   transfersFrom       StockTransfer[]          @relation("TransferFrom")
   transfersTo         StockTransfer[]          @relation("TransferTo")
+  stocktakes          Stocktake[]
   purchaseReturns     PurchaseReturn[]
   refundLineItems     OrderRefundLineItem[]
   priceLists          PriceList[]
@@ -763,6 +769,7 @@ model ProductVariant {
   poItems          PurchaseOrderItem[]
   reiItems         GoodsReceiptItem[]
   stnItems         StockTransferItem[]
+  stocktakeItems   StocktakeItem[]
   pvnItems         PurchaseReturnItem[]
   priceListItems   PriceListItem[]
   orderItems       OrderItem[]
@@ -1038,7 +1045,7 @@ model PurchaseOrder {
   supplierId    BigInt   @map("supplier_id")
   /// Gộp từ branch_id + warehouse_id cũ — Sapo chỉ có một location cho đơn nhập
   locationId    BigInt   @map("location_id")
-  status        PoStatus @default(don_nhap)
+  status        PoStatus @default(draft)
   totalQuantity Int      @default(0) @map("total_quantity")
   totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
   depositAmount Decimal  @default(0) @map("deposit_amount") @db.Decimal(18, 2)
@@ -1081,8 +1088,8 @@ model GoodsReceipt {
   supplierId        BigInt             @map("supplier_id")
   locationId        BigInt             @map("location_id")
   purchaseOrderId   BigInt?            @map("purchase_order_id")
-  status            GoodsReceiptStatus @default(chua_nhap)
-  paymentStatus     PaymentStatus      @default(chua_thanh_toan) @map("payment_status")
+  status            GoodsReceiptStatus @default(pending)
+  paymentStatus     PaymentStatus      @default(unpaid) @map("payment_status")
   amountDue         Decimal            @default(0) @map("amount_due") @db.Decimal(18, 2)
   paidAmount        Decimal            @default(0) @map("paid_amount") @db.Decimal(18, 2)
   discountAmount    Decimal            @default(0) @map("discount_amount") @db.Decimal(18, 2)
@@ -1137,7 +1144,7 @@ model StockTransfer {
   code           String              @unique
   fromLocationId BigInt              @map("from_location_id")
   toLocationId   BigInt              @map("to_location_id")
-  status         StockTransferStatus @default(nhap)
+  status         StockTransferStatus @default(draft)
   note           String?
   totalQuantity  Int                 @default(0) @map("total_quantity")
   createdById    BigInt              @map("created_by")
@@ -1172,6 +1179,67 @@ model StockTransferItem {
   @@map("stock_transfer_items")
 }
 
+// --- Kiểm hàng (kiểm kê tồn thực tế) ---
+
+enum StocktakeStatus {
+  checking
+  balanced
+  cancelled
+}
+
+/// Phiếu kiểm hàng của một kho: chốt tồn hệ thống, ghi số đếm thực tế, rồi cân bằng.
+///
+/// Vì sao cần chứng từ riêng thay vì sửa thẳng tồn: trước đây lệch kiểm kê chỉ vào được
+/// hệ thống qua `POST inventory/import` (điều chỉnh hàng loạt bằng file) — sinh movement
+/// `adjust` không có gì để lần ngược xem ai đếm, đếm khi nào, đếm ra bao nhiêu. Phiếu này
+/// giữ đúng vết đó: mỗi movement cân bằng mang `reference_type = 'stocktake'`.
+model Stocktake {
+  id            BigInt          @id @default(autoincrement())
+  code          String          @unique
+  locationId    BigInt          @map("location_id")
+  status        StocktakeStatus @default(checking)
+  note          String?
+  /// Chốt lúc cân bằng: số dòng lệch và tổng lệch (dương = thừa, âm = thiếu). Lưu sẵn để
+  /// danh sách phiếu không phải quét lại toàn bộ dòng chỉ để hiện hai con số.
+  diffLineCount Int             @default(0) @map("diff_line_count")
+  diffQuantity  Int             @default(0) @map("diff_quantity")
+  createdById   BigInt          @map("created_by")
+  balancedById  BigInt?         @map("balanced_by")
+  balancedAt    DateTime?       @map("balanced_at")
+  cancelledAt   DateTime?       @map("cancelled_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  location   Location        @relation(fields: [locationId], references: [id])
+  createdBy  User            @relation("StocktakeCreatedBy", fields: [createdById], references: [id])
+  balancedBy User?           @relation("StocktakeBalancedBy", fields: [balancedById], references: [id])
+  items      StocktakeItem[]
+
+  @@index([locationId, status])
+  @@index([createdAt])
+  @@map("stocktakes")
+}
+
+model StocktakeItem {
+  id              BigInt  @id @default(autoincrement())
+  stocktakeId     BigInt  @map("stocktake_id")
+  variantId       BigInt  @map("variant_id")
+  /// Tồn hệ thống chụp lúc thêm dòng vào phiếu — để biết phiếu được đếm trên nền số nào.
+  /// KHÔNG dùng làm gốc tính lệch khi cân bằng: lúc đó tồn đọc lại từ `inventory_levels`
+  /// (đã khoá dòng), nếu không thì mọi đơn bán ra trong lúc đang đếm sẽ bị ghi đè mất.
+  systemQuantity  Int     @map("system_quantity")
+  /// null = chưa đếm. Dòng chưa đếm bị bỏ qua khi cân bằng thay vì hiểu là đếm được 0.
+  countedQuantity Int?    @map("counted_quantity")
+  note            String?
+
+  stocktake Stocktake      @relation(fields: [stocktakeId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([stocktakeId, variantId])
+  @@index([variantId])
+  @@map("stocktake_items")
+}
+
 // --- Trả hàng nhập (US4) ---
 
 model PurchaseReturn {
@@ -1183,7 +1251,7 @@ model PurchaseReturn {
   goodsReceiptId BigInt?      @map("goods_receipt_id")
   totalQuantity  Int          @default(0) @map("total_quantity")
   totalAmount    Decimal      @default(0) @map("total_amount") @db.Decimal(18, 2)
-  refundStatus   RefundStatus @default(chua_hoan_tien) @map("refund_status")
+  refundStatus   RefundStatus @default(no_refund) @map("refund_status")
   refundedAt     DateTime?    @map("refunded_at")
   createdById    BigInt       @map("created_by")
   createdAt      DateTime     @default(now()) @map("created_at")

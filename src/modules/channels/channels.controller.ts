@@ -26,6 +26,9 @@ import { Public } from '../../common/decorators/roles.decorator';
 import { ChannelWebhookDto } from '../orders/order.dto';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncService } from './channel-sync.service';
+import { SapoInventorySyncService } from './sapo/sapo-inventory-sync.service';
+import { SapoLocationSyncService } from './sapo/sapo-location-sync.service';
+import { SapoOrderSyncService } from './sapo/sapo-order-sync.service';
 import { ShopeeAuthService } from './shopee/shopee-auth.service';
 import {
   ShopeePushWebhookService,
@@ -56,6 +59,9 @@ export class ChannelsController {
     private tiktokAuth: TiktokAuthService,
     private tiktokOrders: TiktokOrderSyncService,
     private tiktokWebhook: TiktokWebhookService,
+    private sapoOrders: SapoOrderSyncService,
+    private sapoInventory: SapoInventorySyncService,
+    private sapoLocations: SapoLocationSyncService,
     private overview: ChannelOverviewService,
   ) {}
 
@@ -145,6 +151,39 @@ export class ChannelsController {
       filterBy: dto.filter_by,
       createdById: user.userId,
     });
+  }
+
+  /**
+   * Kéo đơn mới từ Sapo ngay, không chờ cron. `since` (ISO) để chạy bù một khoảng cũ;
+   * bỏ trống thì lấy từ đơn Sapo mới nhất đang có trong DB.
+   */
+  @Post('sapo/sync')
+  @RequirePermission('order:create')
+  @LocationOptional()
+  syncSapo(@Query('since') since?: string) {
+    return this.sapoOrders.syncNewOrders(since);
+  }
+
+  /**
+   * Kéo danh sách kho/chi nhánh từ Sapo. Chạy trước khi đồng bộ đơn/tồn nếu vừa lập kho mới
+   * bên Sapo — không có kho thì đơn của nó bị gán tạm vào kho mặc định.
+   */
+  @Post('sapo/location-sync')
+  @RequirePermission('inventory:receive')
+  @LocationOptional()
+  syncSapoLocations() {
+    return this.sapoLocations.syncLocations();
+  }
+
+  /**
+   * Kéo lại tồn kho từ Sapo ngay, không chờ cron. Quét cả catalog nên chạy vài phút —
+   * `inventory:receive` chứ không phải `order:create`: đây là thao tác sửa tồn.
+   */
+  @Post('sapo/inventory-sync')
+  @RequirePermission('inventory:receive')
+  @LocationOptional()
+  syncSapoInventory() {
+    return this.sapoInventory.syncInventoryLevels();
   }
 
   @Post('webhook')

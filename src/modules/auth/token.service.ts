@@ -16,12 +16,6 @@ import { JWT_ISSUER, accessTtlMs, refreshTtlMs } from './jwt.config';
 const ACCESS_TYPE = 'access';
 const REFRESH_TYPE = 'refresh';
 
-/**
- * Hai tab cùng phát hiện access token hết hạn và cùng gọi refresh trong tích tắc là
- * chuyện bình thường. Xử nghiêm ngay lượt thứ hai thì người dùng bị đá ra vì chính hành
- * vi hợp lệ của mình. Trong cửa sổ này, dùng lại một dòng vừa tiêu được coi là cuộc đua
- * lành tính và cấp cặp mới; quá cửa sổ mới coi là token bị đánh cắp.
- */
 const REUSE_GRACE_MS = 10_000;
 
 /** Tách khoá cache của phiên đăng nhập khỏi khoá của API key trong cùng một Map. */
@@ -209,9 +203,11 @@ export class TokenService {
     return count;
   }
 
-  /** Đọc `familyId` từ một refresh token thô mà KHÔNG cần nó còn hiệu lực (dùng cho logout). */
   familyOf(rawToken: string): string | null {
-    return this.verify(rawToken, REFRESH_TYPE)?.sid ?? null;
+    const claims =
+      this.verify(rawToken, REFRESH_TYPE, { ignoreExpiration: true }) ??
+      this.verify(rawToken, ACCESS_TYPE, { ignoreExpiration: true });
+    return claims?.sid ?? null;
   }
 
   private async issuePair(
@@ -223,10 +219,6 @@ export class TokenService {
     const accessExpiresAt = new Date(now + accessTtlMs());
     const refreshExpiresAt = new Date(now + refreshTtlMs());
 
-    // `jti` để hai token phát trong cùng MỘT giây không ra chuỗi giống hệt nhau: mọi
-    // claim còn lại đều trùng, kể cả `iat`/`exp` (đơn vị giây). Với refresh token đó là
-    // yêu cầu cứng — `token_hash` là khoá duy nhất, trùng là lỗi ghi. Với access token
-    // thì để mỗi lượt phát còn phân biệt được nhau trong log.
     const accessToken = this.jwt.sign(
       {
         sub: userId.toString(),
@@ -275,11 +267,21 @@ export class TokenService {
     return alive !== null;
   }
 
-  /** Chữ ký sai, hết hạn, sai `iss`, hay nhầm loại token đều ra `null`. */
-  private verify(rawToken: string, expectedType: string): TokenClaims | null {
+  /**
+   * Chữ ký sai, hết hạn, sai `iss`, hay nhầm loại token đều ra `null`.
+   *
+   * `ignoreExpiration` CHỈ dành cho logout (xem `familyOf`). Mọi đường cấp quyền —
+   * `resolveAuthUser`, `rotate` — đều phải để mặc định, nếu không thì TTL mất hết ý nghĩa.
+   */
+  private verify(
+    rawToken: string,
+    expectedType: string,
+    opts: { ignoreExpiration?: boolean } = {},
+  ): TokenClaims | null {
     try {
       const claims = this.jwt.verify<TokenClaims>(rawToken, {
         issuer: JWT_ISSUER,
+        ignoreExpiration: opts.ignoreExpiration ?? false,
       });
       if (claims.typ !== expectedType) return null;
       if (!claims.sub || !claims.sid) return null;

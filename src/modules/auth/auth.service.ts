@@ -30,15 +30,7 @@ export class AuthService {
     private rbac: RbacService,
     private tokens: TokenService,
   ) {}
-
-  /**
-   * Payload quyền trả cho FE — dùng chung cho login, refresh và `/auth/me` để ba đường
-   * không lệch shape với nhau.
-   *
-   * KHÔNG chứa token: cả access lẫn refresh đều đi bằng cookie `httpOnly`, nên JavaScript
-   * ở trình duyệt không đọc được chúng. Trả thêm một bản trong body là tự tay huỷ lợi ích
-   * đó — chỉ cần một lỗ XSS là token bị đọc và mang đi.
-   */
+  
   private buildUserPayload(user: User, resolved: ResolvedPermissions) {
     return {
       id: user.id.toString(),
@@ -114,18 +106,12 @@ export class AuthService {
       },
     };
   }
-
-  /**
-   * Đăng xuất. Nhận `familyId` từ hai nguồn vì hai nguồn hỏng ở hai kiểu khác nhau:
-   * access token có thể đã hết hạn (guard chặn trước khi tới đây), còn refresh cookie thì
-   * còn hạn nhưng chỉ được gửi cho `/api/auth`. Có cái nào dùng cái đó.
-   */
-  async logout(rawRefreshToken?: string, familyId?: string): Promise<boolean> {
-    const family =
-      familyId ??
-      (rawRefreshToken ? this.tokens.familyOf(rawRefreshToken) : null);
-    if (!family) return false;
-    return (await this.tokens.revokeFamily(family)) > 0;
+  async logout(...rawTokens: (string | undefined)[]): Promise<boolean> {
+    for (const raw of rawTokens) {
+      const family = raw ? this.tokens.familyOf(raw) : null;
+      if (family) return (await this.tokens.revokeFamily(family)) > 0;
+    }
+    return false;
   }
 
   /**

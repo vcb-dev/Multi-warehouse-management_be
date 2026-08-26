@@ -467,13 +467,14 @@ describe('thu hồi họ (đăng xuất)', () => {
     await expect(service.revokeFamily(pair.familyId)).resolves.toBe(0);
   });
 
-  it('đọc được họ từ refresh token thô để đăng xuất khi access token đã hết hạn', async () => {
+  it('đọc được họ từ CẢ access lẫn refresh token để đăng xuất', async () => {
     const { service } = build();
     const pair = await service.issueForLogin(7n);
     expect(service.familyOf(pair.refreshToken)).toBe(pair.familyId);
+    // Refresh cookie chỉ được gửi cho `/api/auth` nên có lúc vắng mặt. Cả hai token đều
+    // chở cùng `familyId`, nên nhận cả hai thì đăng xuất không phụ thuộc vào cookie nào
+    // còn sống — bỏ sót là họ token sống tiếp tới hết 7 ngày.
+    expect(service.familyOf(pair.accessToken)).toBe(pair.familyId);
     expect(service.familyOf('rac')).toBeNull();
-    // Access token không phải đường vào của logout — nhầm hai loại là đăng xuất im lặng
-    // không làm gì.
-    expect(service.familyOf(pair.accessToken)).toBeNull();
   });
 });

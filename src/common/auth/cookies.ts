@@ -1,18 +1,10 @@
 import type { CookieOptions, Response } from 'express';
+import { allowedOrigins } from '../http/cors-origins';
 
-/**
- * Cookie đặt bởi CHÍNH backend, không phải Next.js: trình duyệt gọi thẳng API nên
- * không còn lớp proxy nào cầm token hộ. Tiền tố `vcb_` để không đụng cookie của app
- * khác cùng chạy trên `localhost` lúc dev.
- */
 export const ACCESS_COOKIE = 'vcb_access_token';
 export const REFRESH_COOKIE = 'vcb_refresh_token';
 
-/**
- * `setGlobalPrefix('api')` nên toàn bộ route auth nằm dưới đường này. Refresh token chỉ
- * được gửi kèm cho đúng nhóm route này — mọi request nghiệp vụ khác không mang nó theo,
- * nên bề mặt rò rỉ hẹp hơn hẳn access token.
- */
+
 const REFRESH_COOKIE_PATH = '/api/auth';
 
 type SameSite = 'lax' | 'strict' | 'none';
@@ -23,19 +15,57 @@ function readSameSite(): SameSite {
   return 'lax';
 }
 
-/**
- * `SameSite=None` bắt buộc đi kèm `Secure` (trình duyệt vứt cookie nếu thiếu) — ép ở đây
- * để không phải phát hiện qua triệu chứng "đăng nhập xong vẫn 401" trên môi trường thật.
- *
- * Dev: FE `localhost:3002` và BE `localhost:3001` khác origin nhưng CÙNG site (cổng không
- * tính vào "site"), nên `Lax` mặc định vẫn gửi cookie đi bình thường. Chỉ khi deploy hai
- * bên lên hai domain khác nhau mới cần đặt `AUTH_COOKIE_SAMESITE=none`.
- */
 function readSecure(sameSite: SameSite): boolean {
   const raw = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (raw === 'false' && sameSite === 'none') {
+    throw new Error(
+      'Cấu hình mâu thuẫn: AUTH_COOKIE_SECURE=false không dùng được với ' +
+        'AUTH_COOKIE_SAMESITE=none — trình duyệt vứt cookie khai None mà thiếu Secure. ' +
+        'Bỏ trống AUTH_COOKIE_SECURE (nó tự bật) hoặc đổi SameSite về lax.',
+    );
+  }
   if (raw === 'true') return true;
-  if (raw === 'false' && sameSite !== 'none') return false;
-  return sameSite === 'none' || process.env.NODE_ENV === 'production';
+  if (raw === 'false') return false;
+  return sameSite === 'none' || browserOnHttps();
+}
+
+function browserOnHttps(): boolean {
+  return allowedOrigins().every((o) => o.startsWith('https://'));
+}
+
+
+export function assertAuthCookieConfig(): void {
+  const origins = allowedOrigins();
+  assertUniformScheme(origins);
+  assertDomainReachable(origins);
+  readSecure(readSameSite());
+}
+
+function assertUniformScheme(origins: string[]): void {
+  const https = origins.filter((o) => o.startsWith('https://'));
+  if (https.length === 0 || https.length === origins.length) return;
+  throw new Error(
+    'CORS_ORIGIN trộn http lẫn https — cờ Secure của cookie phiên không thể vừa đúng ' +
+      `cho cả hai (${origins.join(', ')}). Tách môi trường ra, hoặc khai tay ` +
+      'AUTH_COOKIE_SECURE nếu thực sự cố ý.',
+  );
+}
+
+function assertDomainReachable(origins: string[]): void {
+  const raw = process.env.AUTH_COOKIE_DOMAIN?.trim();
+  if (!raw) return;
+
+  const domain = raw.replace(/^\./, '').toLowerCase();
+  const hosts = origins.map((o) => new URL(o).hostname.toLowerCase());
+  const reachable = hosts.some((h) => h === domain || h.endsWith(`.${domain}`));
+  if (reachable) return;
+
+  throw new Error(
+    `AUTH_COOKIE_DOMAIN="${raw}" không dùng được: không origin nào trong CORS_ORIGIN ` +
+      `nằm dưới domain đó (${hosts.join(', ')}). Trình duyệt sẽ vứt cookie phiên ngay ` +
+      'lúc nhận. FE và BE khác tên miền gốc (Vercel/Railway) thì phải BỎ TRỐNG biến này ' +
+      '— cookie là host-only của domain FE.',
+  );
 }
 
 function baseOptions(): CookieOptions {
@@ -73,11 +103,6 @@ export function setAuthCookies(
   });
 }
 
-/**
- * Xoá phải khai LẠI ĐÚNG path/domain/sameSite/secure lúc đặt. Lệch một thuộc tính là
- * trình duyệt coi đó là cookie khác và giữ nguyên cookie cũ — người dùng bấm đăng xuất
- * mà vẫn còn phiên.
- */
 export function clearAuthCookies(res: Response): void {
   const base = baseOptions();
   res.clearCookie(ACCESS_COOKIE, { ...base, path: '/' });

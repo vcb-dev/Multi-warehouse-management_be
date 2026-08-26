@@ -79,7 +79,7 @@ export class PoTransitionDto {
 
 export class ListPurchaseOrdersQueryDto {
   @IsOptional()
-  @IsIn(['don_nhap', 'cho_nhap', 'da_nhap', 'huy'])
+  @IsIn(['draft', 'pending', 'received', 'cancelled'])
   status?: string;
 
   @IsOptional()
@@ -192,7 +192,7 @@ export class ListGoodsReceiptsQueryDto {
   @IsString()
   supplier_id?: string;
 
-  /** Danh sách trạng thái thanh toán, phân tách dấu phẩy — VD: chua_thanh_toan,mot_phan */
+  /** Danh sách trạng thái thanh toán, phân tách dấu phẩy — VD: unpaid,partially_paid */
   @IsOptional()
   @IsString()
   payment_status?: string;

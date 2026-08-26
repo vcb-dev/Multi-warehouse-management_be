@@ -85,6 +85,28 @@ export class SapoClient {
     );
   }
 
+  /**
+   * GET bất kỳ đường dẫn Admin API nào, dùng chung phần auth + retry ở đây.
+   *
+   * Mở ra public để đường đồng bộ đơn (`channels/sapo`) không phải dựng lại client thứ hai
+   * với cùng Basic auth và cùng cách lùi thời gian khi gặp 429 — trước đó mỗi script tự
+   * viết một bản `api()` riêng (xem `scripts/sync-new-sapo-orders.ts`).
+   */
+  get<T>(path: string, tries = 5): Promise<T> {
+    return this.request<T>(path, tries);
+  }
+
+  /**
+   * Header `x-sapo-api-call-limit` ("đã dùng/tổng") của lượt gọi gần nhất, hoặc null nếu
+   * Sapo không trả. Dùng để tự giãn nhịp TRƯỚC khi chạm trần thay vì chờ ăn 429 rồi mới lùi —
+   * quan trọng với các lượt quét cả catalog (đồng bộ tồn kho), không cần cho vài lời gọi lẻ.
+   */
+  get lastRateLimit(): string | null {
+    return this.rateLimit;
+  }
+
+  private rateLimit: string | null = null;
+
   private async request<T>(path: string, tries = 5): Promise<T> {
     let lastErr: unknown;
     for (let i = 1; i <= tries; i++) {
@@ -92,6 +114,7 @@ export class SapoClient {
         const res = await fetch(`https://${this.store}.mysapo.net${path}`, {
           headers: { Authorization: `Basic ${this.auth}` },
         });
+        this.rateLimit = res.headers.get('x-sapo-api-call-limit');
         if (res.status === 429) {
           await new Promise((r) => setTimeout(r, 2000 * i));
           continue;
