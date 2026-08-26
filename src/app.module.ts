@@ -29,6 +29,7 @@ import { FulfillmentsModule } from './modules/fulfillments/fulfillments.module';
 import { ConversationModule } from './modules/conversations/conversation.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SavedFiltersModule } from './modules/saved-filters/saved-filters.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -60,6 +61,7 @@ import { StorageModule } from './common/storage/storage.module';
     ConversationModule,
     RbacModule,
     ReportsModule,
+    SavedFiltersModule,
     ApiKeysModule,
     NotificationsModule,
   ],
