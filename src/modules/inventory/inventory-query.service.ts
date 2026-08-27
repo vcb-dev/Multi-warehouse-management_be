@@ -7,6 +7,14 @@ import {
   locationScopeFilter,
 } from '../../common/auth/access';
 import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
+import {
+  appendAnd,
+  parseDateRange,
+  parseIdList,
+  parseIntRange,
+  parseList,
+  textContainsAny,
+} from '../../common/query/filter-params';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import { serializeLevel, serializeMovement } from './inventory.serializer';
 import {
@@ -17,24 +25,88 @@ import {
 
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD ?? 5);
 
-function parseVariantIds(value?: string): bigint[] | undefined {
-  if (!value?.trim()) return undefined;
-  const ids = value
-    .split(',')
-    .map((v) => v.trim())
-    .filter(Boolean)
-    .map((v) => BigInt(v));
-  return ids.length ? ids : undefined;
+/**
+ * Bảy chỉ số kho của Sapo — mỗi cái là một cột thật trên `inventory_levels`,
+ * nên lọc theo khoảng số là so sánh trực tiếp, không phải tính lại.
+ */
+const BUCKET_COLUMNS = {
+  on_hand: 'onHand',
+  available: 'available',
+  committed: 'committed',
+  incoming: 'incoming',
+  packed: 'packed',
+  reserved: 'reserved',
+  unavailable: 'unavailable',
+} as const;
+
+type BucketColumn = (typeof BUCKET_COLUMNS)[keyof typeof BUCKET_COLUMNS];
+type BucketRanges = Partial<
+  Record<BucketColumn, { gte?: number; lte?: number }>
+>;
+
+function bucketRanges(query: ListInventoryQueryDto): BucketRanges | undefined {
+  const ranges: BucketRanges = {};
+  let any = false;
+  const raw = query as unknown as Record<string, number | undefined>;
+  for (const [param, column] of Object.entries(BUCKET_COLUMNS)) {
+    const range = parseIntRange(raw[`${param}_min`], raw[`${param}_max`]);
+    if (range) {
+      ranges[column] = range;
+      any = true;
+    }
+  }
+  return any ? ranges : undefined;
 }
 
-function appendAnd<W extends { AND?: unknown }>(
-  where: W,
-  clause: object,
-): void {
-  (where as { AND?: unknown[] }).AND = [
-    ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-    clause,
-  ];
+/**
+ * Khoảng có bao trùm số 0 hay không.
+ *
+ * Ở nhánh "chọn kho", variant chưa từng có bản ghi tồn tại kho đó vẫn hiện ra
+ * với mọi chỉ số bằng 0. Nếu khoảng lọc bao trùm 0 mà chỉ dùng `some` thì đúng
+ * những dòng ấy lại rơi ra ngoài — trong khi chúng là thứ người dùng đang tìm.
+ */
+function rangesIncludeZero(ranges: BucketRanges): boolean {
+  return Object.values(ranges).every(
+    (r) =>
+      (r.gte === undefined || r.gte <= 0) &&
+      (r.lte === undefined || r.lte >= 0),
+  );
+}
+
+/** Bộ lọc theo thuộc tính sản phẩm, dùng chung cho cả hai nhánh danh sách. */
+function productClause(
+  query: ListInventoryQueryDto,
+): Prisma.ProductWhereInput | undefined {
+  const clause: Prisma.ProductWhereInput = {};
+  let any = false;
+
+  // Khớp một phần, không phân biệt hoa thường: giao diện cho gõ tay hai tiêu
+  // chí này, khớp chính xác sẽ ra 0 dòng chỉ vì thiếu một chữ hay sai hoa thường.
+  const productTypes = parseList(query.product_types);
+  if (productTypes) {
+    appendAnd(clause, textContainsAny('productType', productTypes));
+    any = true;
+  }
+
+  const vendors = parseList(query.vendors);
+  if (vendors) {
+    appendAnd(clause, textContainsAny('vendor', vendors));
+    any = true;
+  }
+
+  const tags = parseList(query.tags);
+  if (tags) {
+    clause.tags = { hasSome: tags };
+    any = true;
+  }
+
+  const createdOn = parseDateRange(query.created_on_min, query.created_on_max);
+  if (createdOn) {
+    clause.createdOn = createdOn;
+    any = true;
+  }
+
+  return any ? clause : undefined;
 }
 
 @Injectable()
@@ -92,7 +164,7 @@ export class InventoryQueryService {
     user: AuthUser,
   ) {
     const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+    const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildLevelWhere(query, user);
 
     const [rows, total] = await Promise.all([
@@ -120,7 +192,7 @@ export class InventoryQueryService {
   /** Khi chọn kho: hiển thị mọi variant (kể cả chưa có inventory_level) */
   private async listByWarehouse(query: ListInventoryQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+    const pageSize = query.limit ?? query.page_size ?? 20;
     const locationId = BigInt(query.location_id!);
     // Nhánh này bỏ qua buildLevelWhere nên không được thừa hưởng bộ lọc kho —
     // thiếu dòng này thì `?location_id=` xem được tồn của kho bất kỳ.
@@ -195,7 +267,7 @@ export class InventoryQueryService {
       where.id = BigInt(query.variant_id);
     }
 
-    const variantIds = parseVariantIds(query.variant_ids);
+    const variantIds = parseIdList(query.variant_ids);
     if (variantIds) {
       where.id = { in: variantIds };
     }
@@ -236,6 +308,21 @@ export class InventoryQueryService {
         inventoryLevels: { some: { locationId, available: { lt: 0 } } },
       });
     }
+
+    // Cùng bộ lọc như nhánh kia, chỉ khác hình dạng: ở đây phải đi qua quan hệ.
+    const ranges = bucketRanges(query);
+    if (ranges) {
+      const branches: Prisma.ProductVariantWhereInput[] = [
+        { inventoryLevels: { some: { locationId, ...ranges } } },
+      ];
+      if (rangesIncludeZero(ranges)) {
+        branches.push({ inventoryLevels: { none: { locationId } } });
+      }
+      appendAnd(where, branches.length > 1 ? { OR: branches } : branches[0]);
+    }
+
+    const product = productClause(query);
+    if (product) appendAnd(where, { product });
 
     return where;
   }
@@ -295,7 +382,7 @@ export class InventoryQueryService {
       where.variantId = BigInt(query.variant_id);
     }
 
-    const variantIds = parseVariantIds(query.variant_ids);
+    const variantIds = parseIdList(query.variant_ids);
     if (variantIds) {
       where.variantId = { in: variantIds };
     }
@@ -316,6 +403,14 @@ export class InventoryQueryService {
       const ids = await findVariantIdsByQuery(this.prisma, query.q.trim());
       appendAnd(where, { variantId: { in: ids } });
     }
+
+    // Bảy khoảng số đi qua appendAnd vì `available` có thể đã bị low_stock /
+    // stock_status chiếm ở trên — gán thẳng sẽ đè mất bộ lọc kia.
+    const ranges = bucketRanges(query);
+    if (ranges) appendAnd(where, ranges);
+
+    const product = productClause(query);
+    if (product) appendAnd(where, { variant: { product } });
 
     return where;
   }

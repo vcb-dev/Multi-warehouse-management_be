@@ -362,6 +362,7 @@ model User {
   apiKeysCreated         ApiKey[]                    @relation("ApiKeyCreatedBy")
   apiKeysActingAs        ApiKey[]                    @relation("ApiKeyActingUser")
   variantPriceHistories  VariantPriceHistory[]       @relation("VariantPriceHistoryChangedBy")
+  savedFilters           SavedFilter[]               @relation("SavedFilterOwner")
 
   @@map("users")
 }
@@ -2055,6 +2056,30 @@ model SavedReport {
   @@unique([userId, reportKey])
   @@index([userId, isPinned])
   @@map("saved_reports")
+}
+
+/// Bộ lọc người dùng tự đặt tên ở các màn danh sách, hiện ra dưới dạng tab —
+/// đúng cơ chế đứng sau "Đơn SOS", "Hàng đang giao > 10 ngày" bên Sapo.
+model SavedFilter {
+  id       BigInt  @id @default(autoincrement())
+  /// Màn áp dụng: orders | inventory | products | shipments
+  resource String
+  name     String
+  /// Query string đã chuẩn hoá, vd `financial_status=pending&tags=vip`.
+  /// Lưu nguyên dạng URL thay vì JSON: khỏi cần tầng dịch, và tập tiêu chí
+  /// mở rộng về sau không kéo theo việc đánh phiên bản schema.
+  query    String
+  /// NULL = bộ lọc dùng chung toàn shop, khác NULL = của riêng người tạo
+  ownerId  BigInt? @map("owner_id")
+  position Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner User? @relation("SavedFilterOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([resource, ownerId])
+  @@map("saved_filters")
 }
 
 /// API key tĩnh cho đối tác bên thứ 3 gọi API server-to-server, không qua login/JWT.

@@ -19,6 +19,15 @@ import {
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import {
+  appendAnd,
+  firstDefined,
+  parseBool,
+  parseDateRange,
+  parseEnumList,
+  parseIdList,
+  parseList,
+} from '../../common/query/filter-params';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
 import { resolveChannelSyncActorUser } from '../channels/channel-sync-actor';
@@ -192,7 +201,7 @@ export class FulfillmentService {
   /** Danh sách vận đơn — chỉ bản ghi đã đẩy ship (có shipment_status). */
   async listShipments(query: ListShipmentsQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+    const pageSize = query.limit ?? query.page_size ?? 20;
 
     const where: Prisma.FulfillmentWhereInput = {
       // Chỉ lấy phiếu đã có vận đơn, không lấy phiếu đóng gói thuần
@@ -200,10 +209,14 @@ export class FulfillmentService {
     };
 
     // Phân quyền theo kho — giống order.list, dùng order:view (khớp ROUTE_PERMISSIONS)
-    if (query.location_id) {
-      const locationId = BigInt(query.location_id);
-      assertLocationPermission(user, 'order:view', locationId);
-      where.locationId = locationId;
+    const locationIds = parseIdList(
+      firstDefined(query.location_ids, query.location_id),
+    );
+    if (locationIds) {
+      for (const locationId of locationIds) {
+        assertLocationPermission(user, 'order:view', locationId);
+      }
+      where.locationId = { in: locationIds };
     } else {
       where.locationId = locationScopeFilter(user, 'order:view');
     }
@@ -231,23 +244,73 @@ export class FulfillmentService {
         ],
       };
       where.shipmentCreatedOn = { lte: tenDaysAgo };
-    } else if (query.shipment_status) {
-      where.shipmentStatus = query.shipment_status as ShipmentStatus;
+    } else {
+      const statuses = parseEnumList(
+        query.shipment_status,
+        Object.values(ShipmentStatus),
+      );
+      if (statuses) where.shipmentStatus = { in: statuses };
     }
 
-    if (query.provider_id) {
-      where.providerId = BigInt(query.provider_id);
+    const providerIds = parseIdList(
+      firstDefined(query.provider_ids, query.provider_id),
+    );
+    if (providerIds) where.providerId = { in: providerIds };
+
+    const toProvinces = parseList(query.to_provinces);
+    if (toProvinces) where.toProvince = { in: toProvinces };
+
+    // Đã in phiếu giao hàng hay chưa — suy từ dấu thời gian, không có cột cờ riêng.
+    const printed = parseBool(query.printed);
+    if (printed !== undefined) {
+      where.deliveryNotePrintedAt = printed ? { not: null } : null;
     }
+
+    // Nguồn đơn và tag nằm trên đơn hàng gốc, không nằm trên vận đơn.
+    const sources = parseList(query.sources);
+    if (sources) appendAnd(where, { order: { sourceName: { in: sources } } });
+
+    const tags = parseList(query.tags);
+    if (tags) appendAnd(where, { order: { tags: { hasSome: tags } } });
+
+    // Bốn mốc thời gian, mỗi sự kiện một trục riêng.
+    const createdOn = parseDateRange(
+      query.created_on_min,
+      query.created_on_max,
+    );
+    if (createdOn) where.createdOn = createdOn;
+
+    const deliveredOn = parseDateRange(
+      query.delivered_on_min,
+      query.delivered_on_max,
+    );
+    if (deliveredOn) where.deliveredOn = deliveredOn;
+
+    const cancelledOn = parseDateRange(
+      query.cancelled_on_min,
+      query.cancelled_on_max,
+    );
+    if (cancelledOn) where.cancelledOn = cancelledOn;
+
+    const returnedAt = parseDateRange(
+      query.returned_at_min,
+      query.returned_at_max,
+    );
+    if (returnedAt) where.returnedAt = returnedAt;
 
     const q = query.q?.trim();
 
     if (q) {
-      where.OR = [
-        { name: { contains: q, mode: 'insensitive' } },
-        { trackingNumber: { contains: q, mode: 'insensitive' } },
-        { toName: { contains: q, mode: 'insensitive' } },
-        { order: { name: { contains: q, mode: 'insensitive' } } },
-      ];
+      // Qua appendAnd thay vì gán `where.OR`: các bộ lọc khác cũng có thể sinh
+      // ra OR, gán trực tiếp sẽ đè mất nhau.
+      appendAnd(where, {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { trackingNumber: { contains: q, mode: 'insensitive' } },
+          { toName: { contains: q, mode: 'insensitive' } },
+          { order: { name: { contains: q, mode: 'insensitive' } } },
+        ],
+      });
     }
 
     const [rows, total] = await Promise.all([
