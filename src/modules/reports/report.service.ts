@@ -7,10 +7,15 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getReport, reportCatalog } from './report-registry';
 import {
+  DashboardOverviewQueryDto,
   PinReportDto,
   ProductMonthlyOpsQueryDto,
   RunReportQueryDto,
 } from './report.dto';
+import {
+  resolveDashboardPeriod,
+  runDashboardOverview,
+} from './reports/dashboard-overview.report';
 import { runProductMonthlyOps } from './reports/product-monthly-ops.report';
 import {
   ReportColumn,
@@ -22,6 +27,9 @@ import {
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_RANGE_DAYS = 30;
 const DEFAULT_TOP_LIMIT = 10;
+/** Số dòng "Sản phẩm bán chạy" và "Nhật ký hoạt động" trên màn Tổng quan — theo Sapo. */
+const DASHBOARD_TOP_PRODUCTS = 5;
+const DASHBOARD_ACTIVITY_LIMIT = 8;
 /** Chặn export vô hạn — 100k dòng đã quá đủ cho báo cáo vận hành. */
 const EXPORT_LIMIT = 100_000;
 
@@ -53,6 +61,83 @@ export class ReportService {
       total: result.total,
       page: ctx.page,
       page_size: ctx.pageSize,
+    };
+  }
+
+  /**
+   * Nguồn đơn có THẬT trong dữ liệu, để dựng bộ lọc "Tất cả nguồn đơn" của màn Tổng quan.
+   *
+   * Phải hỏi DB chứ không dùng được danh sách nhãn cứng ở frontend: `orders.source_name` là
+   * chuỗi tự do, dữ liệu thật có `BAO-HANH`/`Live-FB`/`TDH-Agency-Website` mà bảng nhãn
+   * không có (và ngược lại, bảng nhãn có `warranty`/`live_fb`/`sapo` mà không đơn nào dùng).
+   * Sắp theo số đơn giảm dần — kênh bán chính nằm ngay đầu danh sách.
+   */
+  async orderSources(user: AuthUser, locationId?: string) {
+    const locationIds = await this.resolveLocations(locationId, user);
+    const rows = await this.prisma.$queryRaw<
+      { source_name: string; order_count: bigint }[]
+    >`
+      SELECT o."source_name" AS source_name, COUNT(*) AS order_count
+      FROM "orders" o
+      WHERE o."location_id" IN (${Prisma.join(locationIds)})
+        AND NULLIF(TRIM(o."source_name"), '') IS NOT NULL
+      GROUP BY 1
+      ORDER BY 2 DESC
+    `;
+    return {
+      data: rows.map((r) => ({
+        value: r.source_name,
+        order_count: Number(r.order_count),
+      })),
+    };
+  }
+
+  /** Màn "Tổng quan" (trang chủ) — xem `dashboard-overview.report.ts`. */
+  async dashboardOverview(query: DashboardOverviewQueryDto, user: AuthUser) {
+    const range = query.range ?? 'this_week';
+    if (range === 'custom' && !(query.from && query.to)) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Khoảng tuỳ chọn cần truyền đủ cả from và to',
+        422,
+      );
+    }
+
+    const period = resolveDashboardPeriod(range, query.from, query.to);
+    if (
+      Number.isNaN(period.from.getTime()) ||
+      Number.isNaN(period.to.getTime())
+    ) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Khoảng thời gian không hợp lệ',
+        422,
+      );
+    }
+    if (period.from >= period.to) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Ngày bắt đầu phải trước ngày kết thúc',
+        422,
+      );
+    }
+
+    const locationIds = await this.resolveLocations(query.location_id, user);
+    const result = await runDashboardOverview({
+      prisma: this.prisma,
+      period,
+      locationIds,
+      channel: query.channel?.trim() || undefined,
+      topLimit: DASHBOARD_TOP_PRODUCTS,
+      activityLimit: DASHBOARD_ACTIVITY_LIMIT,
+    });
+
+    return {
+      filters: {
+        location_id: query.location_id ?? null,
+        channel: query.channel ?? null,
+      },
+      ...result,
     };
   }
 
