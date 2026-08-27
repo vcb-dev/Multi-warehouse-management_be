@@ -17,6 +17,7 @@ import {
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { sendXlsx } from '../../common/utils/send-xlsx';
 import {
+  DashboardOverviewQueryDto,
   PinReportDto,
   ProductMonthlyOpsQueryDto,
   RunReportQueryDto,
@@ -41,6 +42,26 @@ export class ReportsController {
   @RequirePermission('report:view')
   pinned(@CurrentUser() user: AuthUser) {
     return this.reports.listPinned(user);
+  }
+
+  /** Nguồn đơn có thật trong dữ liệu — bộ lọc "Tất cả nguồn đơn" của màn Tổng quan. */
+  @Get('order-sources')
+  @RequirePermission('report:view')
+  orderSources(
+    @CurrentUser() user: AuthUser,
+    @Query('location_id') locationId?: string,
+  ) {
+    return this.reports.orderSources(user, locationId);
+  }
+
+  /** Màn "Tổng quan" (trang chủ) — không nằm trong khung ReportDef chung. */
+  @Get('dashboard')
+  @RequirePermission('report:view')
+  dashboard(
+    @Query() query: DashboardOverviewQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.reports.dashboardOverview(query, user);
   }
 
   /** Dashboard "Sản phẩm — Vận hành theo tháng" — không nằm trong khung ReportDef chung. */
