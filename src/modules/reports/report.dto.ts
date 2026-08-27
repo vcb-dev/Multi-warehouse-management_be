@@ -98,3 +98,49 @@ export class ProductMonthlyOpsQueryDto {
   @Min(1)
   top_limit?: number;
 }
+
+/** Query cho màn "Tổng quan" (trang chủ). */
+export class DashboardOverviewQueryDto {
+  /** Kỳ xem. Mặc định `this_week` — giống Sapo. `custom` bắt buộc kèm `from` + `to`. */
+  @IsOptional()
+  @IsIn([
+    'today',
+    'yesterday',
+    'this_week',
+    'last_week',
+    'this_month',
+    'last_month',
+    'this_year',
+    'last_year',
+    'custom',
+  ])
+  range?:
+    | 'today'
+    | 'yesterday'
+    | 'this_week'
+    | 'last_week'
+    | 'this_month'
+    | 'last_month'
+    | 'this_year'
+    | 'last_year'
+    | 'custom';
+
+  /** "YYYY-MM-DD" — chỉ dùng khi `range=custom`. */
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  /** "YYYY-MM-DD" — mốc cuối BAO GỒM, chỉ dùng khi `range=custom`. */
+  @IsOptional()
+  @IsString()
+  to?: string;
+
+  @IsOptional()
+  @IsString()
+  location_id?: string;
+
+  /** `orders.source_name` — nguồn đơn */
+  @IsOptional()
+  @IsString()
+  channel?: string;
+}
