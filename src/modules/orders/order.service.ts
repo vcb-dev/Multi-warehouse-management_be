@@ -5,10 +5,15 @@ import {
   MovementType,
   OrderFinancialStatus,
   OrderFulfillmentStatus,
+  OrderRefundStatus,
+  OrderRestockStatus,
+  OrderReturnStatus,
   OrderStatus,
   NotificationTopic,
+  PackingStatus,
   Prisma,
   RestockType,
+  ShipmentStatus,
 } from '@prisma/client';
 import {
   assertLocationPermission,
@@ -16,6 +21,15 @@ import {
 } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { findOrderIdsByQuery } from '../../common/search/unaccent-search';
+import {
+  appendAnd,
+  firstDefined,
+  parseDateRange,
+  parseEnumList,
+  parseIdList,
+  parseIntRange,
+  parseList,
+} from '../../common/query/filter-params';
 import {
   BusinessException,
   InsufficientStockException,
@@ -184,10 +198,16 @@ export class OrderService {
     const where: Prisma.OrderWhereInput = {};
 
     // Location nằm ở cấp đơn (theo Sapo), không còn theo từng dòng hàng.
-    if (query.location_id) {
-      const locationId = BigInt(query.location_id);
-      assertLocationPermission(user, 'order:view', locationId);
-      where.locationId = locationId;
+    // `location_id` là tên cũ, chỉ nhận một kho; `location_ids` nhận nhiều.
+    const locationIds = parseIdList(
+      firstDefined(query.location_ids, query.location_id),
+    );
+    if (locationIds) {
+      // Kiểm quyền từng kho: chọn nhiều kho không được phép lách phạm vi kho.
+      for (const locationId of locationIds) {
+        assertLocationPermission(user, 'order:view', locationId);
+      }
+      where.locationId = { in: locationIds };
     } else {
       where.locationId = locationScopeFilter(user, 'order:view');
     }
@@ -213,30 +233,126 @@ export class OrderService {
     } else if (query.status) {
       where.status = query.status as OrderStatus;
     }
-    if (query.sources) {
-      const list = query.sources
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (list.length) where.sourceName = { in: list };
-    } else if (query.source) {
-      where.sourceName = query.source;
+    const sources = parseList(firstDefined(query.sources, query.source));
+    if (sources) where.sourceName = { in: sources };
+
+    const assignedToIds = parseIdList(
+      firstDefined(query.assigned_to_ids, query.assigned_to),
+    );
+    if (assignedToIds) where.assignedToId = { in: assignedToIds };
+
+    const customerIds = parseIdList(query.customer_ids);
+    if (customerIds) where.customerId = { in: customerIds };
+
+    const variantIds = parseIdList(query.variant_ids);
+    if (variantIds) {
+      appendAnd(where, { items: { some: { variantId: { in: variantIds } } } });
     }
-    if (query.assigned_to) {
-      where.assignedToId = BigInt(query.assigned_to);
-    }
-    if (query.from || query.to) {
-      where.createdOn = {};
-      if (query.from) {
-        where.createdOn.gte = new Date(query.from);
+
+    // Tag: đơn khớp MỘT tag bất kỳ trong danh sách là đủ (trước đây chỉ nhận 1 tag).
+    const tags = parseList(query.tags);
+    if (tags) where.tags = { hasSome: tags };
+
+    // --- Trạng thái: mỗi vòng đời một trục, lọc độc lập và giao nhau ---
+    const financialStatus = parseEnumList(
+      query.financial_status,
+      Object.values(OrderFinancialStatus),
+    );
+    if (financialStatus) where.financialStatus = { in: financialStatus };
+
+    const returnStatus = parseEnumList(
+      query.return_status,
+      Object.values(OrderReturnStatus),
+    );
+    if (returnStatus) where.returnStatus = { in: returnStatus };
+
+    const refundStatus = parseEnumList(
+      query.refund_status,
+      Object.values(OrderRefundStatus),
+    );
+    if (refundStatus) where.refundStatus = { in: refundStatus };
+
+    const restockStatus = parseEnumList(
+      query.restock_status,
+      Object.values(OrderRestockStatus),
+    );
+    if (restockStatus) where.restockStatus = { in: restockStatus };
+
+    // `unfulfilled` không phải giá trị enum — Sapo mô hình "chưa xử lý" bằng NULL.
+    const fulfillmentValues = parseList(query.fulfillment_status);
+    if (fulfillmentValues) {
+      const enumValues =
+        parseEnumList(
+          query.fulfillment_status,
+          Object.values(OrderFulfillmentStatus),
+        ) ?? [];
+      const branches: Prisma.OrderWhereInput[] = [];
+      if (fulfillmentValues.includes('unfulfilled')) {
+        branches.push({ fulfillmentStatus: null });
       }
-      if (query.to) {
-        where.createdOn.lte = new Date(query.to);
+      if (enumValues.length) {
+        branches.push({ fulfillmentStatus: { in: enumValues } });
       }
+      // Dùng appendAnd: nhánh `status=closed` ở trên đã chiếm `where.OR`.
+      appendAnd(where, branches.length ? { OR: branches } : { id: { in: [] } });
     }
-    if (query.tags?.trim()) {
-      where.tags = { has: query.tags.trim() };
+
+    // Đóng gói và giao hàng nằm trên phiếu xử lý, không nằm trên đơn.
+    const packingStatus = parseEnumList(
+      query.packing_status,
+      Object.values(PackingStatus),
+    );
+    if (packingStatus) {
+      appendAnd(where, {
+        fulfillments: { some: { packedStatus: { in: packingStatus } } },
+      });
     }
+
+    const shipmentStatus = parseEnumList(
+      query.shipment_status,
+      Object.values(ShipmentStatus),
+    );
+    if (shipmentStatus) {
+      appendAnd(where, {
+        fulfillments: { some: { shipmentStatus: { in: shipmentStatus } } },
+      });
+    }
+
+    const itemQuantity = parseIntRange(
+      query.item_quantity_min,
+      query.item_quantity_max,
+    );
+    if (itemQuantity) where.subtotalLineItemsQuantity = itemQuantity;
+
+    // --- Mốc thời gian: mỗi sự kiện một trục riêng ---
+    // `from`/`to` là tên cũ của cặp `created_on_min`/`created_on_max`.
+    const createdOn = parseDateRange(
+      firstDefined(query.created_on_min, query.from),
+      firstDefined(query.created_on_max, query.to),
+    );
+    if (createdOn) where.createdOn = createdOn;
+
+    const confirmedOn = parseDateRange(
+      query.confirmed_on_min,
+      query.confirmed_on_max,
+    );
+    if (confirmedOn) where.confirmedOn = confirmedOn;
+
+    const completedOn = parseDateRange(
+      query.completed_on_min,
+      query.completed_on_max,
+    );
+    if (completedOn) where.completedOn = completedOn;
+
+    const cancelledOn = parseDateRange(
+      query.cancelled_on_min,
+      query.cancelled_on_max,
+    );
+    if (cancelledOn) where.cancelledOn = cancelledOn;
+
+    const paidOn = parseDateRange(query.paid_on_min, query.paid_on_max);
+    if (paidOn) where.paidOn = paidOn;
+
     if (query.q?.trim()) {
       const ids = await findOrderIdsByQuery(this.repo.client, query.q.trim());
       where.id = { in: ids };
@@ -272,7 +388,8 @@ export class OrderService {
 
   async list(query: ListOrdersQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
-    const pageSize = query.page_size ?? 20;
+    // `limit` là tên theo Sapo Open API, `page_size` là tên cũ của dự án.
+    const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildListWhere(query, user);
 
     const stockFilter = stockStatusOf(query);

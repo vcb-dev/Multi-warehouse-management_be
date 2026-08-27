@@ -54,6 +54,110 @@ export class ListInventoryQueryDto {
   @IsString()
   date_from?: string;
 
+  // --- Khoảng số theo chỉ số kho ---
+  // Đây là các cột thật trên `inventory_levels`, không phải trạng thái rời rạc.
+  // Bao gồm cả hai đầu mút, nên `available_min=0&available_max=0` tìm đúng
+  // những dòng hết sạch hàng.
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  on_hand_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  on_hand_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  available_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  available_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  committed_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  committed_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  incoming_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  incoming_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  packed_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  packed_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  reserved_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  reserved_max?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  unavailable_min?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  unavailable_max?: number;
+
+  // --- Thuộc tính sản phẩm ---
+
+  /** Loại sản phẩm, ngăn bằng dấu phẩy */
+  @IsOptional()
+  @IsString()
+  product_types?: string;
+
+  /** Nhãn hiệu, ngăn bằng dấu phẩy */
+  @IsOptional()
+  @IsString()
+  vendors?: string;
+
+  /** Tag của sản phẩm — khớp MỘT tag bất kỳ là đủ */
+  @IsOptional()
+  @IsString()
+  tags?: string;
+
+  /**
+   * Ngày tạo sản phẩm. KHÔNG liên quan tới `date_from` ở trên — `date_from` là
+   * mốc tính nhập-xuất-tồn, còn cặp này mới là bộ lọc ngày tạo của Sapo.
+   */
+  @IsOptional()
+  @IsString()
+  created_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  created_on_max?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -65,6 +169,13 @@ export class ListInventoryQueryDto {
   @IsInt()
   @Min(1)
   page_size?: number = 20;
+
+  /** Tên theo Sapo Open API của `page_size` */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
 }
 
 export class ExportInventoryQueryDto extends ListInventoryQueryDto {

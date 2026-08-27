@@ -251,6 +251,7 @@ export class ListOrdersQueryDto {
   @IsString()
   to?: string;
 
+  /** Danh sách tag cách nhau bởi dấu phẩy — đơn khớp MỘT tag bất kỳ là đủ. */
   @IsOptional()
   @IsString()
   tags?: string;
@@ -258,6 +259,118 @@ export class ListOrdersQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  // --- Trạng thái (chọn nhiều, ngăn bằng dấu phẩy) ---
+
+  /** pending | partially_paid | paid | refunded | partially_refunded */
+  @IsOptional()
+  @IsString()
+  financial_status?: string;
+
+  /** unfulfilled (chưa xử lý, = NULL) | partial | fulfilled */
+  @IsOptional()
+  @IsString()
+  fulfillment_status?: string;
+
+  /** no_return | in_progress | returned */
+  @IsOptional()
+  @IsString()
+  return_status?: string;
+
+  /** no_refund | partial | refunded */
+  @IsOptional()
+  @IsString()
+  refund_status?: string;
+
+  /** no_restock | partial | restocked */
+  @IsOptional()
+  @IsString()
+  restock_status?: string;
+
+  /** Trạng thái đóng gói — xét trên phiếu xử lý của đơn */
+  @IsOptional()
+  @IsString()
+  packing_status?: string;
+
+  /** Trạng thái giao hàng — xét trên vận đơn của đơn */
+  @IsOptional()
+  @IsString()
+  shipment_status?: string;
+
+  // --- Thực thể (danh sách id) ---
+
+  /** Nhiều chi nhánh; thay cho `location_id` đơn lẻ */
+  @IsOptional()
+  @IsString()
+  location_ids?: string;
+
+  @IsOptional()
+  @IsString()
+  customer_ids?: string;
+
+  /** Nhiều nhân viên phụ trách; thay cho `assigned_to` đơn lẻ */
+  @IsOptional()
+  @IsString()
+  assigned_to_ids?: string;
+
+  /** Lọc đơn có chứa một trong các phiên bản sản phẩm này */
+  @IsOptional()
+  @IsString()
+  variant_ids?: string;
+
+  // --- Mốc thời gian (mỗi sự kiện một trục riêng) ---
+
+  /** Ngày đặt hàng; `from`/`to` là tên cũ của cặp này */
+  @IsOptional()
+  @IsString()
+  created_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  created_on_max?: string;
+
+  @IsOptional()
+  @IsString()
+  confirmed_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  confirmed_on_max?: string;
+
+  @IsOptional()
+  @IsString()
+  completed_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  completed_on_max?: string;
+
+  @IsOptional()
+  @IsString()
+  cancelled_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  cancelled_on_max?: string;
+
+  @IsOptional()
+  @IsString()
+  paid_on_min?: string;
+
+  @IsOptional()
+  @IsString()
+  paid_on_max?: string;
+
+  /** Số lượng sản phẩm trên đơn (cột `subtotal_line_items_quantity`) */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  item_quantity_min?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  item_quantity_max?: number;
 
   @IsOptional()
   @IsInt()
@@ -270,6 +383,13 @@ export class ListOrdersQueryDto {
   @Min(1)
   @Type(() => Number)
   page_size?: number;
+
+  /** Tên theo Sapo Open API của `page_size` */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  limit?: number;
 }
 
 /**
