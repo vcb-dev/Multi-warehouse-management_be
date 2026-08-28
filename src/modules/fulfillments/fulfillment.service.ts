@@ -10,7 +10,6 @@ import {
   ShipmentStatus,
   ShippingFeePayer,
   ShippingProviderType,
-  UserRole,
 } from '@prisma/client';
 import {
   assertLocationPermission,
@@ -30,9 +29,10 @@ import {
 } from '../../common/query/filter-params';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
-import { resolveChannelSyncActorUser } from '../channels/channel-sync-actor';
+import { resolveChannelSyncActor } from '../channels/channel-sync-actor';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RbacService } from '../rbac/rbac.service';
 import {
   CarrierConnectionConfig,
   CarrierShipmentResult,
@@ -81,6 +81,7 @@ export class FulfillmentService {
     private inventory: InventoryService,
     private providers: ShippingProviderService,
     private notifications: NotificationService,
+    private rbac: RbacService,
   ) {}
 
   /**
@@ -1194,6 +1195,14 @@ export class FulfillmentService {
               tx,
             );
           }
+          // Hàng đã quay về kho ⇒ đơn không còn "đã xuất hàng". Không xoá mốc này
+          // thì đơn kẹt: `transition('cancel')` chặn vì `deliveredOn` khác null,
+          // còn giao diện vẫn hiện "Đã xử lý" dù tồn đã hoàn. Giống nhánh
+          // `returned` bên dưới — cùng một kết cục nên phải dọn như nhau.
+          await tx.order.update({
+            where: { id: f.orderId },
+            data: { deliveredOn: null },
+          });
         }
         await tx.fulfillment.update({
           where: { id: f.id },
@@ -1483,8 +1492,20 @@ export class FulfillmentService {
 
     if (ghnAdapter.isCancelStatus(externalStatus)) {
       if (f.shipmentStatus === ShipmentStatus.pending && !f.closedAt) {
-        const user = await this.systemUser();
-        await this.cancel(f.id, { reason: 'GHN cancel' }, user);
+        try {
+          const user = await this.systemUser();
+          await this.cancel(f.id, { reason: 'GHN cancel' }, user);
+        } catch (e) {
+          // Cùng lý do với vòng `pathTo` bên dưới: nuốt lỗi nghiệp vụ và ghi log để
+          // xử lý tay, đừng để GHN retry 10 lần/5 giây vì một ca hủy không áp được.
+          if (e instanceof BusinessException) {
+            this.logger.warn(
+              `Webhook GHN ${orderCode}: hủy vận đơn bị chặn (${e.message})`,
+            );
+          } else {
+            throw e;
+          }
+        }
       }
       return { received: true };
     }
@@ -1654,9 +1675,13 @@ export class FulfillmentService {
    * Webhook không mang danh tính người dùng nào, nhưng `applyShipmentStatus` cần một
    * `AuthUser` để ghi inventory_movements/activity_logs — dùng admin hệ thống, cùng cách
    * `channel-sync.scheduler.ts` làm cho cron đồng bộ sàn.
+   *
+   * PHẢI đi qua `resolveChannelSyncActor` (có RBAC) chứ không tự ghép AuthUser từ hàng
+   * user: thiếu `isAdmin`/`warehousePermissions` thì mọi `assertLocationPermission` trên
+   * đường webhook đều ném FORBIDDEN_SCOPE — hãng nhận non-200 và retry dồn dập.
    */
   private async systemUser(): Promise<AuthUser> {
-    const admin = await resolveChannelSyncActorUser(this.prisma);
+    const admin = await resolveChannelSyncActor(this.prisma, this.rbac);
     if (!admin) {
       throw new BusinessException(
         'CONFIG_ERROR',
@@ -1664,11 +1689,6 @@ export class FulfillmentService {
         500,
       );
     }
-    return {
-      userId: admin.id,
-      email: admin.email,
-      roles: admin.roles,
-      locationIds: [],
-    };
+    return admin;
   }
 }

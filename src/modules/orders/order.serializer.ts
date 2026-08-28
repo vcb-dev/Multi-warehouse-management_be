@@ -251,6 +251,10 @@ export function serializeOrderDetail(o: OrderWithRelations) {
     items: o.items.map((i) => ({
       id: i.id.toString(),
       variant_id: i.variantId.toString(),
+      // Location nằm ở cấp đơn (theo Sapo) nên order_items không có cột riêng —
+      // vẫn phải trả về theo dòng vì các form trả hàng/đổi trả gửi `location_id`
+      // theo từng dòng khi tạo phiếu.
+      location_id: o.locationId.toString(),
       product_id:
         i.productId?.toString() ?? i.variant?.productId.toString() ?? null,
       inventory_item_id: i.inventoryItemId?.toString() ?? null,

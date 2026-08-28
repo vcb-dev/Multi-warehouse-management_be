@@ -8,6 +8,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { nextSequentialCode } from '../../common/db/sequential-code';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
@@ -216,9 +217,10 @@ export class GoodsReceiptService {
     const headerPoId =
       dto.purchase_order_id ?? (poIds.size === 1 ? [...poIds][0] : undefined);
 
-    const code = await this.generateReiCode();
-
     const rei = await this.prisma.$transaction(async (tx) => {
+      // Cấp mã BÊN TRONG transaction: khoá advisory của `nextSequentialCode` chỉ
+      // giữ tới lúc commit nên gọi ở ngoài thì hai phiếu tạo đồng thời vẫn trùng mã.
+      const code = await this.generateReiCode(tx);
       const receipt = await tx.goodsReceipt.create({
         data: {
           code,
@@ -522,11 +524,17 @@ export class GoodsReceiptService {
 
     assertLocationPermission(user, REI_PAY, rei.locationId);
 
-    const remaining = Number(rei.amountDue) - Number(rei.paidAmount);
+    if (amount !== undefined && amount <= 0) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Số tiền thanh toán phải lớn hơn 0',
+        422,
+      );
+    }
 
     // Không còn nợ (đơn 0đ, hoặc phiếu cũ lỡ bị kẹt trạng thái trước khi có
     // fix ở confirm()) ⇒ chốt đã thanh toán, không tạo phiếu chi 0đ.
-    if (remaining <= 0) {
+    if (Number(rei.amountDue) - Number(rei.paidAmount) <= 0) {
       await this.prisma.goodsReceipt.update({
         where: { id },
         data: { paymentStatus: PaymentStatus.paid },
@@ -538,30 +546,52 @@ export class GoodsReceiptService {
       };
     }
 
-    const payAmount = amount ?? remaining;
-
-    if (payAmount <= 0) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        'Số tiền thanh toán phải lớn hơn 0',
-        422,
-      );
-    }
-    if (payAmount > remaining) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `Số tiền thanh toán vượt quá số tiền còn phải trả (còn ${remaining})`,
-        422,
-      );
-    }
-
-    const newPaidAmount = Number(rei.paidAmount) + payAmount;
-    const newStatus =
-      newPaidAmount >= Number(rei.amountDue)
-        ? PaymentStatus.paid
-        : PaymentStatus.partially_paid;
+    // Số tiền chốt bên trong transaction sau khi đã khoá dòng phiếu — đọc ngoài rồi
+    // ghi `paid_amount = <giá trị đã đọc> + tiền chi` là lost update: hai lần bấm
+    // thanh toán song song chỉ cộng một lần nhưng vẫn sinh hai phiếu chi.
+    let payAmount = 0;
+    let newPaidAmount = 0;
+    let newStatus: PaymentStatus = PaymentStatus.partially_paid;
 
     const voucher = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<
+        Array<{ amount_due: Prisma.Decimal; paid_amount: Prisma.Decimal }>
+      >`
+        SELECT amount_due, paid_amount
+        FROM goods_receipts
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+      if (!locked.length) {
+        throw new NotFoundException('Không tìm thấy phiếu nhập');
+      }
+      const amountDue = Number(locked[0].amount_due);
+      const paidAmount = Number(locked[0].paid_amount);
+      const remaining = amountDue - paidAmount;
+
+      payAmount = amount ?? remaining;
+
+      if (payAmount <= 0) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Số tiền thanh toán phải lớn hơn 0',
+          422,
+        );
+      }
+      if (payAmount > remaining) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Số tiền thanh toán vượt quá số tiền còn phải trả (còn ${remaining})`,
+          422,
+        );
+      }
+
+      newPaidAmount = paidAmount + payAmount;
+      newStatus =
+        newPaidAmount >= amountDue
+          ? PaymentStatus.paid
+          : PaymentStatus.partially_paid;
+
       await tx.goodsReceipt.update({
         where: { id },
         data: { paymentStatus: newStatus, paidAmount: newPaidAmount },
@@ -653,16 +683,11 @@ export class GoodsReceiptService {
     return s;
   }
 
-  private async generateReiCode() {
-    // Dựa vào count() sẽ trùng mã sau khi phiếu nháp bị xóa hẳn (cancel), nên
-    // phải lấy số thứ tự cao nhất đã từng cấp thay vì đếm số bản ghi còn lại.
-    // Sắp theo chính "code" (không phải id) — thứ tự tạo record không đảm bảo
-    // khớp thứ tự số trong code nếu dữ liệu cũ từng bị cấp lệch.
-    const latest = await this.prisma.goodsReceipt.findFirst({
-      orderBy: { code: 'desc' },
-      select: { code: true },
+  private generateReiCode(tx: Prisma.TransactionClient) {
+    return nextSequentialCode(tx, {
+      table: Prisma.sql`goods_receipts`,
+      column: Prisma.sql`code`,
+      prefix: 'REI',
     });
-    const nextSeq = latest ? Number(latest.code.slice(3)) + 1 : 1;
-    return `REI${String(nextSeq).padStart(6, '0')}`;
   }
 }

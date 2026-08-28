@@ -660,31 +660,52 @@ export class OrderService {
       };
     }
 
-    const remaining = Number(order.totalPrice) - Number(order.totalReceived);
-    const payAmount = dto.amount ?? remaining;
-
-    if (payAmount <= 0) {
+    if (dto.amount !== undefined && dto.amount <= 0) {
       throw new BusinessException(
         'VALIDATION_ERROR',
         'Số tiền thanh toán phải lớn hơn 0',
         422,
       );
     }
-    if (payAmount > remaining) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `Số tiền thanh toán vượt quá số còn phải thu (còn ${remaining})`,
-        422,
-      );
-    }
 
-    const newPaidAmount = Number(order.totalReceived) + payAmount;
-    const reachedPaid = newPaidAmount >= Number(order.totalPrice);
-    const newStatus = reachedPaid
-      ? OrderFinancialStatus.paid
-      : OrderFinancialStatus.partially_paid;
+    // Số tiền chốt bên trong transaction sau khi đã khoá dòng đơn — con số đọc ở
+    // trên chỉ dùng cho các guard không liên quan tới tiền (trạng thái đơn).
+    let payAmount = 0;
+    let newPaidAmount = 0;
+    let reachedPaid = false;
+    let newStatus: OrderFinancialStatus = OrderFinancialStatus.partially_paid;
 
     const voucher = await this.repo.client.$transaction(async (tx) => {
+      const locked = await this.repo.lockPayment(tx, id);
+      if (!locked) throw new NotFoundException('Không tìm thấy đơn hàng');
+
+      const totalPrice = Number(locked.total_price);
+      const totalReceived = Number(locked.total_received);
+      const remaining = totalPrice - totalReceived;
+
+      payAmount = dto.amount ?? remaining;
+
+      if (payAmount <= 0) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Số tiền thanh toán phải lớn hơn 0',
+          422,
+        );
+      }
+      if (payAmount > remaining) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Số tiền thanh toán vượt quá số còn phải thu (còn ${remaining})`,
+          422,
+        );
+      }
+
+      newPaidAmount = totalReceived + payAmount;
+      reachedPaid = newPaidAmount >= totalPrice;
+      newStatus = reachedPaid
+        ? OrderFinancialStatus.paid
+        : OrderFinancialStatus.partially_paid;
+
       await tx.order.update({
         where: { id },
         data: {
@@ -1215,19 +1236,10 @@ export class OrderService {
           },
         });
 
-        // Đặt lại financial/refund/restock_status từ toàn bộ refund của đơn
+        // Đặt lại financial/refund/restock_status từ toàn bộ refund của đơn —
+        // financial_status cũng do hàm này suy, không set lại thủ công ở đây nữa
+        // (luồng trả hàng dùng chung, xem `recomputeOrderRefundStatuses`).
         await recomputeOrderRefundStatuses(tx, id);
-        if (refundedAmount > 0) {
-          await tx.order.update({
-            where: { id },
-            data: {
-              financialStatus:
-                refundedAmount >= Number(order.totalPrice)
-                  ? OrderFinancialStatus.refunded
-                  : OrderFinancialStatus.partially_refunded,
-            },
-          });
-        }
         await tx.activityLog.create({
           data: {
             userId: user.userId,
