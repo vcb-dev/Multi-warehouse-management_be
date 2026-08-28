@@ -15,6 +15,7 @@ import {
   AuthUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
+import { ParseBigIntPipe } from '../../common/pipes/parse-bigint.pipe';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import {
   CreateOrderDto,
@@ -69,44 +70,50 @@ export class OrdersController {
 
   @Get(':id')
   @RequirePermission('order:view')
-  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.orders.findOne(BigInt(id), user);
+  findOne(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.orders.findOne(id, user);
   }
 
   @Get(':id/history')
   @RequirePermission('order:view')
-  async history(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    await this.orders.assertOrderPermission(BigInt(id), user, 'order:view');
-    return this.activityLog.getHistory('order', BigInt(id));
+  async history(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @CurrentUser() user: AuthUser,
+  ) {
+    await this.orders.assertOrderPermission(id, user, 'order:view');
+    return this.activityLog.getHistory('order', id);
   }
 
   @Put(':id')
   @RequirePermission('order:update')
   update(
-    @Param('id') id: string,
+    @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: UpdateOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.orders.update(BigInt(id), dto, user);
+    return this.orders.update(id, dto, user);
   }
 
   @Post(':id/transition')
   @RequirePermission('order:update', 'order:cancel', 'order:pack')
   transition(
-    @Param('id') id: string,
+    @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: OrderTransitionDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.orders.transition(BigInt(id), dto, user);
+    return this.orders.transition(id, dto, user);
   }
 
   @Post(':id/payments')
   @RequirePermission('order:update')
   pay(
-    @Param('id') id: string,
+    @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: PayOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.orders.pay(BigInt(id), dto, user);
+    return this.orders.pay(id, dto, user);
   }
 }
