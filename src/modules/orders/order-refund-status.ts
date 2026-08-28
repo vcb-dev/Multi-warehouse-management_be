@@ -1,4 +1,5 @@
 import {
+  OrderFinancialStatus,
   OrderRefundStatus,
   OrderRestockStatus,
   OrderReturnStatus,
@@ -69,10 +70,33 @@ export async function recomputeOrderRefundStatuses(
         ? OrderRestockStatus.restocked
         : OrderRestockStatus.partial;
 
+  // --- financial_status: tiền đã hoàn ghi đè trạng thái thu ---
+  // Trước đây chỉ luồng huỷ đơn tự set trường này, còn luồng trả hàng thì không —
+  // đơn hoàn tiền toàn bộ qua phiếu trả vẫn hiện `paid`. Cùng một sự kiện (tiền chạy
+  // ngược về khách) nên phải suy ở một chỗ cho cả hai. `totalRefunded === 0` thì
+  // KHÔNG đụng tới, để nguyên pending/partially_paid/paid do đường thanh toán quản.
+  const financialStatus =
+    totalRefunded <= 0
+      ? undefined
+      : totalRefunded >= Number(order.totalPrice)
+        ? OrderFinancialStatus.refunded
+        : OrderFinancialStatus.partially_refunded;
+
   await tx.order.update({
     where: { id: orderId },
-    data: { returnStatus, refundStatus, restockStatus },
+    data: {
+      returnStatus,
+      refundStatus,
+      restockStatus,
+      ...(financialStatus ? { financialStatus } : {}),
+    },
   });
 
-  return { returnStatus, refundStatus, restockStatus, totalRefunded };
+  return {
+    returnStatus,
+    refundStatus,
+    restockStatus,
+    financialStatus,
+    totalRefunded,
+  };
 }

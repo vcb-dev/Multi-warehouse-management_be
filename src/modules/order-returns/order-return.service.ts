@@ -112,6 +112,7 @@ export class OrderReturnService {
     }
 
     await this.validateReturnQty(orderId, dto);
+    await this.validateRefundAmount(order, dto.refund_amount);
 
     for (const item of dto.items) {
       assertLocationPermission(
@@ -135,7 +136,6 @@ export class OrderReturnService {
     });
     const variantMap = new Map(variants.map((v) => [v.id.toString(), v]));
 
-    const code = await generateReturnCode(this.prisma);
     const restock = dto.restock ?? true;
     const deductFromDebt = dto.deduct_from_debt ?? false;
 
@@ -150,6 +150,9 @@ export class OrderReturnService {
     const record = await this.prisma.$transaction(async (tx) => {
       // Sapo: phiếu trả hàng (`return`) chỉ giữ mã + lý do; tiền và việc nhập
       // kho nằm ở bản ghi `refund` trỏ về nó qua `return_id`.
+      // Cấp mã BÊN TRONG transaction: khoá advisory của `generateReturnCode` chỉ
+      // giữ tới lúc commit nên gọi ở ngoài thì hai phiếu tạo đồng thời vẫn trùng mã.
+      const code = await generateReturnCode(tx);
       const ret = await tx.orderReturn.create({
         data: {
           code,
@@ -298,6 +301,30 @@ export class OrderReturnService {
       refund_amount: Number(record.refund.totalRefunded),
       voucher: record.voucher,
     };
+  }
+
+  /**
+   * Tiền hoàn của MỌI phiếu trả + phiếu huỷ trên đơn cộng lại không được vượt giá trị
+   * đơn. DTO chỉ chặn số âm, nên trước đây trả lẻ vài món vẫn hoàn được nhiều hơn cả
+   * đơn — tiền ra khỏi két và công nợ khách âm mà không có gì đối chiếu lại.
+   */
+  private async validateRefundAmount(
+    order: { id: bigint; totalPrice: Prisma.Decimal },
+    refundAmount: number,
+  ) {
+    const agg = await this.prisma.orderRefund.aggregate({
+      where: { orderId: order.id },
+      _sum: { totalRefunded: true },
+    });
+    const already = Number(agg._sum.totalRefunded ?? 0);
+    const max = Number(order.totalPrice) - already;
+    if (refundAmount > max) {
+      throw new BusinessException(
+        'REFUND_EXCEEDS_ORDER',
+        `Số tiền hoàn vượt giá trị đơn (còn hoàn được ${max}, yêu cầu ${refundAmount})`,
+        422,
+      );
+    }
   }
 
   private async validateReturnQty(orderId: bigint, dto: CreateOrderReturnDto) {

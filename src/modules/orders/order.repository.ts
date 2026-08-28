@@ -65,6 +65,24 @@ export class OrderRepository {
     return this.prisma.order.findUnique({ where: { name: code } });
   }
 
+  /**
+   * Khoá dòng đơn và đọc lại số tiền NGAY TRONG transaction thanh toán. Đọc ngoài
+   * transaction rồi ghi `total_received = <giá trị đã đọc> + tiền thu` là lost update:
+   * hai lần bấm "Nhận tiền" song song cùng đọc số cũ, đơn chỉ cộng một lần nhưng vẫn
+   * sinh hai phiếu thu và hai bút toán công nợ.
+   */
+  async lockPayment(tx: Prisma.TransactionClient, id: bigint) {
+    const rows = await tx.$queryRaw<
+      Array<{ total_price: Prisma.Decimal; total_received: Prisma.Decimal }>
+    >`
+      SELECT total_price, total_received
+      FROM orders
+      WHERE id = ${id}
+      FOR UPDATE
+    `;
+    return rows[0] ?? null;
+  }
+
   get client() {
     return this.prisma;
   }

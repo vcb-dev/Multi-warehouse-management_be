@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, StocktakeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { nextSequentialCode } from '../../common/db/sequential-code';
 import {
   BusinessException,
   InsufficientStockException,
@@ -56,10 +57,17 @@ export class StocktakeService {
     const where: Prisma.StocktakeWhereInput = {};
 
     if (query.status) where.status = query.status as StocktakeStatus;
-    if (query.location_id) where.locationId = BigInt(query.location_id);
 
-    const readable = locationScopeFilter(user, READ_PERMISSIONS);
-    if (readable) where.locationId = readable;
+    // if/else, không gán tuần tự: gán `locationScopeFilter` sau sẽ ĐÈ MẤT bộ lọc kho
+    // người dùng chọn (chỉ admin thoát vì filter của họ là undefined). Chọn kho cụ thể
+    // thì kiểm quyền tại đúng kho đó rồi lọc theo nó.
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, READ_PERMISSIONS, locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, READ_PERMISSIONS);
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.stocktake.findMany({
@@ -384,8 +392,11 @@ export class StocktakeService {
     return new Map(levels.map((l) => [l.variantId.toString(), l.onHand]));
   }
 
-  private async generateCode(tx: Prisma.TransactionClient) {
-    const count = await tx.stocktake.count();
-    return `KK${String(count + 1).padStart(6, '0')}`;
+  private generateCode(tx: Prisma.TransactionClient) {
+    return nextSequentialCode(tx, {
+      table: Prisma.sql`stocktakes`,
+      column: Prisma.sql`code`,
+      prefix: 'KK',
+    });
   }
 }

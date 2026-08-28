@@ -6,6 +6,7 @@ import {
   StockTransferStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { nextSequentialCode } from '../../common/db/sequential-code';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { InsufficientStockException } from '../../common/exceptions/business.exception';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -148,9 +149,11 @@ export class StockTransferService {
     await this.validateWarehouses(fromId, toId);
 
     const totalQuantity = dto.items.reduce((s, i) => s + i.quantity, 0);
-    const code = await this.resolveCode(dto.code);
 
     const stn = await this.prisma.$transaction(async (tx) => {
+      // Cấp mã BÊN TRONG transaction: khoá advisory của `nextSequentialCode` chỉ
+      // giữ tới lúc commit nên gọi ở ngoài thì hai phiếu tạo đồng thời vẫn trùng mã.
+      const code = await this.resolveCode(tx, dto.code);
       const transfer = await tx.stockTransfer.create({
         data: {
           code,
@@ -637,11 +640,11 @@ export class StockTransferService {
     }
   }
 
-  private async resolveCode(customCode?: string) {
+  private async resolveCode(tx: Prisma.TransactionClient, customCode?: string) {
     const trimmed = customCode?.trim();
-    if (!trimmed) return this.generateCode();
+    if (!trimmed) return this.generateCode(tx);
 
-    const existing = await this.prisma.stockTransfer.findUnique({
+    const existing = await tx.stockTransfer.findUnique({
       where: { code: trimmed },
     });
     if (existing) {
@@ -654,8 +657,11 @@ export class StockTransferService {
     return trimmed;
   }
 
-  private async generateCode() {
-    const count = await this.prisma.stockTransfer.count();
-    return `STN${String(count + 1).padStart(6, '0')}`;
+  private generateCode(tx: Prisma.TransactionClient) {
+    return nextSequentialCode(tx, {
+      table: Prisma.sql`stock_transfers`,
+      column: Prisma.sql`code`,
+      prefix: 'STN',
+    });
   }
 }

@@ -63,8 +63,11 @@ function makePrisma(opts: {
         }),
       ),
     },
+    // Cấp mã đi qua SQL thô (`nextSequentialCode`): advisory lock + tra mã lớn nhất
+    // đã cấp. Bảng rỗng ⇒ không có dòng nào ⇒ mã đầu tiên là KK000001.
+    $executeRaw: jest.fn(async () => 0),
+    $queryRaw: jest.fn(async () => [] as { code: string }[]),
     stocktake: {
-      count: jest.fn(async () => 0),
       findUnique: jest.fn(async () => opts.stocktake ?? null),
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         created.push(data);
