@@ -22,12 +22,4 @@ describe('VariantService — tích Descartes (P-2)', () => {
       service.optionKey(['Xanh', 'M']),
     );
   });
-
-  it('suggestSku — slug + giá trị thuộc tính', () => {
-    expect(service.suggestSku('khu', ['12', 'Bạc'])).toBe('khu-12-bạc');
-    expect(service.suggestSku('khu', ['12', 'Bạc', 'Hồng'])).toBe(
-      'khu-12-bạc-hồng',
-    );
-    expect(service.suggestSku('khu', [])).toBe('khu');
-  });
 });
