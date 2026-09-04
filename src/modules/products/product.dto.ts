@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
   ValidateNested,
@@ -314,4 +315,19 @@ export class VariantPriceHistoryQueryDto {
   @Min(1)
   @Type(() => Number)
   page_size?: number = 20;
+}
+
+/** Query chung cho các endpoint trả danh sách giá trị sẵn có (tag, loại SP) */
+export class ProductFacetQueryDto {
+  /** Lọc theo chuỗi con, bỏ dấu tiếng Việt — để ô chọn gõ tìm được */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  @Type(() => Number)
+  limit?: number;
 }
