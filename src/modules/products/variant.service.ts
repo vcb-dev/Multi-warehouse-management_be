@@ -30,25 +30,6 @@ export class VariantService {
     return result;
   }
 
-  /** Chuẩn hoá 1 phần SKU: lowercase, giữ tiếng Việt, nối bằng dấu gạch */
-  slugPart(text: string): string {
-    return text
-      .trim()
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 40);
-  }
-
-  /** Sinh SKU từ slug SP + giá trị thuộc tính theo thứ tự option */
-  suggestSku(productSlug: string, optionValues: string[]): string {
-    const base = this.slugPart(productSlug || 'san-pham');
-    if (!optionValues.length) return base;
-    const suffix = optionValues.map((v) => this.slugPart(v)).join('-');
-    return `${base}-${suffix}`;
-  }
-
   optionKey(values: string[]): string {
     return values.join('\0');
   }
