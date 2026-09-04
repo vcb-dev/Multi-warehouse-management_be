@@ -161,6 +161,20 @@ export class ProductService {
     };
   }
 
+  /** Nhãn hiệu đang dùng, xếp theo số sản phẩm giảm dần như loại sản phẩm */
+  async listVendors(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listVendors({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        vendor: r.vendor,
+        product_count: Number(r.product_count),
+      })),
+    };
+  }
+
   async findOne(id: bigint) {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundException('Không tìm thấy sản phẩm');
