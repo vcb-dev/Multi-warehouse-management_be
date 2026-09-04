@@ -221,6 +221,28 @@ export class ProductRepository {
     `;
   }
 
+  /**
+   * Nhãn hiệu đang dùng, kèm số sản phẩm — nguồn gợi ý cho ô chọn nhãn hiệu.
+   * Giống loại sản phẩm, `vendor` là chuỗi tự do đồng bộ từ Sapo chứ không có
+   * bảng riêng, nên danh sách phải gom thẳng từ bảng products.
+   */
+  async listVendors(params: { q?: string; limit: number }) {
+    const pattern = params.q ? `%${params.q}%` : null;
+    return this.prisma.$queryRaw<{ vendor: string; product_count: bigint }[]>`
+      SELECT vendor, count(*) AS product_count
+      FROM products
+      WHERE vendor IS NOT NULL
+        AND vendor <> ''
+        AND (
+          ${pattern}::text IS NULL
+          OR unaccent(vendor) ILIKE unaccent(${pattern}::text)
+        )
+      GROUP BY vendor
+      ORDER BY count(*) DESC, vendor ASC
+      LIMIT ${params.limit}
+    `;
+  }
+
   get client() {
     return this.prisma;
   }
