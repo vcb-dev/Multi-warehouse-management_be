@@ -20,6 +20,7 @@ import {
   CreateProductDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
+  ProductFacetQueryDto,
   ProductVariantDto,
   UpdateProductDto,
   VariantPriceHistoryQueryDto,
@@ -126,6 +127,37 @@ export class ProductService {
       total,
       page,
       page_size: pageSize,
+    };
+  }
+
+  /**
+   * Tag đang dùng trên toàn bộ sản phẩm (chủ yếu do đồng bộ Sapo đổ về), xếp
+   * theo số sản phẩm giảm dần để tag hay dùng nằm trên đầu ô chọn.
+   */
+  async listTags(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listTags({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        tag: r.tag,
+        product_count: Number(r.product_count),
+      })),
+    };
+  }
+
+  /** Loại sản phẩm đang dùng, cũng xếp theo số sản phẩm giảm dần như tag */
+  async listProductTypes(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listProductTypes({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        product_type: r.product_type,
+        product_count: Number(r.product_count),
+      })),
     };
   }
 
