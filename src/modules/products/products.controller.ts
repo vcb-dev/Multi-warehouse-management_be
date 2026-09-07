@@ -69,6 +69,12 @@ export class ProductsController {
     return this.products.listProductTypes(query);
   }
 
+  @Get('vendors')
+  @RequirePermission('product:view')
+  vendors(@Query() query: ProductFacetQueryDto) {
+    return this.products.listVendors(query);
+  }
+
   @Get('export/fields')
   @RequirePermission('product:manage')
   exportFields() {
