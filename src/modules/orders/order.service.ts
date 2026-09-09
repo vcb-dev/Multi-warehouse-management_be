@@ -41,6 +41,7 @@ import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
+import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
 import { recomputeOrderRefundStatuses } from './order-refund-status';
 import {
   calcLineTotal,
@@ -98,45 +99,6 @@ function stockStatusOf(
   return query.stock_status === 'thieu_hang' || query.stock_status === 'du_hang'
     ? query.stock_status
     : undefined;
-}
-
-async function computeStockReady(
-  repo: OrderRepository,
-  // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
-  orders: {
-    id: bigint;
-    locationId: bigint;
-    items: { variantId: bigint; quantity: number }[];
-  }[],
-) {
-  const pairs = new Map<string, { variantId: bigint; locationId: bigint }>();
-  for (const row of orders) {
-    for (const item of row.items) {
-      pairs.set(`${item.variantId}:${row.locationId}`, {
-        variantId: item.variantId,
-        locationId: row.locationId,
-      });
-    }
-  }
-  const levels = pairs.size
-    ? await repo.client.inventoryLevel.findMany({
-        where: { OR: Array.from(pairs.values()) },
-        select: { variantId: true, locationId: true, onHand: true },
-      })
-    : [];
-  const onHandMap = new Map(
-    levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
-  );
-  return new Map<bigint, boolean>(
-    orders.map((row) => [
-      row.id,
-      row.items.every(
-        (i) =>
-          (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
-          i.quantity,
-      ),
-    ]),
-  );
 }
 
 type ResolvedItem = {
@@ -215,13 +177,8 @@ export class OrderService {
     const stockFilter = stockStatusOf(query);
 
     if (stockFilter) {
-      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ. Không thể chỉ lọc
-      // status='open': dữ liệu Sapo thật có 75.125 đơn 'open' nhưng 73.402 trong
-      // số đó đã giao xong (Sapo không đóng đơn sau khi giao) — nạp hết sẽ vượt
-      // statement_timeout. Thêm fulfillment_status IS NULL để về đúng ~1.7k đơn
-      // thật sự đang chờ, khôi phục giả định "tập này luôn nhỏ" bên dưới.
-      where.status = OrderStatus.open;
-      where.fulfillmentStatus = null;
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ — xem PENDING_ORDER_WHERE.
+      Object.assign(where, PENDING_ORDER_WHERE);
     } else if (query.status === 'closed') {
       // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
       // status='closed' — khớp guard ở order-return.service.ts, vì đa số
@@ -379,7 +336,7 @@ export class OrderService {
         items: { select: { variantId: true, quantity: true } },
       },
     });
-    const readyMap = await computeStockReady(this.repo, rows);
+    const readyMap = await computeStockReady(this.repo.client, rows);
     const wantReady = stockFilter === 'du_hang';
     return rows
       .filter((row) => (readyMap.get(row.id) ?? true) === wantReady)
@@ -404,7 +361,7 @@ export class OrderService {
         orderBy: { createdOn: 'desc' },
         include: orderListInclude,
       });
-      const stockReadyMap = await computeStockReady(this.repo, all);
+      const stockReadyMap = await computeStockReady(this.repo.client, all);
       const wantReady = stockFilter === 'du_hang';
       const filtered = all.filter(
         (row) => (stockReadyMap.get(row.id) ?? true) === wantReady,
@@ -432,7 +389,7 @@ export class OrderService {
       this.repo.count(where),
     ]);
 
-    const stockReadyMap = await computeStockReady(this.repo, rows);
+    const stockReadyMap = await computeStockReady(this.repo.client, rows);
 
     return {
       data: rows.map((row) =>

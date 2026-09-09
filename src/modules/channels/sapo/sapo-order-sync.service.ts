@@ -13,6 +13,7 @@ import { NotificationService } from '../../notifications/notification.service';
 import { SapoClient } from '../../products/sapo-sync/sapo-client';
 import { normalizeChannelShopName } from '../channel-order-link';
 import { resolveChannelSyncActorId } from '../channel-sync-actor';
+import { isWithinNotifyWindow } from '../sync-notify';
 
 /**
  * Kéo đơn mới từ Sapo vào bảng `orders` theo nhịp cron.
@@ -62,14 +63,6 @@ const OVERLAP_MINUTES = Number(
 /** Không có đơn Sapo nào trong DB (cài mới) thì quét lùi ngần này giờ, không quét cả lịch sử. */
 const COLD_START_HOURS = Number(
   process.env.SAPO_ORDER_SYNC_COLD_START_HOURS ?? 24,
-);
-
-/**
- * Cùng biến với TikTok/Shopee — đơn đặt quá lâu thì tạo vẫn tạo, chỉ không bắn thông báo.
- * Không có chặn này thì một lượt chạy tay với mốc xa sẽ dội hàng nghìn thông báo về đơn cũ.
- */
-const SYNC_NOTIFY_MAX_AGE_HOURS = Number(
-  process.env.SYNC_NOTIFY_MAX_AGE_HOURS ?? 24,
 );
 
 const STATUS = ['open', 'closed', 'cancelled'];
@@ -590,9 +583,7 @@ export class SapoOrderSyncService {
     locationId: bigint,
   ) {
     const placedAt = data.createdOn ? new Date(data.createdOn as Date) : null;
-    if (!placedAt) return;
-    const ageHours = (Date.now() - placedAt.getTime()) / 3_600_000;
-    if (ageHours > SYNC_NOTIFY_MAX_AGE_HOURS) return;
+    if (!isWithinNotifyWindow(placedAt)) return;
 
     void this.notifications.emit(NotificationTopic.orders_create, {
       subjectType: 'order',
