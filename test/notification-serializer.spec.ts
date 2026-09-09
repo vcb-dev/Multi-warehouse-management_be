@@ -38,18 +38,18 @@ function makeRow(
 }
 
 describe('serializeNotification — resolveLink theo subject_type', () => {
-  it('order → /don-hang/[id]', () => {
+  it('order → /orders/[id]', () => {
     const row = makeRow({ subjectType: 'order', subjectId: 42n });
-    expect(serializeNotification(row).link).toBe('/don-hang/42');
+    expect(serializeNotification(row).link).toBe('/orders/42');
   });
 
-  it('customer → /khach-hang/[id]', () => {
+  it('customer → /customers/[id]', () => {
     const row = makeRow({
       subjectType: 'customer',
       subjectId: 7n,
       topic: NotificationTopic.customers_create,
     });
-    expect(serializeNotification(row).link).toBe('/khach-hang/7');
+    expect(serializeNotification(row).link).toBe('/customers/7');
   });
 
   it('fulfillment có tracking_code → lọc danh sách vận đơn theo mã, KHÔNG mở đơn hàng', () => {
@@ -61,7 +61,7 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
     });
     // encodeURIComponent bắt buộc — mã vận đơn có thể chứa khoảng trắng/ký tự đặc biệt
     expect(serializeNotification(row).link).toBe(
-      '/van-chuyen/van-don?q=GHN-ABC%20123',
+      '/shipping/shipments?q=GHN-ABC%20123',
     );
   });
 
@@ -72,7 +72,7 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
       topic: NotificationTopic.fulfillments_update,
       payload: { order_id: '99' },
     });
-    expect(serializeNotification(row).link).toBe('/don-hang/99');
+    expect(serializeNotification(row).link).toBe('/orders/99');
   });
 
   it('fulfillment không có cả tracking_code lẫn order_id → null (không dựng được link)', () => {
@@ -92,7 +92,7 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
       payload: { order_id: '99' },
     });
     const link = serializeNotification(row).link;
-    expect(link).toBe('/don-hang/99');
+    expect(link).toBe('/orders/99');
     expect(link).not.toContain('555');
   });
 
@@ -114,7 +114,7 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
       payload: { stock_status: 'negative', variant_ids: '1,2,3' },
     });
     const link = serializeNotification(row).link;
-    expect(link).toBe('/kho/ton-kho?locationId=4&stockStatus=negative');
+    expect(link).toBe('/warehouse/inventory?locationId=4&stockStatus=negative');
     expect(link).not.toContain('variantIds');
     expect(link).not.toContain('low_stock');
   });
@@ -127,7 +127,9 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
       payload: { variant_ids: '10,20,30' },
     });
     const link = serializeNotification(row).link;
-    expect(link).toBe('/kho/ton-kho?locationId=4&variantIds=10%2C20%2C30');
+    expect(link).toBe(
+      '/warehouse/inventory?locationId=4&variantIds=10%2C20%2C30',
+    );
     expect(link).not.toContain('low_stock=true');
     expect(link).not.toContain('stockStatus');
   });
@@ -139,7 +141,48 @@ describe('serializeNotification — resolveLink theo subject_type', () => {
       topic: NotificationTopic.inventory_low_stock,
       payload: {},
     });
-    expect(serializeNotification(row).link).toBe('/kho/ton-kho?locationId=4');
+    expect(serializeNotification(row).link).toBe(
+      '/warehouse/inventory?locationId=4',
+    );
+  });
+
+  it('order_shortage → danh sách đơn đã bật sẵn tab Thiếu hàng của ĐÚNG kho đó', () => {
+    // subjectId là id KHO (digest gom theo kho), không phải id đơn — bấm vào phải ra
+    // đúng con số ghi trên thông báo, nên link buộc phải mang cả hai điều kiện.
+    const row = makeRow({
+      subjectType: 'order_shortage',
+      subjectId: 4n,
+      topic: NotificationTopic.orders_out_of_stock,
+      payload: { count: 16, created_on_min: '2026-09-02' },
+    });
+    expect(serializeNotification(row).link).toBe(
+      '/orders?stock_status=thieu_hang&location_ids=4&created_on_min=2026-09-02',
+    );
+  });
+
+  it('order_shortage KHÔNG có created_on_min → vẫn ra link, chỉ mất phần lọc ngày', () => {
+    // Thiếu mốc ngày thì tab Thiếu hàng không giới hạn thời gian sẽ ra nhiều đơn hơn con
+    // số trên thông báo — chấp nhận được hơn là không bấm được vào đâu cả.
+    const row = makeRow({
+      subjectType: 'order_shortage',
+      subjectId: 4n,
+      topic: NotificationTopic.orders_out_of_stock,
+      payload: { count: 16 },
+    });
+    expect(serializeNotification(row).link).toBe(
+      '/orders?stock_status=thieu_hang&location_ids=4',
+    );
+  });
+
+  it('channel → màn Kênh bán, không phụ thuộc subjectId', () => {
+    // subjectId = 0 vì Sapo không có dòng channel_connections nào; link vẫn phải dựng được.
+    const row = makeRow({
+      subjectType: 'channel',
+      subjectId: 0n,
+      topic: NotificationTopic.channel_sync_failed,
+      payload: { channel: 'Đơn Sapo', reason: 'connect ETIMEDOUT' },
+    });
+    expect(serializeNotification(row).link).toBe('/settings/sales-channels');
   });
 
   it('subject_type lạ (chưa từng khai) → null, không throw', () => {

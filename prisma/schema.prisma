@@ -273,6 +273,8 @@ enum NotificationTopic {
 
   /// Âm kho (`available < 0`) — bán quá tay hoặc lệch sổ. 756 dòng lúc đo.
   inventory_negative @map("inventory/negative")
+
+  channel_sync_failed @map("channel/sync_failed")
 }
 
 // --- Auth & config ---

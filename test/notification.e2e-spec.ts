@@ -67,7 +67,8 @@ describeIfDb('Thông báo in-app (integration)', () => {
       select: { id: true },
     });
     for (const r of rows) {
-      if (!createdNotificationIds.includes(r.id)) createdNotificationIds.push(r.id);
+      if (!createdNotificationIds.includes(r.id))
+        createdNotificationIds.push(r.id);
     }
     return rows.map((r) => r.id);
   }
@@ -98,11 +99,26 @@ describeIfDb('Thông báo in-app (integration)', () => {
 
   /** Mở người nhận cho mọi nhân viên, để test chắc chắn có người nhận bất kể seed. */
   async function setTopicRecipientsOpen(topic: NotificationTopic) {
+    await setTopicRecipients(topic, []);
+  }
+
+  /**
+   * Ghim người nhận của một topic cho test, thay vì dựa vào giá trị seed.
+   *
+   * Định tuyến là quyết định nghiệp vụ và sẽ còn đổi (`orders/create` vừa chuyển từ
+   * `order:view` sang `order:pack`); còn thứ các test dưới đây kiểm là CƠ CHẾ fan-out
+   * theo kho. Ghim tại chỗ để đổi chính sách không làm đỏ test không liên quan.
+   */
+  async function setTopicRecipients(
+    topic: NotificationTopic,
+    permissions: string[],
+  ) {
     await backupSetting(topic);
     await prisma.notificationSetting.update({
       where: { topic },
-      data: { recipientPermissions: [] },
+      data: { recipientPermissions: permissions },
     });
+    // Service cache cấu hình 60s — không xoá cache thì thay đổi vừa ghi không có tác dụng.
     notifications.invalidateSettingsCache();
   }
 
@@ -145,7 +161,8 @@ describeIfDb('Thông báo in-app (integration)', () => {
       where: { userId: salesUserId },
       select: { locationId: true },
     });
-    if (!salesAssignment) throw new Error('sales@local.dev chưa được gán kho nào');
+    if (!salesAssignment)
+      throw new Error('sales@local.dev chưa được gán kho nào');
     salesLocationId = salesAssignment.locationId;
 
     // Điều kiện tiên quyết của các test scope: kho của sales KHÔNG được là kho mà
@@ -205,6 +222,9 @@ describeIfDb('Thông báo in-app (integration)', () => {
 
   it('fan-out theo quyền TẠI KHO: người có order:view ở kho đó nhận, người không có thì không', async () => {
     await setTopicEnabled(NotificationTopic.orders_create, true);
+    // Ghim `order:view` cho test này: seed thật định tuyến `orders/create` sang
+    // `order:pack`, nhưng ở đây đang kiểm phạm vi KHO chứ không kiểm chính sách định tuyến.
+    await setTopicRecipients(NotificationTopic.orders_create, ['order:view']);
 
     await notifications.emit(NotificationTopic.orders_create, {
       subjectType: 'order',
@@ -253,15 +273,18 @@ describeIfDb('Thông báo in-app (integration)', () => {
   });
 
   it('serializer dựng link tới đơn hàng và trả topic theo đúng chuỗi Sapo', async () => {
-    const list = await notifications.list(asUser(salesUserId, 'sales@local.dev'), {
-      limit: 50,
-    });
+    const list = await notifications.list(
+      asUser(salesUserId, 'sales@local.dev'),
+      {
+        limit: 50,
+      },
+    );
     const item = list.data.find((n) =>
       createdNotificationIds.map(String).includes(n.id),
     );
     expect(item).toBeDefined();
     expect(item!.topic).toBe('orders/create');
-    expect(item!.link).toBe(`/don-hang/${SUBJECT_ID.toString()}`);
+    expect(item!.link).toBe(`/orders/${SUBJECT_ID.toString()}`);
     expect(item!.is_read).toBe(false);
   });
 
@@ -364,16 +387,19 @@ describeIfDb('Thông báo in-app (integration)', () => {
     expect(created).toBeTruthy();
     createdNotificationIds.push(created!.id);
 
-    const list = await notifications.list(asUser(adminUserId, 'admin@local.dev'), {
-      limit: 20,
-    });
+    const list = await notifications.list(
+      asUser(adminUserId, 'admin@local.dev'),
+      {
+        limit: 20,
+      },
+    );
     const item = list.data.find((n) => n.id === created!.id.toString());
     expect(item).toBeDefined();
     expect(item!.topic).toBe('inventory/negative');
 
     // Âm kho → dùng bộ lọc SQL thật, KHÔNG liệt kê id (kho lớn có tới 405 dòng)
     expect(item!.link).toBe(
-      `/kho/ton-kho?locationId=${location.id}&stockStatus=negative`,
+      `/warehouse/inventory?locationId=${location.id}&stockStatus=negative`,
     );
     expect(item!.link).not.toContain('low_stock');
     // Nhiều lượt round-trip lên DB Supabase ở xa — 5s mặc định của Jest không đủ.
@@ -406,13 +432,16 @@ describeIfDb('Thông báo in-app (integration)', () => {
     expect(created).toBeTruthy();
     createdNotificationIds.push(created!.id);
 
-    const list = await notifications.list(asUser(adminUserId, 'admin@local.dev'), {
-      limit: 20,
-    });
+    const list = await notifications.list(
+      asUser(adminUserId, 'admin@local.dev'),
+      {
+        limit: 20,
+      },
+    );
     const item = list.data.find((n) => n.id === created!.id.toString());
     expect(item!.topic).toBe('inventory/low_stock');
     expect(item!.link).toBe(
-      `/kho/ton-kho?locationId=${location.id}&variantIds=10%2C20`,
+      `/warehouse/inventory?locationId=${location.id}&variantIds=10%2C20`,
     );
   }, 30_000);
 
@@ -522,9 +551,7 @@ describeIfDb('Thông báo in-app (integration)', () => {
       .expect(200);
 
     // Đếm theo enum thay vì số cứng — thêm topic mới không phải sửa test
-    expect(res.body.data).toHaveLength(
-      Object.keys(NotificationTopic).length,
-    );
+    expect(res.body.data).toHaveLength(Object.keys(NotificationTopic).length);
     expect(res.body.data.map((s: { topic: string }) => s.topic)).toContain(
       'orders/create',
     );
