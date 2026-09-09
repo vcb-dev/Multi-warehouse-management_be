@@ -20,6 +20,7 @@ import {
   CreateProductDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
+  ProductFacetQueryDto,
   ProductVariantDto,
   UpdateProductDto,
   VariantPriceHistoryQueryDto,
@@ -129,6 +130,37 @@ export class ProductService {
     };
   }
 
+  /**
+   * Tag đang dùng trên toàn bộ sản phẩm (chủ yếu do đồng bộ Sapo đổ về), xếp
+   * theo số sản phẩm giảm dần để tag hay dùng nằm trên đầu ô chọn.
+   */
+  async listTags(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listTags({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        tag: r.tag,
+        product_count: Number(r.product_count),
+      })),
+    };
+  }
+
+  /** Loại sản phẩm đang dùng, cũng xếp theo số sản phẩm giảm dần như tag */
+  async listProductTypes(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listProductTypes({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        product_type: r.product_type,
+        product_count: Number(r.product_count),
+      })),
+    };
+  }
+
   async findOne(id: bigint) {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundException('Không tìm thấy sản phẩm');
@@ -150,7 +182,10 @@ export class ProductService {
       );
     }
 
-    const variantRows = this.buildVariantRows(alias, options, dto);
+    const variantRows = this.buildVariantRows(options, dto);
+    for (const row of variantRows) {
+      if (!row.sku) throw this.missingSku(row.optionValues);
+    }
 
     const product = await this.repo.client.$transaction(
       async (tx) => {
@@ -417,7 +452,7 @@ export class ProductService {
         }
 
         if (dto.options && dto.variants) {
-          await this.syncVariants(tx, id, existing.alias, dto.options, dto, {
+          await this.syncVariants(tx, id, dto.options, dto, {
             userId: user.userId,
             source: 'manual',
           });
@@ -569,7 +604,6 @@ export class ProductService {
   }
 
   private buildVariantRows(
-    alias: string,
     options: CreateProductDto['options'],
     dto: Pick<
       CreateProductDto,
@@ -586,8 +620,7 @@ export class ProductService {
       const v = variants?.[0];
       return [
         {
-          sku: v?.sku?.trim() || this.variants.suggestSku(alias, []),
-          skuExplicit: Boolean(v?.sku?.trim()),
+          sku: v?.sku?.trim() ?? '',
           price: v?.price ?? 0,
           cost: v?.cost,
           compareAtPrice: v?.compare_at_price,
@@ -613,10 +646,7 @@ export class ProductService {
       const key = this.variants.optionKey(optionValues);
       const input = byKey.get(key);
       return {
-        // SKU do người dùng nhập là nguồn sự thật; chỉ tự sinh khi bỏ trống.
-        sku:
-          input?.sku?.trim() || this.variants.suggestSku(alias, optionValues),
-        skuExplicit: Boolean(input?.sku?.trim()),
+        sku: input?.sku?.trim() ?? '',
         price: input?.price ?? 0,
         cost: input?.cost,
         compareAtPrice: input?.compare_at_price,
@@ -641,7 +671,6 @@ export class ProductService {
   private async syncVariants(
     tx: Prisma.TransactionClient,
     productId: bigint,
-    alias: string,
     options: NonNullable<CreateProductDto['options']>,
     dto: Pick<
       CreateProductDto,
@@ -686,7 +715,7 @@ export class ProductService {
       orderBy: { position: 'asc' },
     });
 
-    const desired = this.buildVariantRows(alias, options, dto);
+    const desired = this.buildVariantRows(options, dto);
     const desiredKeys = new Set(
       desired.map((d) => this.variants.optionKey(d.optionValues)),
     );
@@ -702,10 +731,11 @@ export class ProductService {
       const match = existingByKey.get(key);
       let variantId: bigint;
 
-      // Request không gửi SKU thì giữ nguyên SKU đang lưu — nếu lấy SKU tự sinh
-      // làm chuẩn, mọi lần sửa giá/tên đều bị coi là "đổi SKU" rồi xoá-tạo lại
-      // phiên bản (hoặc chặn bằng VARIANT_IN_USE khi đã có tồn kho).
-      const desiredSku = d.skuExplicit ? d.sku : (match?.sku ?? d.sku);
+      // Request không gửi SKU thì giữ nguyên SKU đang lưu — nếu không, mọi lần
+      // sửa giá/tên đều bị coi là "đổi SKU" rồi xoá-tạo lại phiên bản (hoặc chặn
+      // bằng VARIANT_IN_USE khi đã có tồn kho).
+      const desiredSku = d.sku || match?.sku;
+      if (!desiredSku) throw this.missingSku(d.optionValues);
 
       if (match && match.sku === desiredSku) {
         const nextCost = d.cost ?? match.cost;
@@ -819,6 +849,16 @@ export class ProductService {
         toRemove.map((v) => v.id),
       );
     }
+  }
+
+  private missingSku(optionValues: string[]) {
+    return new BusinessException(
+      'SKU_REQUIRED',
+      optionValues.length
+        ? `Thiếu mã SKU cho phiên bản ${optionValues.join(' / ')}`
+        : 'Thiếu mã SKU cho sản phẩm',
+      422,
+    );
   }
 
   private async validateSkus(skus: string[], excludeProductId?: bigint) {

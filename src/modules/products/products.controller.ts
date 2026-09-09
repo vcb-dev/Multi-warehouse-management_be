@@ -26,6 +26,7 @@ import {
   ExportProductsQueryDto,
   ListProductsQueryDto,
   ProductInventoryQueryDto,
+  ProductFacetQueryDto,
   UpdateProductDto,
   VariantPriceHistoryQueryDto,
 } from './product.dto';
@@ -54,6 +55,18 @@ export class ProductsController {
   @LocationOptional()
   create(@Body() dto: CreateProductDto, @CurrentUser() user: AuthUser) {
     return this.products.create(dto, user);
+  }
+
+  @Get('tags')
+  @RequirePermission('product:view')
+  tags(@Query() query: ProductFacetQueryDto) {
+    return this.products.listTags(query);
+  }
+
+  @Get('product-types')
+  @RequirePermission('product:view')
+  productTypes(@Query() query: ProductFacetQueryDto) {
+    return this.products.listProductTypes(query);
   }
 
   @Get('export/fields')

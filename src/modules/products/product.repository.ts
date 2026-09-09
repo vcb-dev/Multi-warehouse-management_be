@@ -176,6 +176,51 @@ export class ProductRepository {
     return inUse.has(variantId);
   }
 
+  /**
+   * Danh sách tag đang dùng, kèm số sản phẩm — nguồn gợi ý cho ô chọn tag.
+   * Không có bảng tag riêng (tag của Sapo về thẳng `products.tags`), nên phải
+   * `unnest` mảng rồi gom nhóm bằng raw SQL; Prisma không làm được việc này.
+   */
+  async listTags(params: { q?: string; limit: number }) {
+    const pattern = params.q ? `%${params.q}%` : null;
+    return this.prisma.$queryRaw<{ tag: string; product_count: bigint }[]>`
+      SELECT t AS tag, count(*) AS product_count
+      FROM products p, unnest(p.tags) AS t
+      WHERE t <> ''
+        AND (
+          ${pattern}::text IS NULL
+          OR unaccent(t) ILIKE unaccent(${pattern}::text)
+        )
+      GROUP BY t
+      ORDER BY count(*) DESC, t ASC
+      LIMIT ${params.limit}
+    `;
+  }
+
+  /**
+   * Loại sản phẩm đang dùng, kèm số sản phẩm — nguồn gợi ý cho ô chọn loại.
+   * Cũng như tag, `product_type` là chuỗi tự do đồng bộ từ Sapo chứ không có
+   * bảng danh mục riêng, nên danh sách phải gom từ chính bảng products.
+   */
+  async listProductTypes(params: { q?: string; limit: number }) {
+    const pattern = params.q ? `%${params.q}%` : null;
+    return this.prisma.$queryRaw<
+      { product_type: string; product_count: bigint }[]
+    >`
+      SELECT product_type, count(*) AS product_count
+      FROM products
+      WHERE product_type IS NOT NULL
+        AND product_type <> ''
+        AND (
+          ${pattern}::text IS NULL
+          OR unaccent(product_type) ILIKE unaccent(${pattern}::text)
+        )
+      GROUP BY product_type
+      ORDER BY count(*) DESC, product_type ASC
+      LIMIT ${params.limit}
+    `;
+  }
+
   get client() {
     return this.prisma;
   }
