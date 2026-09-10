@@ -274,6 +274,12 @@ enum NotificationTopic {
   /// Âm kho (`available < 0`) — bán quá tay hoặc lệch sổ. 756 dòng lúc đo.
   inventory_negative @map("inventory/negative")
 
+  /// Đơn đang mở mà kho không đủ hàng để đóng gói. Giá trị đã có trong DB từ
+  /// migration 20260909120000 và đang được dùng ở inventory-alert.service.ts,
+  /// nhưng sót lại chưa khai ở đây — `prisma generate` sinh ra client thiếu
+  /// giá trị này là vỡ build.
+  orders_out_of_stock @map("orders/out_of_stock")
+
   channel_sync_failed @map("channel/sync_failed")
 }
 
