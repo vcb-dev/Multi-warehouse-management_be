@@ -83,6 +83,32 @@ export class OrderRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * Tag đang dùng trên đơn, kèm số đơn — nguồn gợi ý cho ô nhập tag.
+   *
+   * Tag là chuỗi tự do (mảng trên chính bảng orders, không có bảng danh mục),
+   * nên danh sách phải gom từ dữ liệu. Xếp theo số lượt dùng giảm dần là điều
+   * bắt buộc chứ không phải cho đẹp: đo trên dữ liệu thật có 58.769 tag khác
+   * nhau nhưng 46.221 cái chỉ xuất hiện đúng 1 lần (rác từ đồng bộ), còn bộ
+   * tag thật sự đang dùng chỉ khoảng 246 cái (>= 10 đơn). Xếp theo abc là chôn
+   * hết tag thật dưới hàng chục nghìn tag rác.
+   */
+  async listTags(params: { q?: string; limit: number }) {
+    const pattern = params.q ? `%${params.q}%` : null;
+    return this.prisma.$queryRaw<{ tag: string; order_count: bigint }[]>`
+      SELECT t AS tag, count(*) AS order_count
+      FROM orders o, unnest(o.tags) AS t
+      WHERE t <> ''
+        AND (
+          ${pattern}::text IS NULL
+          OR unaccent(t) ILIKE unaccent(${pattern}::text)
+        )
+      GROUP BY t
+      ORDER BY count(*) DESC, t ASC
+      LIMIT ${params.limit}
+    `;
+  }
+
   get client() {
     return this.prisma;
   }

@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
   ValidateNested,
@@ -34,6 +35,21 @@ export class OrderItemDto {
   @IsNumber()
   @Min(0)
   discount?: number;
+}
+
+/** Gợi ý giá trị cho ô nhập tự do của đơn (hiện chỉ có tag) */
+export class OrderFacetQueryDto {
+  /** Lọc theo chuỗi con, bỏ dấu tiếng Việt — để ô chọn gõ tìm được */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  @Type(() => Number)
+  limit?: number;
 }
 
 /** Sapo `shipping_address` / `billing_address` */
