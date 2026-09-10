@@ -179,3 +179,20 @@ export function firstDefined<T>(
   }
   return undefined;
 }
+
+/**
+ * Tham số sắp xếp của các màn danh sách: `sort=<trường>_asc` | `<trường>_desc`
+ * (VD `price_asc`). Trả `undefined` khi không gửi hoặc trường không nằm trong
+ * `allowed` — danh sách rơi về thứ tự mặc định của màn thay vì báo lỗi.
+ */
+export function parseSort<T extends string>(
+  raw: string | null | undefined,
+  allowed: readonly T[],
+): { field: T; dir: 'asc' | 'desc' } | undefined {
+  if (!raw) return undefined;
+  const match = raw.trim().match(/^(.+)_(asc|desc)$/);
+  if (!match) return undefined;
+  const [, field, dir] = match;
+  if (!(allowed as readonly string[]).includes(field)) return undefined;
+  return { field: field as T, dir: dir as 'asc' | 'desc' };
+}
