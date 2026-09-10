@@ -1558,6 +1558,10 @@ model OrderItem {
   /// Sapo `name` (tên hiển thị đầy đủ) và `variant_title` (tên phiên bản)
   name                   String
   variantTitle           String?  @map("variant_title")
+  /// Ghi chú riêng cho dòng hàng ("khắc tên", "nới size 16") — Sapo có ô này trên
+  /// từng dòng. Đơn đồng bộ về không mang theo (payload line_item đang dùng không
+  /// có trường tương ứng) nên đây là dữ liệu do app nhập.
+  note                   String?
   sku                    String
   quantity               Int
   price                  Decimal  @db.Decimal(18, 2)

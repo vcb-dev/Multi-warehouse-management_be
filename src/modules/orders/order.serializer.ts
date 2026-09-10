@@ -260,6 +260,7 @@ export function serializeOrderDetail(o: OrderWithRelations) {
       inventory_item_id: i.inventoryItemId?.toString() ?? null,
       name: i.name,
       variant_title: i.variantTitle,
+      note: i.note,
       sku: i.sku,
       image_url: i.variant?.imageUrl ?? null,
       unit: i.variant?.unit ?? null,
