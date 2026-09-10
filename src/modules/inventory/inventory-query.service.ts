@@ -16,7 +16,11 @@ import {
   textContainsAny,
 } from '../../common/query/filter-params';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
-import { serializeLevel, serializeMovement } from './inventory.serializer';
+import {
+  serializeLevel,
+  serializeMovement,
+  variantTitle,
+} from './inventory.serializer';
 import {
   InventoryNxtService,
   NxtRowInput,
@@ -233,6 +237,7 @@ export class InventoryQueryService {
         product_id: v.productId.toString(),
         sku: v.sku,
         product_name: v.product.name,
+        variant_title: variantTitle(v.title),
         image_url: v.imageUrl ?? v.product.imageUrl ?? null,
         unit: v.unit ?? null,
         location_code: location.code,
