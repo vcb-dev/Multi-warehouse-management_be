@@ -13,6 +13,7 @@ import {
   parseDateRange,
   parseIdList,
   parseList,
+  parseSort,
   textContainsAny,
 } from '../../common/query/filter-params';
 import { CategoryService } from '../categories/category.service';
@@ -37,6 +38,22 @@ import { serializeVariantPriceHistory } from './variant-price-history.serializer
 
 /** SP nhiều variant + DB remote — syncVariants có thể > 5s mặc định của Prisma */
 const PRODUCT_TX_TIMEOUT_MS = 30_000;
+
+/** Trường được phép xếp thứ tự ở màn danh sách (`?sort=price_asc`) */
+const PRODUCT_SORT_FIELDS = ['price'] as const;
+
+/** Quan hệ cần cho một dòng danh sách — dùng chung cho cả hai nhánh của `list()` */
+const LIST_INCLUDE = {
+  variants: {
+    where: { enabled: true },
+    orderBy: { id: 'asc' as const },
+    select: { sku: true, barcode: true, price: true, unit: true },
+  },
+} satisfies Prisma.ProductInclude;
+
+type ProductListRow = Prisma.ProductGetPayload<{
+  include: typeof LIST_INCLUDE;
+}>;
 
 @Injectable()
 export class ProductService {
@@ -103,20 +120,17 @@ export class ProductService {
     const page = query.page ?? 1;
     const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildListWhere(query);
+    const sort = parseSort(query.sort, PRODUCT_SORT_FIELDS);
     const [rows, total] = await Promise.all([
-      this.repo.client.product.findMany({
-        where,
-        orderBy: { modifiedOn: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          variants: {
-            where: { enabled: true },
-            orderBy: { id: 'asc' },
-            select: { sku: true, barcode: true, price: true, unit: true },
-          },
-        },
-      }),
+      sort
+        ? this.listPageByPrice(where, sort.dir, page, pageSize)
+        : this.repo.client.product.findMany({
+            where,
+            orderBy: { modifiedOn: 'desc' },
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            include: LIST_INCLUDE,
+          }),
       this.repo.count(where),
     ]);
 
@@ -128,6 +142,66 @@ export class ProductService {
       page,
       page_size: pageSize,
     };
+  }
+
+  /**
+   * Một trang sản phẩm xếp theo "Giá từ" = MIN(giá phiên bản đang bán).
+   *
+   * Prisma không xếp được theo hàm gộp của quan hệ (chỉ có `_count`), nên phần
+   * xếp thứ tự phải nhờ SQL. Chỉ lấy id ở bước này rồi nạp lại bằng Prisma để
+   * nhánh sắp xếp dùng đúng include/serializer của nhánh thường — không phải
+   * dựng lại product + variants từ SQL thô.
+   */
+  private async listPageByPrice(
+    where: Prisma.ProductWhereInput,
+    dir: 'asc' | 'desc',
+    page: number,
+    pageSize: number,
+  ): Promise<ProductListRow[]> {
+    // Không có bộ lọc thì để SQL quét thẳng cả bảng (12.6k dòng, ~100ms). Có
+    // lọc thì lấy id khớp từ Prisma và truyền vào SQL: chép lại toàn bộ điều
+    // kiện lọc sang SQL thô là nguồn sai lệch chắc chắn xảy ra khi thêm bộ lọc mới.
+    const filteredIds = Object.keys(where).length
+      ? (
+          await this.repo.client.product.findMany({
+            where,
+            select: { id: true },
+          })
+        ).map((row) => row.id.toString())
+      : null;
+    if (filteredIds && !filteredIds.length) return [];
+
+    // Mảng id đi vào SQL bằng MỘT tham số `ANY($1)`, không phải `IN (...)`:
+    // bộ lọc rộng khớp gần hết 12.6k sản phẩm thì `IN` thành 12.6k bind
+    // variable, sát trần 32.767 của Postgres.
+    const idFilter = filteredIds
+      ? Prisma.sql`WHERE p.id = ANY(${filteredIds}::bigint[])`
+      : Prisma.empty;
+    const order = dir === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+
+    const ordered = await this.repo.client.$queryRaw<{ id: bigint }[]>`
+      SELECT p.id
+      FROM products p
+      LEFT JOIN (
+        SELECT product_id, MIN(price) AS price_from
+        FROM product_variants
+        WHERE enabled
+        GROUP BY product_id
+      ) v ON v.product_id = p.id
+      ${idFilter}
+      ORDER BY COALESCE(v.price_from, 0) ${order}, p.id ASC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `;
+
+    const ids = ordered.map((row) => row.id);
+    if (!ids.length) return [];
+    const rows = await this.repo.client.product.findMany({
+      where: { id: { in: ids } },
+      include: LIST_INCLUDE,
+    });
+    // `in` không giữ thứ tự — xếp lại theo đúng thứ tự SQL vừa trả về.
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
   }
 
   /**
