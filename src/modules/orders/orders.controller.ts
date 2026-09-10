@@ -21,6 +21,7 @@ import {
   CreateOrderDto,
   ExportOrdersQueryDto,
   ListOrdersQueryDto,
+  OrderFacetQueryDto,
   OrderTransitionDto,
   PayOrderDto,
   UpdateOrderDto,
@@ -50,8 +51,14 @@ export class OrdersController {
     return this.orders.create(dto, user);
   }
 
-  // Hai route 'export*' phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
-  // 'export' thành id và trả 404.
+  // Các route tên cố định phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
+  // tên thành id và trả 404.
+  @Get('tags')
+  @RequirePermission('order:view')
+  tags(@Query() query: OrderFacetQueryDto) {
+    return this.orders.listTags(query);
+  }
+
   @Get('export/fields')
   @RequirePermission('order:view')
   exportFields(@Query() query: ExportOrdersQueryDto) {
