@@ -78,6 +78,14 @@ function rangesIncludeZero(ranges: BucketRanges): boolean {
   );
 }
 
+/**
+ * Chọn kho mà không đòi `managed_only` thì liệt kê cả catalog (variant chưa có dòng tồn
+ * hiện số 0); còn lại chỉ đọc các dòng `inventory_levels` đang có.
+ */
+function listsWholeCatalog(query: ListInventoryQueryDto): boolean {
+  return !!query.location_id && !query.managed_only;
+}
+
 /** Bộ lọc theo thuộc tính sản phẩm, dùng chung cho cả hai nhánh danh sách. */
 function productClause(
   query: ListInventoryQueryDto,
@@ -194,7 +202,7 @@ export class InventoryQueryService {
   }
 
   async listInventory(query: ListInventoryQueryDto, user: AuthUser) {
-    if (query.location_id) {
+    if (listsWholeCatalog(query)) {
       return this.listByWarehouse(query, user);
     }
     return this.listExistingLevels(query, user);
@@ -214,7 +222,7 @@ export class InventoryQueryService {
       page: 1,
       page_size: 100000,
     };
-    const { data } = query.location_id
+    const { data } = listsWholeCatalog(query)
       ? await this.listByWarehouse(unpaginated, user)
       : await this.listExistingLevels(unpaginated, user);
     return data;
@@ -251,7 +259,10 @@ export class InventoryQueryService {
     };
   }
 
-  /** Khi chọn kho: hiển thị mọi variant (kể cả chưa có inventory_level) */
+  /**
+   * Khi chọn kho mà không đòi `managed_only`: hiển thị mọi variant (kể cả chưa có
+   * inventory_level) — nhánh của các ô chọn sản phẩm.
+   */
   private async listByWarehouse(query: ListInventoryQueryDto, user: AuthUser) {
     const page = query.page ?? 1;
     const pageSize = query.limit ?? query.page_size ?? 20;
@@ -501,7 +512,13 @@ export class InventoryQueryService {
   ): Promise<Prisma.InventoryLevelWhereInput> {
     const where: Prisma.InventoryLevelWhereInput = {};
 
-    where.locationId = locationScopeFilter(user, 'inventory:view');
+    if (query.location_id) {
+      const locationId = BigInt(query.location_id);
+      assertLocationPermission(user, 'inventory:view', locationId);
+      where.locationId = locationId;
+    } else {
+      where.locationId = locationScopeFilter(user, 'inventory:view');
+    }
 
     if (query.variant_id) {
       where.variantId = BigInt(query.variant_id);
