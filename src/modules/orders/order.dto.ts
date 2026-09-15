@@ -35,6 +35,18 @@ export class OrderItemDto {
   @IsNumber()
   @Min(0)
   discount?: number;
+
+  /** Ghi chú riêng cho dòng hàng: "khắc tên An", "nới size 16"... */
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+/** Sửa một dòng hàng của đơn đã tạo — hiện chỉ có ghi chú. */
+export class UpdateOrderItemDto {
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 /** Gợi ý giá trị cho ô nhập tự do của đơn (hiện chỉ có tag) */
