@@ -76,6 +76,17 @@ export class CreateCustomerDto {
 
 export class UpdateCustomerDto extends CreateCustomerDto {}
 
+/** Thông tin khách sắp tạo — tìm khách đã có trùng SĐT, họ tên hoặc địa chỉ. */
+export class CustomerDuplicateQueryDto {
+  @IsOptional() @IsString() phone?: string;
+  /** Họ tên đầy đủ, có thể kèm danh xưng ("Chị Hà") */
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() address1?: string;
+  @IsOptional() @IsString() ward?: string;
+  @IsOptional() @IsString() district?: string;
+  @IsOptional() @IsString() province?: string;
+}
+
 export class ListCustomersQueryDto {
   @IsOptional() @IsString() q?: string;
   /** enabled | disabled | invited */

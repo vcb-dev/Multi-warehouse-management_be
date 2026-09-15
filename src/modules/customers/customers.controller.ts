@@ -21,6 +21,7 @@ import { CustomerService } from './customer.service';
 import {
   CreateCustomerDebtAdjustmentDto,
   CreateCustomerDto,
+  CustomerDuplicateQueryDto,
   ListCustomerLedgerQueryDto,
   ListCustomersQueryDto,
   UpdateCustomerDto,
@@ -72,6 +73,16 @@ export class CustomersController {
           c.email,
       })),
     };
+  }
+
+  /**
+   * Khách đã có có thể trùng với khách sắp tạo (SĐT, họ tên, địa chỉ). Khai báo
+   * trước `:id` để Nest không hiểu `duplicates` là một id.
+   */
+  @Get('duplicates')
+  @RequirePermission('customer:view', 'customer:manage')
+  duplicates(@Query() query: CustomerDuplicateQueryDto) {
+    return this.customers.findDuplicates(query);
   }
 
   @Get(':id')
