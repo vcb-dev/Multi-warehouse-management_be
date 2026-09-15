@@ -55,6 +55,7 @@ import {
   OrderTransitionDto,
   PayOrderDto,
   ShippingAddressDto,
+  OrderFacetQueryDto,
   UpdateOrderDto,
   UpdateOrderItemDto,
 } from './order.dto';
@@ -596,6 +597,26 @@ export class OrderService {
     });
 
     return { data: serializeOrderDetail(updated) };
+  }
+
+  /**
+   * Tag đang dùng trên đơn, xếp theo số đơn giảm dần — gợi ý cho ô nhập tag.
+   *
+   * KHÔNG lọc theo kho của người dùng: tag là từ vựng chung của cửa hàng
+   * ("Không cọc", "VAT", "Tiktok Channel"). Lọc theo kho thì nhân viên kho mới
+   * gõ tag chung nào cũng không thấy gợi ý, rồi tự chế ra biến thể mới.
+   */
+  async listTags(query: OrderFacetQueryDto) {
+    const rows = await this.repo.listTags({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 20,
+    });
+    return {
+      data: rows.map((r) => ({
+        tag: r.tag,
+        order_count: Number(r.order_count),
+      })),
+    };
   }
 
   /**
