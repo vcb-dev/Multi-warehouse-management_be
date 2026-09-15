@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationTopic, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { userDisplayName } from '../../common/utils/user-display-name';
@@ -12,8 +8,19 @@ import { findRepeatCustomerIds } from '../../common/search/repeat-customer-searc
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { CustomerGroupService } from './customer-group.service';
 import {
+  canMatchAddress,
+  canMatchName,
+  compareDuplicates,
+  isSameAddress,
+  nameKey,
+  phoneKey,
+  placeKey,
+  type DuplicateReason,
+} from './customer-duplicates';
+import {
   CreateCustomerDto,
   CustomerAddressDto,
+  CustomerDuplicateQueryDto,
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './customer.dto';
@@ -21,6 +28,15 @@ import {
 type CustomerWithRelations = Prisma.CustomerGetPayload<{
   include: { addresses: true; groups: { include: { group: true } } };
 }>;
+
+type MatchedAddressRow = {
+  id: bigint;
+  customer_id: bigint;
+  address1: string | null;
+  ward: string | null;
+  district: string | null;
+  province: string | null;
+};
 
 /** Giao các mảng id — dùng khi nhiều filter (q, repeat_only) cùng thu hẹp theo id */
 function intersectBigintArrays(lists: bigint[][]): bigint[] {
@@ -310,16 +326,122 @@ export class CustomerService {
     return { data: this.serialize(c) };
   }
 
+  /**
+   * Khách có SĐT cùng khoá chuẩn hoá. Dữ liệu Sapo lưu `+84…` còn người nhập gõ
+   * `0…`, nên so bằng chuỗi thô là lọt trùng. SQL chỉ lọc thô theo 9 số cuối,
+   * `phoneKey` quyết định.
+   */
+  private async customersWithPhone(key: string) {
+    const rows = await this.prisma.$queryRaw<{ id: bigint; phone: string }[]>`
+      SELECT id, phone
+      FROM customers
+      WHERE regexp_replace(phone, '\\D', '', 'g') LIKE ${`%${key.slice(-9)}`}
+    `;
+    return rows.filter((r) => phoneKey(r.phone) === key).map((r) => r.id);
+  }
+
   private async assertPhoneFree(phone: string | undefined, excludeId?: bigint) {
-    if (!phone?.trim()) return;
-    const dup = await this.prisma.customer.findFirst({
-      where: {
-        phone: phone.trim(),
-        ...(excludeId ? { id: { not: excludeId } } : {}),
+    const key = phoneKey(phone);
+    if (!key) return;
+    const ids = await this.customersWithPhone(key);
+    if (ids.some((id) => id !== excludeId)) {
+      throw new BusinessException(
+        'PHONE_EXISTS',
+        'Số điện thoại này đã thuộc về khách hàng khác',
+        409,
+      );
+    }
+  }
+
+  /** Khách có tên trùng sau khi bỏ dấu và danh xưng. */
+  private async customersWithName(key: string) {
+    // Mẫu regex chỉ gồm [a-z0-9] và khoảng trắng (đã qua foldText) — không cần escape.
+    const pattern = `\\m${key.split(' ').join('\\M.*\\m')}\\M`;
+    const rows = await this.prisma.$queryRaw<
+      { id: bigint; first_name: string | null; last_name: string | null }[]
+    >`
+      SELECT id, first_name, last_name
+      FROM customers
+      WHERE unaccent(concat_ws(' ', first_name, last_name)) ~* ${pattern}
+      LIMIT 2000
+    `;
+    return rows
+      .filter((r) => nameKey(r.first_name, r.last_name) === key)
+      .map((r) => r.id);
+  }
+
+  /** Địa chỉ trùng — lọc thô theo tên phường/xã rồi mới so kỹ. */
+  private async addressesMatching(input: CustomerDuplicateQueryDto) {
+    const pattern = `\\m${placeKey(input.ward).split(' ').join('\\M.*\\m')}\\M`;
+    const rows = await this.prisma.$queryRaw<MatchedAddressRow[]>`
+      SELECT id, customer_id, address1, ward, district, province
+      FROM customer_addresses
+      WHERE address1 IS NOT NULL
+        AND unaccent(ward) ~* ${pattern}
+    `;
+    return rows.filter((r) => isSameAddress(input, r));
+  }
+
+  /**
+   * Khách đã có mà có thể chính là khách sắp tạo. Trùng SĐT là chắc chắn (tạo
+   * sẽ bị chặn); trùng tên hoặc địa chỉ chỉ là cảnh báo để người dùng tự quyết.
+   */
+  async findDuplicates(query: CustomerDuplicateQueryDto) {
+    const phone = phoneKey(query.phone);
+    const name = nameKey(query.name);
+
+    const [phoneIds, nameIds, addresses] = await Promise.all([
+      phone.length >= 9 ? this.customersWithPhone(phone) : ([] as bigint[]),
+      canMatchName(name) ? this.customersWithName(name) : ([] as bigint[]),
+      canMatchAddress(query)
+        ? this.addressesMatching(query)
+        : ([] as MatchedAddressRow[]),
+    ]);
+
+    const reasons = new Map<bigint, Set<DuplicateReason>>();
+    const mark = (id: bigint, reason: DuplicateReason) => {
+      const set = reasons.get(id) ?? new Set<DuplicateReason>();
+      set.add(reason);
+      reasons.set(id, set);
+    };
+    phoneIds.forEach((id) => mark(id, 'phone'));
+    nameIds.forEach((id) => mark(id, 'name'));
+    addresses.forEach((a) => mark(a.customer_id, 'address'));
+    if (!reasons.size) return { data: [] };
+
+    const matchedAddressId = new Map(
+      addresses.map((a) => [a.customer_id, a.id]),
+    );
+    const customers = await this.prisma.customer.findMany({
+      where: { id: { in: [...reasons.keys()] } },
+      include: {
+        addresses: { orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] },
       },
-      select: { id: true },
     });
-    if (dup) throw new ConflictException('PHONE_EXISTS');
+
+    const data = customers.map((c) => {
+      // Trùng địa chỉ thì hiện đúng địa chỉ trùng, không thì địa chỉ mặc định.
+      const addr =
+        c.addresses.find((a) => a.id === matchedAddressId.get(c.id)) ??
+        c.addresses[0];
+      return {
+        id: c.id.toString(),
+        name: [c.firstName, c.lastName].filter(Boolean).join(' ') || null,
+        phone: c.phone,
+        email: c.email,
+        state: c.state,
+        orders_count: c.ordersCount,
+        total_spent: Number(c.totalSpent),
+        address: addr
+          ? [addr.address1, addr.ward, addr.district, addr.province]
+              .filter(Boolean)
+              .join(', ') || null
+          : null,
+        matched: [...(reasons.get(c.id) ?? [])],
+      };
+    });
+
+    return { data: data.sort(compareDuplicates).slice(0, 10) };
   }
 
   async create(dto: CreateCustomerDto) {
@@ -373,7 +495,14 @@ export class CustomerService {
   async update(id: bigint, dto: UpdateCustomerDto) {
     const existing = await this.prisma.customer.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Không tìm thấy khách hàng');
-    await this.assertPhoneFree(dto.phone, id);
+    // Chỉ kiểm khi SĐT thực sự đổi: dữ liệu sync cũ có sẵn cặp khách trùng số,
+    // kiểm lại mỗi lần lưu thì không sửa được hồ sơ của họ nữa.
+    if (
+      dto.phone !== undefined &&
+      phoneKey(dto.phone) !== phoneKey(existing.phone)
+    ) {
+      await this.assertPhoneFree(dto.phone, id);
+    }
 
     let touchedGroups: bigint[] = [];
 
