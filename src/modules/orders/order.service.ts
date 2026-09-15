@@ -56,6 +56,7 @@ import {
   PayOrderDto,
   ShippingAddressDto,
   UpdateOrderDto,
+  UpdateOrderItemDto,
 } from './order.dto';
 import {
   OrderRepository,
@@ -106,6 +107,7 @@ type ResolvedItem = {
   locationId: bigint;
   productName: string;
   sku: string;
+  note: string | null;
   quantity: number;
   price: number;
   discount: number;
@@ -596,6 +598,53 @@ export class OrderService {
     return { data: serializeOrderDetail(updated) };
   }
 
+  /**
+   * Ghi chú của MỘT dòng hàng trong đơn.
+   *
+   * Cố tình không đi qua `update()`: sửa đơn bị chặn sau khi xác nhận vì đụng
+   * tiền và tồn, còn ghi chú dòng thì không đụng gì cả — mà đúng lúc đơn đang
+   * xử lý mới phát sinh yêu cầu riêng ("khắc tên", "nới size"). Chặn ở đó thì
+   * ô ghi chú vô dụng đúng lúc cần nhất.
+   */
+  async updateItemNote(
+    orderId: bigint,
+    itemId: bigint,
+    dto: UpdateOrderItemDto,
+    user: AuthUser,
+  ) {
+    const order = await this.repo.findById(orderId);
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    assertLocationPermission(user, 'order:update', order.locationId);
+
+    const item = order.items.find((i) => i.id === itemId);
+    if (!item) {
+      throw new NotFoundException('Không tìm thấy dòng hàng trong đơn này');
+    }
+
+    const note = dto.note?.trim() || null;
+
+    const updated = await this.repo.client.$transaction(async (tx) => {
+      await tx.orderItem.update({ where: { id: itemId }, data: { note } });
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'order.item_note',
+          entityType: 'order',
+          entityId: orderId,
+          // Ghi cả nội dung: ghi chú dòng là chỉ dẫn gia công, sau này cãi nhau
+          // "ai bảo khắc tên đó" thì lịch sử phải trả lời được.
+          metadata: { code: order.name, sku: item.sku, note },
+        },
+      });
+      return tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: orderInclude,
+      });
+    });
+
+    return { data: serializeOrderDetail(updated) };
+  }
+
   /** Thanh toán đơn (toàn bộ hoặc một phần) — phiếu thu + giảm công nợ KH */
   async pay(id: bigint, dto: PayOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
@@ -882,6 +931,7 @@ export class OrderService {
                 variantId: i.variantId,
                 name: i.productName,
                 sku: i.sku,
+                note: i.note,
                 quantity: i.quantity,
                 price: i.price,
                 totalDiscount: i.discount,
@@ -1409,6 +1459,7 @@ export class OrderService {
         locationId,
         productName: variant.product.name,
         sku: variant.sku,
+        note: item.note?.trim() || null,
         quantity: item.quantity,
         price,
         discount,
