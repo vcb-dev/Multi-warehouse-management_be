@@ -24,6 +24,7 @@ import {
   OrderTransitionDto,
   PayOrderDto,
   UpdateOrderDto,
+  UpdateOrderItemDto,
 } from './order.dto';
 import { OrderExportService } from './order-export.service';
 import { OrderService } from './order.service';
@@ -95,6 +96,22 @@ export class OrdersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.orders.update(id, dto, user);
+  }
+
+  /**
+   * Ghi chú cho một dòng hàng. Route riêng thay vì nhét vào `PUT :id`: sửa đơn
+   * chỉ cho phép khi đơn chưa xác nhận, còn ghi chú dòng thì lúc nào cũng ghi
+   * được vì không đụng tiền hay tồn.
+   */
+  @Put(':id/items/:itemId')
+  @RequirePermission('order:update')
+  updateItem(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('itemId', ParseBigIntPipe) itemId: bigint,
+    @Body() dto: UpdateOrderItemDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.orders.updateItemNote(id, itemId, dto, user);
   }
 
   @Post(':id/transition')

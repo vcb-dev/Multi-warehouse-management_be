@@ -24,6 +24,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   'purchase_return.confirm_refund': 'Xác nhận đã nhận hoàn tiền',
   'order.create': 'Tạo đơn hàng',
   'order.update': 'Cập nhật đơn hàng',
+  'order.item_note': 'Ghi chú dòng hàng',
   'order.transition_processing': 'Chuyển đơn sang xử lý',
   'order.complete': 'Hoàn thành đơn hàng',
   'order.cancel': 'Hủy đơn hàng',
