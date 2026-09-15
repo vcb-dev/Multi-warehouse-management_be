@@ -13,6 +13,7 @@ import {
   parseIdList,
   parseIntRange,
   parseList,
+  parseSort,
   textContainsAny,
 } from '../../common/query/filter-params';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
@@ -109,6 +110,51 @@ function productClause(
   return any ? clause : undefined;
 }
 
+/**
+ * Cột được phép xếp thứ tự ở màn tồn kho (`?sort=price_asc`).
+ *
+ * Chỉ gồm cột có thật trong DB: các cột NXT (tồn đầu kì, bán 15/30/90 ngày...)
+ * tính sau khi phân trang nên xếp theo chúng chỉ đúng trong phạm vi trang.
+ */
+const INVENTORY_SORT_FIELDS = ['price', 'cost', 'on_hand'] as const;
+
+type InventorySort = {
+  field: (typeof INVENTORY_SORT_FIELDS)[number];
+  dir: 'asc' | 'desc';
+};
+
+/** Thứ tự cho nhánh "mọi kho" — xếp thẳng trên inventory_levels/variant. */
+function levelOrderBy(
+  sort: InventorySort | undefined,
+): Prisma.InventoryLevelOrderByWithRelationInput[] {
+  if (!sort) {
+    return [{ location: { code: 'asc' } }, { variant: { sku: 'asc' } }];
+  }
+  // Chốt thêm sku để hai dòng cùng giá không đảo chỗ giữa các trang.
+  const tail: Prisma.InventoryLevelOrderByWithRelationInput = {
+    variant: { sku: 'asc' },
+  };
+  if (sort.field === 'on_hand') return [{ onHand: sort.dir }, tail];
+  return [{ variant: { [sort.field]: sort.dir } }, tail];
+}
+
+/**
+ * Thứ tự cho nhánh "chọn kho" — nhánh này duyệt variant nên chỉ xếp được theo
+ * cột của variant; `on_hand` đi đường riêng qua {@link InventoryQueryService.variantIdsByOnHand}.
+ */
+function variantOrderBy(
+  sort: InventorySort | undefined,
+): Prisma.ProductVariantOrderByWithRelationInput[] {
+  if (!sort || sort.field === 'on_hand') return [{ sku: 'asc' }];
+  return [{ [sort.field]: sort.dir }, { sku: 'asc' }];
+}
+
+/** Xếp lại rows theo đúng thứ tự id đã lấy được (`in` không giữ thứ tự). */
+function orderByIds<T extends { id: bigint }>(rows: T[], ids: bigint[]): T[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
+}
+
 @Injectable()
 export class InventoryQueryService {
   constructor(
@@ -150,9 +196,20 @@ export class InventoryQueryService {
     return this.listExistingLevels(query, user);
   }
 
-  /** Lấy toàn bộ dòng khớp filter (không phân trang) — dùng cho Xuất file */
+  /**
+   * Lấy toàn bộ dòng khớp filter (không phân trang) — dùng cho Xuất file.
+   *
+   * File xuất luôn giữ thứ tự mặc định: xếp theo tồn cuối kì ở nhánh chọn kho
+   * phải nạp id của cả bảng rồi tra ngược bằng `IN`, thứ chỉ chịu được một
+   * trang chứ không phải 100k dòng.
+   */
   async exportRows(query: ListInventoryQueryDto, user: AuthUser) {
-    const unpaginated = { ...query, page: 1, page_size: 100000 };
+    const unpaginated = {
+      ...query,
+      sort: undefined,
+      page: 1,
+      page_size: 100000,
+    };
     const { data } = query.location_id
       ? await this.listByWarehouse(unpaginated, user)
       : await this.listExistingLevels(unpaginated, user);
@@ -166,6 +223,7 @@ export class InventoryQueryService {
     const page = query.page ?? 1;
     const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildLevelWhere(query, user);
+    const sort = parseSort(query.sort, INVENTORY_SORT_FIELDS);
 
     const [rows, total] = await Promise.all([
       this.prisma.inventoryLevel.findMany({
@@ -176,7 +234,7 @@ export class InventoryQueryService {
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        orderBy: [{ location: { code: 'asc' } }, { variant: { sku: 'asc' } }],
+        orderBy: levelOrderBy(sort),
       }),
       this.prisma.inventoryLevel.count({ where }),
     ]);
@@ -203,18 +261,37 @@ export class InventoryQueryService {
     });
 
     const variantWhere = await this.buildVariantWhere(query, locationId);
+    const sort = parseSort(query.sort, INVENTORY_SORT_FIELDS);
+    // Tồn cuối kì nằm ở bảng khác, lại phải tính variant chưa có bản ghi tồn là
+    // 0 — Prisma không xếp được theo quan hệ 1-nhiều nên trang này lấy id từ SQL.
+    const onHandPage =
+      sort?.field === 'on_hand'
+        ? await this.variantIdsByOnHand(
+            variantWhere,
+            locationId,
+            sort.dir,
+            page,
+            pageSize,
+          )
+        : null;
+
+    const include = {
+      product: true,
+      inventoryLevels: { where: { locationId } },
+    } satisfies Prisma.ProductVariantInclude;
 
     const [variants, total] = await Promise.all([
-      this.prisma.productVariant.findMany({
-        where: variantWhere,
-        include: {
-          product: true,
-          inventoryLevels: { where: { locationId } },
-        },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        orderBy: { sku: 'asc' },
-      }),
+      onHandPage
+        ? this.prisma.productVariant
+            .findMany({ where: { id: { in: onHandPage } }, include })
+            .then((rows) => orderByIds(rows, onHandPage))
+        : this.prisma.productVariant.findMany({
+            where: variantWhere,
+            include,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            orderBy: variantOrderBy(sort),
+          }),
       this.prisma.productVariant.count({ where: variantWhere }),
     ]);
 
@@ -255,6 +332,49 @@ export class InventoryQueryService {
       page,
       page_size: pageSize,
     };
+  }
+
+  /**
+   * Id variant của một trang, xếp theo tồn cuối kì tại kho đang chọn.
+   *
+   * Không có bộ lọc thì để SQL quét thẳng; có lọc thì lấy id khớp từ Prisma rồi
+   * truyền vào SQL — chép lại toàn bộ điều kiện lọc sang SQL thô là nguồn sai
+   * lệch chắc chắn xảy ra khi thêm bộ lọc mới. Mảng id đi bằng MỘT tham số
+   * `ANY($1)` chứ không phải `IN (...)`: danh sách có thể tới 15k phần tử, sát
+   * trần 32.767 bind variable của Postgres.
+   */
+  private async variantIdsByOnHand(
+    where: Prisma.ProductVariantWhereInput,
+    locationId: bigint,
+    dir: 'asc' | 'desc',
+    page: number,
+    pageSize: number,
+  ): Promise<bigint[]> {
+    const filteredIds = Object.keys(where).length
+      ? (
+          await this.prisma.productVariant.findMany({
+            where,
+            select: { id: true },
+          })
+        ).map((row) => row.id.toString())
+      : null;
+    if (filteredIds && !filteredIds.length) return [];
+
+    const idFilter = filteredIds
+      ? Prisma.sql`AND v.id = ANY(${filteredIds}::bigint[])`
+      : Prisma.empty;
+    const order = dir === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+
+    const rows = await this.prisma.$queryRaw<{ id: bigint }[]>`
+      SELECT v.id
+      FROM product_variants v
+      LEFT JOIN inventory_levels l
+        ON l.variant_id = v.id AND l.location_id = ${locationId}
+      WHERE TRUE ${idFilter}
+      ORDER BY COALESCE(l.on_hand, 0) ${order}, v.sku ASC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `;
+    return rows.map((row) => row.id);
   }
 
   private async buildVariantWhere(

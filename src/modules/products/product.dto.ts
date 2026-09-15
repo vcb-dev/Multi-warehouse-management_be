@@ -261,6 +261,17 @@ export class ListProductsQueryDto {
   @IsString()
   created_on_max?: string;
 
+  // --- Sắp xếp ---
+
+  /**
+   * `price_asc` | `price_desc` — theo "Giá từ" của sản phẩm, tức giá thấp nhất
+   * trong các phiên bản đang bán. Bỏ trống thì giữ thứ tự mặc định (sửa gần nhất
+   * lên đầu).
+   */
+  @IsOptional()
+  @IsIn(['price_asc', 'price_desc'])
+  sort?: 'price_asc' | 'price_desc';
+
   @IsOptional()
   @IsInt()
   @Min(1)

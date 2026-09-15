@@ -158,6 +158,23 @@ export class ListInventoryQueryDto {
   @IsString()
   created_on_max?: string;
 
+  // --- Sắp xếp ---
+
+  /**
+   * `<trường>_asc` | `<trường>_desc` với trường thuộc {giá bán, giá vốn, tồn
+   * cuối kì}. Bỏ trống thì giữ thứ tự mặc định của màn (theo kho rồi tới SPU).
+   */
+  @IsOptional()
+  @IsIn([
+    'price_asc',
+    'price_desc',
+    'cost_asc',
+    'cost_desc',
+    'on_hand_asc',
+    'on_hand_desc',
+  ])
+  sort?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
