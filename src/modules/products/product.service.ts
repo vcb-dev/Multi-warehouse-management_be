@@ -17,6 +17,7 @@ import {
   textContainsAny,
 } from '../../common/query/filter-params';
 import { CategoryService } from '../categories/category.service';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateProductDto,
   ListProductsQueryDto,
@@ -38,6 +39,8 @@ import { serializeVariantPriceHistory } from './variant-price-history.serializer
 
 /** SP nhiều variant + DB remote — syncVariants có thể > 5s mặc định của Prisma */
 const PRODUCT_TX_TIMEOUT_MS = 30_000;
+/** Thời gian cộng thêm cho mỗi dòng tồn ban đầu > 0 ghi qua InventoryService */
+const STOCK_ENTRY_TX_MS = 1_000;
 
 /** Trường được phép xếp thứ tự ở màn danh sách (`?sort=price_asc`) */
 const PRODUCT_SORT_FIELDS = ['price'] as const;
@@ -62,6 +65,7 @@ export class ProductService {
     private variants: VariantService,
     private categories: CategoryService,
     private priceHistory: VariantPriceHistoryService,
+    private inventory: InventoryService,
   ) {}
 
   async buildListWhere(
@@ -271,9 +275,20 @@ export class ProductService {
     }
 
     const variantRows = this.buildVariantRows(options, dto);
+    if (!variantRows.length) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Sản phẩm phải có ít nhất một phiên bản',
+        422,
+      );
+    }
     for (const row of variantRows) {
       if (!row.sku) throw this.missingSku(row.optionValues);
     }
+    const stockEntries = await this.validateInitialInventories(
+      variantRows,
+      user,
+    );
 
     const product = await this.repo.client.$transaction(
       async (tx) => {
@@ -355,6 +370,17 @@ export class ProductService {
             },
           });
 
+          if (vr.inventories.length) {
+            await this.seedInventory(tx, {
+              variantId: variant.id,
+              productId: p.id,
+              price: vr.price,
+              cost: vr.cost ?? 0,
+              inventories: vr.inventories,
+              userId: user.userId,
+            });
+          }
+
           // await this.priceHistory.logIfChanged({
           //   tx,
           //   variantId: variant.id,
@@ -402,7 +428,8 @@ export class ProductService {
 
         return p;
       },
-      { timeout: PRODUCT_TX_TIMEOUT_MS },
+      // Mỗi dòng tồn ban đầu là thêm vài lượt khoá/ghi tới DB remote
+      { timeout: PRODUCT_TX_TIMEOUT_MS + stockEntries * STOCK_ENTRY_TX_MS },
     );
 
     const count = await this.repo.client.productVariant.count({
@@ -419,6 +446,13 @@ export class ProductService {
   async update(id: bigint, dto: UpdateProductDto, user: AuthUser) {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Không tìm thấy sản phẩm');
+    if (dto.variants?.some((v) => v.inventories?.length)) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Tồn kho chỉ nhập được lúc tạo sản phẩm — sau đó hãy dùng phiếu nhập hàng hoặc kiểm kho',
+        422,
+      );
+    }
 
     const newSkus = dto.variants?.map((v) => v.sku) ?? [];
     const keepSkus = existing.variants.map((v) => v.sku);
@@ -717,18 +751,26 @@ export class ProductService {
           weight: v?.weight,
           weightUnit: v?.weight_unit,
           optionValues: [] as string[],
+          inventories: v?.inventories ?? [],
           ...this.resolveVariantFlags(dto, v),
         },
       ];
     }
 
-    const combos = this.variants.cartesian(options);
     const byKey = new Map(
       (variants ?? []).map((v) => [
         this.variants.optionKey(v.option_values),
         v,
       ]),
     );
+    // Gửi kèm danh sách phiên bản thì chỉ tạo đúng các tổ hợp có trong đó —
+    // người dùng được xoá bớt tổ hợp không bán (giống Sapo). Không gửi thì
+    // sinh đủ tích Descartes như trước.
+    const combos = this.variants
+      .cartesian(options)
+      .filter(
+        (values) => !byKey.size || byKey.has(this.variants.optionKey(values)),
+      );
 
     return combos.map((optionValues) => {
       const key = this.variants.optionKey(optionValues);
@@ -743,9 +785,109 @@ export class ProductService {
         weight: input?.weight,
         weightUnit: input?.weight_unit,
         optionValues,
+        inventories: input?.inventories ?? [],
         ...this.resolveVariantFlags(dto, input),
       };
     });
+  }
+
+  /**
+   * Kiểm tra kho + tồn ban đầu gửi kèm từng phiên bản trước khi mở transaction.
+   * Trả về số dòng có tồn > 0 (mỗi dòng là một bút toán kho) để nới timeout.
+   */
+  private async validateInitialInventories(
+    rows: ReturnType<ProductService['buildVariantRows']>,
+    user: AuthUser,
+  ): Promise<number> {
+    const locationIds = new Set<string>();
+    let stockEntries = 0;
+
+    for (const row of rows) {
+      const label = row.optionValues.join(' / ') || row.sku;
+      const seen = new Set<string>();
+      for (const inv of row.inventories) {
+        if (seen.has(inv.location_id)) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Phiên bản ${label} chọn trùng một kho hai lần`,
+            422,
+          );
+        }
+        seen.add(inv.location_id);
+        locationIds.add(inv.location_id);
+        if (inv.on_hand <= 0) continue;
+        if (row.inventoryManagement === '') {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Phiên bản ${label} không quản lý tồn kho nên không nhập được tồn ban đầu`,
+            422,
+          );
+        }
+        // Nhập tồn ban đầu tương đương nhập hàng vào kho đó
+        assertLocationPermission(user, 'inventory:receive', inv.location_id);
+        stockEntries += 1;
+      }
+    }
+
+    if (locationIds.size) {
+      const active = await this.repo.client.location.findMany({
+        where: {
+          id: { in: [...locationIds].map((id) => BigInt(id)) },
+          status: 'active',
+        },
+        select: { id: true },
+      });
+      if (active.length !== locationIds.size) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Kho đã chọn không tồn tại hoặc đã ngừng hoạt động',
+          422,
+        );
+      }
+    }
+
+    return stockEntries;
+  }
+
+  /**
+   * Gắn phiên bản vừa tạo vào các kho đã chọn (kể cả kho tồn 0, để phiên bản
+   * hiện ở kho đó như Sapo). Tồn ban đầu > 0 đi qua InventoryService như một
+   * lần điều chỉnh để sổ biến động khớp với tồn và truy được về sản phẩm.
+   */
+  private async seedInventory(
+    tx: Prisma.TransactionClient,
+    input: {
+      variantId: bigint;
+      productId: bigint;
+      price: number;
+      cost: number;
+      inventories: { location_id: string; on_hand: number }[];
+      userId: bigint;
+    },
+  ) {
+    await tx.inventoryLevel.createMany({
+      data: input.inventories.map((inv) => ({
+        variantId: input.variantId,
+        locationId: BigInt(inv.location_id),
+        price: input.price,
+        cost: input.cost,
+      })),
+      skipDuplicates: true,
+    });
+    for (const inv of input.inventories) {
+      if (inv.on_hand <= 0) continue;
+      await this.inventory.adjustOnHandTo(
+        {
+          variantId: input.variantId,
+          locationId: BigInt(inv.location_id),
+          targetOnHand: inv.on_hand,
+          referenceType: 'product',
+          referenceId: input.productId,
+          createdById: input.userId,
+        },
+        tx,
+      );
+    }
   }
 
   private sortedOptionValues(
