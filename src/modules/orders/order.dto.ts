@@ -478,6 +478,18 @@ export class UpdateOrderDto {
   @IsNumber()
   @Min(0)
   tax_rate?: number;
+
+  /** Thông tin liên hệ riêng của đơn — không đổi hồ sơ khách hàng */
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  /** Người nhận + địa chỉ giao của riêng đơn này. Trường không gửi thì giữ
+   * nguyên, gửi chuỗi rỗng là xoá. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ShippingAddressDto)
+  shipping_address?: ShippingAddressDto;
 }
 
 export class OrderTransitionDto {
