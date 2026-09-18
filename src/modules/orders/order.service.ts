@@ -44,6 +44,10 @@ import { generateOrderCode } from './order-code';
 import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
 import { recomputeOrderRefundStatuses } from './order-refund-status';
 import {
+  buildShippingAddressPatch,
+  recipientSnapshot,
+} from './order-shipping-address';
+import {
   calcLineTotal,
   calcOrderTotals,
   deriveTaxRate,
@@ -557,6 +561,14 @@ export class OrderService {
     if (dto.shipping_method !== undefined) {
       data.shippingMethod = dto.shipping_method.trim() || null;
     }
+    if (dto.email !== undefined) data.email = dto.email.trim() || null;
+
+    // Người nhận riêng của đơn: sửa ở đây không đụng hồ sơ khách hàng.
+    const shippingPatch = dto.shipping_address
+      ? buildShippingAddressPatch(order, dto.shipping_address)
+      : {};
+    const recipientChanged = Object.keys(shippingPatch).length > 0;
+    Object.assign(data, shippingPatch);
 
     const totalDelta = totals.totalPrice - Number(order.totalPrice);
 
@@ -589,7 +601,17 @@ export class OrderService {
           action: 'order.update',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.name },
+          // Đổi người nhận là chuyện hay bị hỏi lại ("ai sửa địa chỉ?") —
+          // giữ cả bản trước và sau.
+          metadata: recipientChanged
+            ? {
+                code: order.name,
+                recipient: {
+                  before: recipientSnapshot(order),
+                  after: recipientSnapshot({ ...order, ...shippingPatch }),
+                },
+              }
+            : { code: order.name },
         },
       });
 
