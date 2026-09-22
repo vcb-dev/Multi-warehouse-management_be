@@ -13,6 +13,7 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { TiktokAuthService } from '../src/modules/channels/tiktok/tiktok-auth.service';
 import { TiktokReturnSyncService } from '../src/modules/channels/tiktok/tiktok-return-sync.service';
+import { NotificationService } from '../src/modules/notifications/notification.service';
 
 function arg(name: string): string | undefined {
   return process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
@@ -28,7 +29,16 @@ async function main() {
   }
 
   const prisma = new PrismaClient() as unknown as PrismaService;
-  const sync = new TiktokReturnSyncService(prisma, new TiktokAuthService(prisma));
+  // Chạy tay là để vá dữ liệu theo khoảng ngày tự chọn, không phải để báo cho ai — nuốt
+  // `emit` như `scripts/sync-tiktok-orders.ts`. Thông báo thật do cron/webhook sinh ra.
+  const notifications = {
+    emit: async () => undefined,
+  } as unknown as NotificationService;
+  const sync = new TiktokReturnSyncService(
+    prisma,
+    new TiktokAuthService(prisma),
+    notifications,
+  );
 
   const actor =
     (await prisma.user.findFirst({

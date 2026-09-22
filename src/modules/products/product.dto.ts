@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   MinLength,
@@ -29,6 +30,16 @@ export class ProductOptionDto {
   @IsArray()
   @IsString({ each: true })
   values!: string[];
+}
+
+/** Kho chứa một phiên bản và tồn ban đầu tại kho đó */
+export class VariantInventoryDto {
+  @Matches(/^\d+$/, { message: 'location_id không hợp lệ' })
+  location_id!: string;
+
+  @IsInt()
+  @Min(0)
+  on_hand!: number;
 }
 
 export class ProductVariantDto {
@@ -90,6 +101,17 @@ export class ProductVariantDto {
   @IsOptional()
   @IsBoolean()
   allow_backorder?: boolean;
+
+  /**
+   * Kho chứa phiên bản kèm tồn ban đầu (mục "Phiên bản" ở màn thêm sản phẩm,
+   * giống Sapo). Chỉ nhận lúc TẠO sản phẩm — tồn sau đó phải đổi qua chứng từ
+   * kho (nhập hàng, kiểm kho) để còn dấu vết.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantInventoryDto)
+  inventories?: VariantInventoryDto[];
 }
 
 export class CreateProductDto {
@@ -260,6 +282,17 @@ export class ListProductsQueryDto {
   @IsOptional()
   @IsString()
   created_on_max?: string;
+
+  // --- Sắp xếp ---
+
+  /**
+   * `price_asc` | `price_desc` — theo "Giá từ" của sản phẩm, tức giá thấp nhất
+   * trong các phiên bản đang bán. Bỏ trống thì giữ thứ tự mặc định (sửa gần nhất
+   * lên đầu).
+   */
+  @IsOptional()
+  @IsIn(['price_asc', 'price_desc'])
+  sort?: 'price_asc' | 'price_desc';
 
   @IsOptional()
   @IsInt()

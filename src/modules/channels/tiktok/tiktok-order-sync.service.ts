@@ -13,6 +13,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { marketplaceOrderUrl } from '../channel-order-link';
+import { isWithinNotifyWindow, shouldNotifyCancelled } from '../sync-notify';
 import {
   TiktokApiClient,
   TiktokOrder,
@@ -21,20 +22,12 @@ import {
 import { TiktokAuthService } from './tiktok-auth.service';
 
 /**
- * Đơn đặt cách đây quá số giờ này thì kéo về im lặng, không sinh thông báo.
- * Mục đích duy nhất: sync bù khoảng đã hụt không làm ngập chuông bằng đơn cũ.
- */
-/**
  * Hạn cho giao dịch ghi một đơn. Mặc định của Prisma là 5 giây — quá ngắn cho DB dùng
  * chung: đo 2026-08-18, một lượt backfill tháng 5 chết giữa chừng với
  * "Transaction already closed ... 67905 ms passed since the start of the transaction"
  * vì phải xếp hàng chờ connection với cron 15 phút đang chạy song song.
  */
 const ORDER_TX_OPTIONS = { maxWait: 15_000, timeout: 30_000 };
-
-const SYNC_NOTIFY_MAX_AGE_HOURS = Number(
-  process.env.SYNC_NOTIFY_MAX_AGE_HOURS ?? 24,
-);
 
 /**
  * Kéo đơn thẳng từ TikTok Shop Open API vào bảng `orders` — KHÔNG đi qua Sapo.
@@ -360,7 +353,14 @@ export class TiktokOrderSyncService {
 
     const existing = await this.prisma.order.findUnique({
       where: { name: order.id },
-      select: { id: true },
+      // `status` để so được trạng thái cũ với trạng thái TikTok vừa trả về — đó là cách
+      // duy nhất biết đơn VỪA bị huỷ. `fulfillments` để biết có kiện hàng thật hay không;
+      // xem `notifyCancelledSyncedOrder`.
+      select: {
+        id: true,
+        status: true,
+        fulfillments: { select: { id: true }, take: 1 },
+      },
     });
 
     const fulfillment = mapFulfillmentRecord(order, locationId, createdById);
@@ -438,8 +438,20 @@ export class TiktokOrderSyncService {
       }
     }, ORDER_TX_OPTIONS);
 
-    if (newOrderId !== null) {
-      this.notifyNewSyncedOrder(newOrderId, order, data, locationId);
+    // `emit()` tự nuốt lỗi, nhưng phần dựng nội dung ở đây thì không — mà nguyên tắc của
+    // dự án là thông báo hỏng tuyệt đối không được làm hỏng việc ghi đơn.
+    try {
+      if (newOrderId !== null) {
+        this.notifyNewSyncedOrder(newOrderId, order, data, locationId);
+      }
+      if (existing) {
+        this.notifyCancelledSyncedOrder(existing, order, data, locationId);
+      }
+    } catch (e) {
+      this.logger.error(
+        `Dựng thông báo cho đơn TikTok ${order.id} thất bại`,
+        e instanceof Error ? e.stack : String(e),
+      );
     }
 
     return { created: !existing, skippedLines, keptExistingLines };
@@ -450,10 +462,10 @@ export class TiktokOrderSyncService {
    * hệ thống — trước đây im lặng hoàn toàn vì sync ghi thẳng `tx.order.create()`, không
    * đi qua `OrderService.create()` (nơi duy nhất có `emit`).
    *
-   * ⚠️ Chốt chặn backfill: chỉ báo đơn ĐẶT TRONG {@link SYNC_NOTIFY_MAX_AGE_HOURS} giờ
-   * gần đây. Sync bù các khoảng đã hụt (hiện còn ~3.043 đơn Sapo chưa về) sẽ tạo hàng
-   * nghìn đơn cũ một lúc — không có chặn này thì mỗi nhân viên nhận vài nghìn thông báo
-   * về đơn từ tháng trước, chuông thành vô dụng vĩnh viễn.
+   * ⚠️ Chốt chặn backfill ({@link isWithinNotifyWindow}): chỉ báo đơn ĐẶT gần đây. Sync
+   * bù các khoảng đã hụt (hiện còn ~3.043 đơn Sapo chưa về) sẽ tạo hàng nghìn đơn cũ một
+   * lúc — không có chặn này thì mỗi nhân viên nhận vài nghìn thông báo về đơn từ tháng
+   * trước, chuông thành vô dụng vĩnh viễn.
    */
   private notifyNewSyncedOrder(
     orderId: bigint,
@@ -461,11 +473,7 @@ export class TiktokOrderSyncService {
     data: { createdOn?: Date | null },
     locationId: bigint,
   ) {
-    const placedAt = data.createdOn ?? null;
-    if (!placedAt) return;
-
-    const ageHours = (Date.now() - placedAt.getTime()) / 3_600_000;
-    if (ageHours > SYNC_NOTIFY_MAX_AGE_HOURS) return;
+    if (!isWithinNotifyWindow(data.createdOn)) return;
 
     void this.notifications.emit(NotificationTopic.orders_create, {
       subjectType: 'order',
@@ -473,6 +481,48 @@ export class TiktokOrderSyncService {
       locationId,
       title: `Đơn TikTok mới ${order.id}`,
       payload: { code: order.id, source_name: 'tiktok' },
+    });
+  }
+
+  /**
+   * Thông báo "đơn đã bị huỷ" khi TikTok huỷ một đơn đã có sẵn trong DB.
+   *
+   * Trước đây `orders_cancelled` chỉ được bắn ở `OrderService.cancel()` — tức là chỉ khi
+   * nhân viên tự bấm Huỷ trên UI. Đơn sàn huỷ ở phía TikTok đi vào nhánh `update` của sync
+   * nên im lặng tuyệt đối: đo 09/09/2026 có 5.717 đơn TikTok `cancelled` trong DB mà bảng
+   * `notifications` không có lấy một dòng `orders/cancelled` nào. Sync là chỗ DUY NHẤT
+   * nhìn thấy việc huỷ xảy ra.
+   *
+   * ⚠️ Chốt chặn tuổi ở đây tính theo `cancelledOn` (lúc huỷ), KHÁC
+   * {@link notifyNewSyncedOrder} vốn tính theo ngày đặt đơn. Đơn đặt tuần trước mà vừa huỷ
+   * sáng nay vẫn phải báo; ngược lại lượt sync bù gặp hàng nghìn đơn huỷ từ tháng trước thì
+   * `cancelledOn` đã cũ nên tất cả bị chặn.
+   */
+  private notifyCancelledSyncedOrder(
+    existing: { id: bigint; status: OrderStatus; fulfillments: unknown[] },
+    order: TiktokOrder,
+    data: { status: OrderStatus; cancelledOn?: Date | null },
+    locationId: bigint,
+  ) {
+    if (
+      !shouldNotifyCancelled(
+        existing.status,
+        data,
+        existing.fulfillments.length > 0,
+      )
+    )
+      return;
+
+    void this.notifications.emit(NotificationTopic.orders_cancelled, {
+      subjectType: 'order',
+      subjectId: existing.id,
+      locationId,
+      title: `Đơn TikTok ${order.id} đã bị huỷ`,
+      payload: {
+        code: order.id,
+        source_name: 'tiktok',
+        reason: order.cancel_reason ?? null,
+      },
     });
   }
 

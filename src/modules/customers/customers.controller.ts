@@ -21,10 +21,14 @@ import { CustomerService } from './customer.service';
 import {
   CreateCustomerDebtAdjustmentDto,
   CreateCustomerDto,
+  CustomerDuplicateQueryDto,
   ListCustomerLedgerQueryDto,
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './customer.dto';
+
+/** Số dòng tối đa của dropdown chọn khách */
+const OPTIONS_LIMIT = 20;
 
 @ApiTags('customers')
 @ApiBearerAuth()
@@ -48,15 +52,27 @@ export class CustomersController {
   @RequirePermission('customer:view', 'order:create')
   async options(@Query('q') q?: string) {
     const term = q?.trim();
+    // Cắt ngay trong SQL: dropdown chỉ hiện 20 dòng, mà nạp hết id ứng viên rồi
+    // mới `in` là vừa chậm vừa có ngày vượt trần bind variable của Postgres.
+    const ids = term
+      ? await findCustomerIdsByQuery(this.prisma, term, OPTIONS_LIMIT)
+      : null;
     const rows = await this.prisma.customer.findMany({
-      where: term
-        ? { id: { in: await findCustomerIdsByQuery(this.prisma, term) } }
-        : undefined,
-      take: 20,
+      where: ids ? { id: { in: ids } } : undefined,
+      take: OPTIONS_LIMIT,
       orderBy: { id: 'desc' },
     });
+    // `findMany` trả về theo thứ tự của nó, nên phải xếp lại theo đúng thứ tự
+    // ưu tiên mà câu tìm đã tính (khớp SĐT / khớp đầu chữ lên trước).
+    const byId = new Map(rows.map((c) => [c.id, c]));
+    const ordered = ids
+      ? ids.flatMap((id) => {
+          const row = byId.get(id);
+          return row ? [row] : [];
+        })
+      : rows;
     return {
-      data: rows.map((c) => ({
+      data: ordered.map((c) => ({
         id: c.id.toString(),
         first_name: c.firstName,
         last_name: c.lastName,
@@ -72,6 +88,16 @@ export class CustomersController {
           c.email,
       })),
     };
+  }
+
+  /**
+   * Khách đã có có thể trùng với khách sắp tạo (SĐT, họ tên, địa chỉ). Khai báo
+   * trước `:id` để Nest không hiểu `duplicates` là một id.
+   */
+  @Get('duplicates')
+  @RequirePermission('customer:view', 'customer:manage')
+  duplicates(@Query() query: CustomerDuplicateQueryDto) {
+    return this.customers.findDuplicates(query);
   }
 
   @Get(':id')

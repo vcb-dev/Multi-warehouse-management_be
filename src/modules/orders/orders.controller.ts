@@ -21,9 +21,11 @@ import {
   CreateOrderDto,
   ExportOrdersQueryDto,
   ListOrdersQueryDto,
+  OrderFacetQueryDto,
   OrderTransitionDto,
   PayOrderDto,
   UpdateOrderDto,
+  UpdateOrderItemDto,
 } from './order.dto';
 import { OrderExportService } from './order-export.service';
 import { OrderService } from './order.service';
@@ -50,8 +52,14 @@ export class OrdersController {
     return this.orders.create(dto, user);
   }
 
-  // Hai route 'export*' phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
-  // 'export' thành id và trả 404.
+  // Các route tên cố định phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
+  // tên thành id và trả 404.
+  @Get('tags')
+  @RequirePermission('order:view')
+  tags(@Query() query: OrderFacetQueryDto) {
+    return this.orders.listTags(query);
+  }
+
   @Get('export/fields')
   @RequirePermission('order:view')
   exportFields(@Query() query: ExportOrdersQueryDto) {
@@ -95,6 +103,22 @@ export class OrdersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.orders.update(id, dto, user);
+  }
+
+  /**
+   * Ghi chú cho một dòng hàng. Route riêng thay vì nhét vào `PUT :id`: sửa đơn
+   * chỉ cho phép khi đơn chưa xác nhận, còn ghi chú dòng thì lúc nào cũng ghi
+   * được vì không đụng tiền hay tồn.
+   */
+  @Put(':id/items/:itemId')
+  @RequirePermission('order:update')
+  updateItem(
+    @Param('id', ParseBigIntPipe) id: bigint,
+    @Param('itemId', ParseBigIntPipe) itemId: bigint,
+    @Body() dto: UpdateOrderItemDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.orders.updateItemNote(id, itemId, dto, user);
   }
 
   @Post(':id/transition')

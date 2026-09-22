@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
   ValidateNested,
@@ -34,6 +35,33 @@ export class OrderItemDto {
   @IsNumber()
   @Min(0)
   discount?: number;
+
+  /** Ghi chú riêng cho dòng hàng: "khắc tên An", "nới size 16"... */
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+/** Sửa một dòng hàng của đơn đã tạo — hiện chỉ có ghi chú. */
+export class UpdateOrderItemDto {
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+/** Gợi ý giá trị cho ô nhập tự do của đơn (hiện chỉ có tag) */
+export class OrderFacetQueryDto {
+  /** Lọc theo chuỗi con, bỏ dấu tiếng Việt — để ô chọn gõ tìm được */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  @Type(() => Number)
+  limit?: number;
 }
 
 /** Sapo `shipping_address` / `billing_address` */
@@ -450,6 +478,18 @@ export class UpdateOrderDto {
   @IsNumber()
   @Min(0)
   tax_rate?: number;
+
+  /** Thông tin liên hệ riêng của đơn — không đổi hồ sơ khách hàng */
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  /** Người nhận + địa chỉ giao của riêng đơn này. Trường không gửi thì giữ
+   * nguyên, gửi chuỗi rỗng là xoá. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ShippingAddressDto)
+  shipping_address?: ShippingAddressDto;
 }
 
 export class OrderTransitionDto {

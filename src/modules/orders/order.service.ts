@@ -41,7 +41,12 @@ import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
+import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
 import { recomputeOrderRefundStatuses } from './order-refund-status';
+import {
+  buildShippingAddressPatch,
+  recipientSnapshot,
+} from './order-shipping-address';
 import {
   calcLineTotal,
   calcOrderTotals,
@@ -54,7 +59,9 @@ import {
   OrderTransitionDto,
   PayOrderDto,
   ShippingAddressDto,
+  OrderFacetQueryDto,
   UpdateOrderDto,
+  UpdateOrderItemDto,
 } from './order.dto';
 import {
   OrderRepository,
@@ -100,50 +107,12 @@ function stockStatusOf(
     : undefined;
 }
 
-async function computeStockReady(
-  repo: OrderRepository,
-  // Location ở cấp đơn (theo Sapo), nên cặp tra tồn là (variant, location của đơn).
-  orders: {
-    id: bigint;
-    locationId: bigint;
-    items: { variantId: bigint; quantity: number }[];
-  }[],
-) {
-  const pairs = new Map<string, { variantId: bigint; locationId: bigint }>();
-  for (const row of orders) {
-    for (const item of row.items) {
-      pairs.set(`${item.variantId}:${row.locationId}`, {
-        variantId: item.variantId,
-        locationId: row.locationId,
-      });
-    }
-  }
-  const levels = pairs.size
-    ? await repo.client.inventoryLevel.findMany({
-        where: { OR: Array.from(pairs.values()) },
-        select: { variantId: true, locationId: true, onHand: true },
-      })
-    : [];
-  const onHandMap = new Map(
-    levels.map((l) => [`${l.variantId}:${l.locationId}`, l.onHand]),
-  );
-  return new Map<bigint, boolean>(
-    orders.map((row) => [
-      row.id,
-      row.items.every(
-        (i) =>
-          (onHandMap.get(`${i.variantId}:${row.locationId}`) ?? 0) >=
-          i.quantity,
-      ),
-    ]),
-  );
-}
-
 type ResolvedItem = {
   variantId: bigint;
   locationId: bigint;
   productName: string;
   sku: string;
+  note: string | null;
   quantity: number;
   price: number;
   discount: number;
@@ -215,13 +184,8 @@ export class OrderService {
     const stockFilter = stockStatusOf(query);
 
     if (stockFilter) {
-      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ. Không thể chỉ lọc
-      // status='open': dữ liệu Sapo thật có 75.125 đơn 'open' nhưng 73.402 trong
-      // số đó đã giao xong (Sapo không đóng đơn sau khi giao) — nạp hết sẽ vượt
-      // statement_timeout. Thêm fulfillment_status IS NULL để về đúng ~1.7k đơn
-      // thật sự đang chờ, khôi phục giả định "tập này luôn nhỏ" bên dưới.
-      where.status = OrderStatus.open;
-      where.fulfillmentStatus = null;
+      // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ — xem PENDING_ORDER_WHERE.
+      Object.assign(where, PENDING_ORDER_WHERE);
     } else if (query.status === 'closed') {
       // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
       // status='closed' — khớp guard ở order-return.service.ts, vì đa số
@@ -379,7 +343,7 @@ export class OrderService {
         items: { select: { variantId: true, quantity: true } },
       },
     });
-    const readyMap = await computeStockReady(this.repo, rows);
+    const readyMap = await computeStockReady(this.repo.client, rows);
     const wantReady = stockFilter === 'du_hang';
     return rows
       .filter((row) => (readyMap.get(row.id) ?? true) === wantReady)
@@ -404,7 +368,7 @@ export class OrderService {
         orderBy: { createdOn: 'desc' },
         include: orderListInclude,
       });
-      const stockReadyMap = await computeStockReady(this.repo, all);
+      const stockReadyMap = await computeStockReady(this.repo.client, all);
       const wantReady = stockFilter === 'du_hang';
       const filtered = all.filter(
         (row) => (stockReadyMap.get(row.id) ?? true) === wantReady,
@@ -432,7 +396,7 @@ export class OrderService {
       this.repo.count(where),
     ]);
 
-    const stockReadyMap = await computeStockReady(this.repo, rows);
+    const stockReadyMap = await computeStockReady(this.repo.client, rows);
 
     return {
       data: rows.map((row) =>
@@ -597,6 +561,14 @@ export class OrderService {
     if (dto.shipping_method !== undefined) {
       data.shippingMethod = dto.shipping_method.trim() || null;
     }
+    if (dto.email !== undefined) data.email = dto.email.trim() || null;
+
+    // Người nhận riêng của đơn: sửa ở đây không đụng hồ sơ khách hàng.
+    const shippingPatch = dto.shipping_address
+      ? buildShippingAddressPatch(order, dto.shipping_address)
+      : {};
+    const recipientChanged = Object.keys(shippingPatch).length > 0;
+    Object.assign(data, shippingPatch);
 
     const totalDelta = totals.totalPrice - Number(order.totalPrice);
 
@@ -629,11 +601,88 @@ export class OrderService {
           action: 'order.update',
           entityType: 'order',
           entityId: id,
-          metadata: { code: order.name },
+          // Đổi người nhận là chuyện hay bị hỏi lại ("ai sửa địa chỉ?") —
+          // giữ cả bản trước và sau.
+          metadata: recipientChanged
+            ? {
+                code: order.name,
+                recipient: {
+                  before: recipientSnapshot(order),
+                  after: recipientSnapshot({ ...order, ...shippingPatch }),
+                },
+              }
+            : { code: order.name },
         },
       });
 
       return record;
+    });
+
+    return { data: serializeOrderDetail(updated) };
+  }
+
+  /**
+   * Tag đang dùng trên đơn, xếp theo số đơn giảm dần — gợi ý cho ô nhập tag.
+   *
+   * KHÔNG lọc theo kho của người dùng: tag là từ vựng chung của cửa hàng
+   * ("Không cọc", "VAT", "Tiktok Channel"). Lọc theo kho thì nhân viên kho mới
+   * gõ tag chung nào cũng không thấy gợi ý, rồi tự chế ra biến thể mới.
+   */
+  async listTags(query: OrderFacetQueryDto) {
+    const rows = await this.repo.listTags({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 20,
+    });
+    return {
+      data: rows.map((r) => ({
+        tag: r.tag,
+        order_count: Number(r.order_count),
+      })),
+    };
+  }
+
+  /**
+   * Ghi chú của MỘT dòng hàng trong đơn.
+   *
+   * Cố tình không đi qua `update()`: sửa đơn bị chặn sau khi xác nhận vì đụng
+   * tiền và tồn, còn ghi chú dòng thì không đụng gì cả — mà đúng lúc đơn đang
+   * xử lý mới phát sinh yêu cầu riêng ("khắc tên", "nới size"). Chặn ở đó thì
+   * ô ghi chú vô dụng đúng lúc cần nhất.
+   */
+  async updateItemNote(
+    orderId: bigint,
+    itemId: bigint,
+    dto: UpdateOrderItemDto,
+    user: AuthUser,
+  ) {
+    const order = await this.repo.findById(orderId);
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
+    assertLocationPermission(user, 'order:update', order.locationId);
+
+    const item = order.items.find((i) => i.id === itemId);
+    if (!item) {
+      throw new NotFoundException('Không tìm thấy dòng hàng trong đơn này');
+    }
+
+    const note = dto.note?.trim() || null;
+
+    const updated = await this.repo.client.$transaction(async (tx) => {
+      await tx.orderItem.update({ where: { id: itemId }, data: { note } });
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: 'order.item_note',
+          entityType: 'order',
+          entityId: orderId,
+          // Ghi cả nội dung: ghi chú dòng là chỉ dẫn gia công, sau này cãi nhau
+          // "ai bảo khắc tên đó" thì lịch sử phải trả lời được.
+          metadata: { code: order.name, sku: item.sku, note },
+        },
+      });
+      return tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: orderInclude,
+      });
     });
 
     return { data: serializeOrderDetail(updated) };
@@ -925,6 +974,7 @@ export class OrderService {
                 variantId: i.variantId,
                 name: i.productName,
                 sku: i.sku,
+                note: i.note,
                 quantity: i.quantity,
                 price: i.price,
                 totalDiscount: i.discount,
@@ -1452,6 +1502,7 @@ export class OrderService {
         locationId,
         productName: variant.product.name,
         sku: variant.sku,
+        note: item.note?.trim() || null,
         quantity: item.quantity,
         price,
         discount,

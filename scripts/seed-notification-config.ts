@@ -4,6 +4,10 @@
  *
  * Chạy: npx ts-node --compiler-options '{"module":"CommonJS"}' scripts/seed-notification-config.ts
  *
+ * Thêm `--force-routing` để ÁP LẠI người nhận mặc định cho cả những dòng đã có. Mặc định
+ * KHÔNG làm điều đó (chỉ thêm dòng thiếu) vì sẽ xoá lựa chọn admin đã chỉnh trên UI — chỉ
+ * dùng cờ này khi biết chắc chưa ai đụng vào màn Cấu hình > Thông báo.
+ *
  * Vì sao KHÔNG dùng `prisma db seed`: `seedRbac()` trong prisma/seed.ts có
  * `rolePermission.deleteMany()` rồi tạo lại theo DEFAULT_ROLE_PERMISSIONS — chạy trên DB
  * thật sẽ xoá sạch mọi tuỳ chỉnh phân quyền admin đã làm qua màn quản lý vai trò.
@@ -12,32 +16,18 @@
  * Làm 2 việc:
  * 1. Upsert permission `notification:manage` và gán cho các role đang có toàn quyền
  *    (theo DEFAULT_ROLE_PERMISSIONS: role nào khai '*') + store_manager.
- * 2. Upsert 8 dòng `notification_settings` mặc định.
+ * 2. Upsert các dòng `notification_settings` mặc định (danh sách ở
+ *    src/modules/notifications/notification.defaults.ts).
  */
 import 'dotenv/config';
-import { NotificationTopic, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { NOTIFICATION_SETTING_DEFAULTS } from '../src/modules/notifications/notification.defaults';
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSION_CATALOG,
 } from '../src/modules/rbac/permission-catalog';
 
 const prisma = new PrismaClient();
-
-const SETTINGS: { topic: NotificationTopic; recipientPermissions: string[] }[] =
-  [
-    { topic: 'orders_create', recipientPermissions: ['order:view'] },
-    { topic: 'orders_paid', recipientPermissions: ['order:view'] },
-    { topic: 'orders_cancelled', recipientPermissions: ['order:view'] },
-    { topic: 'orders_fulfilled', recipientPermissions: ['order:view'] },
-    { topic: 'fulfillments_create', recipientPermissions: ['order:pack'] },
-    { topic: 'fulfillments_update', recipientPermissions: ['order:pack'] },
-    { topic: 'refunds_create', recipientPermissions: ['order:view'] },
-    { topic: 'customers_create', recipientPermissions: ['customer:view'] },
-    // Cảnh báo tồn kho — hai việc thuộc hai bộ phận khác nhau nên người nhận khác nhau:
-    // "cần nhập hàng" là việc của mua hàng, "âm kho" là việc của nhân viên kho.
-    { topic: 'inventory_low_stock', recipientPermissions: ['purchasing:manage'] },
-    { topic: 'inventory_negative', recipientPermissions: ['inventory:view'] },
-  ];
 
 async function main() {
   const def = PERMISSION_CATALOG.find((p) => p.key === 'notification:manage');
@@ -74,14 +64,21 @@ async function main() {
     console.log(`  ✓ gán cho role "${code}"`);
   }
 
-  for (const s of SETTINGS) {
+  const forceRouting = process.argv.includes('--force-routing');
+  for (const s of NOTIFICATION_SETTING_DEFAULTS) {
     await prisma.notificationSetting.upsert({
       where: { topic: s.topic },
-      update: {}, // không ghi đè lựa chọn admin đã chỉnh trên UI
+      // Mặc định không ghi đè lựa chọn admin đã chỉnh trên UI.
+      update: forceRouting
+        ? { recipientPermissions: s.recipientPermissions }
+        : {},
       create: s,
     });
   }
-  console.log(`✓ ${SETTINGS.length} notification_settings`);
+  console.log(
+    `✓ ${NOTIFICATION_SETTING_DEFAULTS.length} notification_settings` +
+      (forceRouting ? ' (đã áp lại người nhận mặc định)' : ''),
+  );
 }
 
 main()

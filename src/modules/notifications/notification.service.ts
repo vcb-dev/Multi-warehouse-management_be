@@ -21,12 +21,22 @@ import {
  * kho chứ không phải một bản ghi đơn lẻ, danh sách SKU nằm trong `payload.variant_ids`.
  */
 export type EmitInput = {
+  /**
+   * Union đóng chứ không phải `string`: `resolveLink()` bên serializer switch trên giá trị
+   * này, gõ sai một chữ là thông báo im lặng mất link chứ không báo lỗi ở đâu cả.
+   * Thêm giá trị mới ở đây thì phải thêm nhánh tương ứng trong `resolveLink()`.
+   */
   subjectType:
     | 'order'
     | 'fulfillment'
     | 'customer'
     | 'order_refund'
-    | 'location';
+    | 'location'
+    /// Digest "đơn thiếu hàng" gom theo kho — `subjectId` là id KHO, không phải id đơn.
+    | 'order_shortage'
+    /// Kênh bán (sync lỗi) — `subjectId` là id `channel_connections`, hoặc 0 nếu kênh
+    /// không có dòng kết nối nào (Sapo); tên kênh nằm ở `payload.channel`.
+    | 'channel';
   subjectId: bigint;
   locationId: bigint | null;
   title: string;

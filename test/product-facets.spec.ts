@@ -1,5 +1,5 @@
 /**
- * `GET /products/tags` và `GET /products/product-types` gom giá trị sẵn có
+ * `GET /products/tags`, `/product-types` và `/vendors` gom giá trị sẵn có
  * bằng raw SQL (unnest + unaccent) — Prisma không diễn tả được, nên chỉ chạy
  * thật mới biết câu SQL có đúng không.
  * Chạy: RUN_INTEGRATION_TESTS=1 npm test -- test/product-facets.spec.ts
@@ -17,7 +17,7 @@ const describeIfDb =
     ? describe
     : describe.skip;
 
-describeIfDb('danh sách tag và loại sản phẩm', () => {
+describeIfDb('danh sách tag, loại sản phẩm và nhãn hiệu', () => {
   let products: ProductService;
   let prisma: PrismaService;
 
@@ -71,5 +71,25 @@ describeIfDb('danh sách tag và loại sản phẩm', () => {
     const q = top.product_type.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const res = await products.listProductTypes({ q });
     expect(res.data.map((r) => r.product_type)).toContain(top.product_type);
+  });
+
+  it('trả nhãn hiệu kèm số sản phẩm, xếp theo lượt dùng giảm dần', async () => {
+    const res = await products.listVendors({ limit: 20 });
+    expect(res.data.length).toBeGreaterThan(0);
+    expect(res.data.length).toBeLessThanOrEqual(20);
+    for (const row of res.data) {
+      expect(typeof row.vendor).toBe('string');
+      expect(row.vendor).not.toBe('');
+      expect(row.product_count).toBeGreaterThan(0);
+    }
+    const counts = res.data.map((r) => r.product_count);
+    expect([...counts].sort((a, b) => b - a)).toEqual(counts);
+  });
+
+  it('lọc nhãn hiệu theo q, bỏ dấu tiếng Việt', async () => {
+    const [top] = (await products.listVendors({ limit: 1 })).data;
+    const q = top.vendor.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const res = await products.listVendors({ q });
+    expect(res.data.map((r) => r.vendor)).toContain(top.vendor);
   });
 });

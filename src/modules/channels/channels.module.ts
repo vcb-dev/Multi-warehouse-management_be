@@ -9,6 +9,7 @@ import { SapoLocationSyncService } from './sapo/sapo-location-sync.service';
 import { SapoOrderSyncService } from './sapo/sapo-order-sync.service';
 import { ChannelOverviewService } from './channel-overview.service';
 import { ChannelSyncScheduler } from './channel-sync.scheduler';
+import { ChannelSyncAlertService } from './channel-sync-alert.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ChannelsController } from './channels.controller';
 import { ShopeeModule } from './shopee/shopee.module';
@@ -38,6 +39,7 @@ import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
     TiktokAuthService,
     TiktokOrderSyncService,
     TiktokReturnSyncService,
+    ChannelSyncAlertService,
     TiktokWebhookService,
     ChannelOverviewService,
   ],

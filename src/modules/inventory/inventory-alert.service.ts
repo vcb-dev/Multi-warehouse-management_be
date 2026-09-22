@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { NotificationTopic } from '@prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parseDateRange } from '../../common/query/filter-params';
+import { PENDING_ORDER_WHERE, computeStockReady } from '../orders/order-stock';
 import { InventoryNxtService } from './inventory-nxt.service';
 
 /**
@@ -24,6 +26,24 @@ const MAX_LINKED_VARIANTS = 300;
 
 /** Số SKU hiển thị ngay trong nội dung thông báo (xem nhanh khỏi bấm). */
 const MAX_PREVIEW_ITEMS = 10;
+
+/**
+ * Chỉ cảnh báo thiếu hàng cho đơn đặt trong ngần này ngày.
+ *
+ * KHÔNG phải để giảm tải, mà vì `status='open' AND fulfillment_status IS NULL` vẫn còn lẫn
+ * rất nhiều đơn Sapo cũ đã giao xong nhưng không bao giờ được đóng. Đo 09/09/2026 trên dữ
+ * liệu thật, số đơn "thiếu hàng" theo cửa sổ:
+ *
+ *     3 ngày →    14 đơn, 1 kho        14 ngày →   92 đơn, 5 kho
+ *     7 ngày →    16 đơn, 1 kho        30 ngày →  764 đơn, 10 kho (kho nhiều nhất 545)
+ *     không giới hạn → 1.996 đơn, kho nhiều nhất 1.244 (đơn cũ nhất từ 29/09/2025)
+ *
+ * Mốc gãy nằm giữa 14 và 30 ngày — qua đó là rác lịch sử chứ không phải việc phải làm.
+ * "Kho X có 1.244 đơn thiếu hàng" thì không ai đi xử lý, đó là một con số để bỏ qua.
+ */
+const SHORTAGE_MAX_ORDER_AGE_DAYS = Number(
+  process.env.SHORTAGE_MAX_ORDER_AGE_DAYS ?? 7,
+);
 
 type AlertItem = {
   variantId: bigint;
@@ -54,11 +74,12 @@ export class InventoryAlertService {
     // Hỏi trạng thái topic TRƯỚC khi quét: một lượt quét đầy đủ mất ~47s cho 14 kho
     // (phải tính bán 15/30/90 ngày trên bảng orders ~88k dòng). Topic tắt mà vẫn quét
     // rồi để `emit` lặng lẽ bỏ đi là đốt từng đó công hai lần mỗi ngày.
-    const [lowStockOn, negativeOn] = await Promise.all([
+    const [lowStockOn, negativeOn, shortageOn] = await Promise.all([
       this.notifications.isTopicEnabled(NotificationTopic.inventory_low_stock),
       this.notifications.isTopicEnabled(NotificationTopic.inventory_negative),
+      this.notifications.isTopicEnabled(NotificationTopic.orders_out_of_stock),
     ]);
-    if (!lowStockOn && !negativeOn) {
+    if (!lowStockOn && !negativeOn && !shortageOn) {
       return { locations: 0, notifications: 0 };
     }
 
@@ -73,6 +94,7 @@ export class InventoryAlertService {
         // `scanLowStock` là phần đắt nhất (enrich theo mẻ) — bỏ hẳn khi topic tắt.
         if (lowStockOn && (await this.scanLowStock(loc))) sent++;
         if (negativeOn && (await this.scanNegative(loc))) sent++;
+        if (shortageOn && (await this.scanOrderShortage(loc))) sent++;
       } catch (e) {
         // Một kho lỗi không được làm hỏng cả lượt quét.
         this.logger.error(
@@ -102,7 +124,11 @@ export class InventoryAlertService {
       orderBy: { id: 'desc' },
       select: {
         payload: true,
-        recipients: { where: { readOn: null }, select: { userId: true }, take: 1 },
+        recipients: {
+          where: { readOn: null },
+          select: { userId: true },
+          take: 1,
+        },
       },
     });
     if (!last || !last.recipients.length) return false;
@@ -125,7 +151,11 @@ export class InventoryAlertService {
         onHand: true,
         committed: true,
         variant: {
-          select: { productId: true, sku: true, product: { select: { name: true } } },
+          select: {
+            productId: true,
+            sku: true,
+            product: { select: { name: true } },
+          },
         },
       },
     });
@@ -227,6 +257,80 @@ export class InventoryAlertService {
     return true;
   }
 
+  /**
+   * Đơn đang chờ xử lý mà kho không đủ hàng để đóng gói.
+   *
+   * Khác hai cảnh báo trên ở chỗ đối tượng phải xử lý là cái ĐƠN, không phải dòng tồn:
+   * người nhận phải đi nhập thêm hoặc điều chuyển từ kho khác cho đủ, rồi mới đóng gói
+   * được. Vì vậy topic nằm trong nhóm `orders/` và link trỏ về danh sách đơn.
+   *
+   * Quy tắc "thiếu hàng" lấy nguyên từ {@link computeStockReady} — cùng hàm mà tab
+   * "Thiếu hàng" trên màn Đơn hàng đang dùng. Chép lại quy tắc ở đây thì sớm muộn con số
+   * trên thông báo sẽ lệch con số hiện ra khi bấm vào.
+   *
+   * Giới hạn tuổi đơn theo {@link SHORTAGE_MAX_ORDER_AGE_DAYS} — không có nó thì cảnh báo
+   * đầu tiên sẽ ghi "1.244 đơn thiếu hàng" cho một kho.
+   */
+  private async scanOrderShortage(loc: { id: bigint; name: string }) {
+    // Dựng chuỗi ngày TRƯỚC rồi mới suy ra mốc Date từ chính nó: `created_on_min` đi vào
+    // link phải cho ra đúng tập đơn vừa đếm. Tự tính `new Date(now - 7 ngày)` cho truy vấn
+    // rồi format riêng cho link là hai mốc khác nhau (một cái giữa ngày, một cái đầu ngày
+    // theo giờ cửa hàng) — lệch vài đơn là mất niềm tin vào con số trên thông báo.
+    const createdOnMin = shortageWindowStart();
+    const since = parseDateRange(createdOnMin, undefined)?.gte;
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        ...PENDING_ORDER_WHERE,
+        locationId: loc.id,
+        ...(since ? { createdOn: { gte: since } } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        locationId: true,
+        items: { select: { variantId: true, quantity: true } },
+      },
+      orderBy: { createdOn: 'desc' },
+    });
+    if (!orders.length) return false;
+
+    const readyMap = await computeStockReady(this.prisma, orders);
+    const short = orders.filter((o) => readyMap.get(o.id) === false);
+    if (!short.length) return false;
+
+    if (
+      await this.isDuplicateOfUnread(
+        NotificationTopic.orders_out_of_stock,
+        loc.id,
+        short.length,
+      )
+    ) {
+      return false;
+    }
+
+    await this.notifications.emit(NotificationTopic.orders_out_of_stock, {
+      subjectType: 'order_shortage',
+      // `subjectId` là id KHO chứ không phải id đơn — đây là digest gom theo kho, giống
+      // hai cảnh báo tồn ở trên. Serializer đọc nó để dựng link lọc theo kho.
+      subjectId: loc.id,
+      locationId: loc.id,
+      title: `${loc.name}: ${short.length} đơn thiếu hàng chưa đóng gói được`,
+      payload: {
+        location_id: loc.id.toString(),
+        location_name: loc.name,
+        count: short.length,
+        // Serializer ghép thẳng vào link — cùng một mốc với truy vấn ở trên.
+        created_on_min: createdOnMin,
+        preview: short.slice(0, MAX_PREVIEW_ITEMS).map((o) => ({
+          order_id: o.id.toString(),
+          code: o.name,
+        })),
+      },
+    });
+    return true;
+  }
+
   private buildPayload(
     loc: { id: bigint; name: string },
     items: AlertItem[],
@@ -237,7 +341,7 @@ export class InventoryAlertService {
       location_name: loc.name,
       count: items.length,
       unit_label: unitLabel,
-      // Dùng để dựng link `/kho/ton-kho?variant_ids=...` — màn Tồn kho đã hỗ trợ sẵn
+      // Dùng để dựng link `/warehouse/inventory?variantIds=...` — màn Tồn kho đã hỗ trợ sẵn
       // filter này, nên bấm vào thông báo là thấy đúng những SKU được đếm, không phải
       // một bộ lọc khác cho ra con số khác.
       variant_ids: items
@@ -252,4 +356,13 @@ export class InventoryAlertService {
       })),
     };
   }
+}
+
+/**
+ * Mốc đầu cửa sổ dạng `YYYY-MM-DD` — đúng định dạng mà `created_on_min` trên URL nhận,
+ * nên cùng một chuỗi dùng được cho cả truy vấn lẫn link.
+ */
+function shortageWindowStart(now: Date = new Date()): string {
+  const start = new Date(now.getTime() - SHORTAGE_MAX_ORDER_AGE_DAYS * 864e5);
+  return start.toISOString().slice(0, 10);
 }

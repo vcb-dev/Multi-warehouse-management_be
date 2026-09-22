@@ -22,6 +22,20 @@ export class ListInventoryQueryDto {
   @IsString()
   location_id?: string;
 
+  /**
+   * Chỉ lấy phiên bản đang quản lý kho tại `location_id` — tức đã có dòng `inventory_levels`
+   * ở kho đó, kể cả khi tồn bằng 0. Giống màn Tồn kho của Sapo: phiên bản chưa từng có dòng
+   * tồn ở kho ("Chưa quản lý kho") không hiện, nên mỗi kho chỉ thấy hàng của chính nó.
+   *
+   * Mặc định tắt vì các ô chọn sản phẩm (nhập hàng, chuyển kho, kiểm hàng, tạo đơn) cũng gọi
+   * endpoint này kèm `location_id` và cần thấy mọi phiên bản — nhập hàng vào kho trống là
+   * đúng lúc phiên bản chưa có dòng tồn nào.
+   */
+  @IsOptional()
+  @Transform(({ value }) => toBoolean(value))
+  @IsBoolean()
+  managed_only?: boolean;
+
   @IsOptional()
   @IsString()
   variant_id?: string;
@@ -157,6 +171,23 @@ export class ListInventoryQueryDto {
   @IsOptional()
   @IsString()
   created_on_max?: string;
+
+  // --- Sắp xếp ---
+
+  /**
+   * `<trường>_asc` | `<trường>_desc` với trường thuộc {giá bán, giá vốn, tồn
+   * cuối kì}. Bỏ trống thì giữ thứ tự mặc định của màn (theo kho rồi tới SPU).
+   */
+  @IsOptional()
+  @IsIn([
+    'price_asc',
+    'price_desc',
+    'cost_asc',
+    'cost_desc',
+    'on_hand_asc',
+    'on_hand_desc',
+  ])
+  sort?: string;
 
   @IsOptional()
   @Type(() => Number)

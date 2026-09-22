@@ -21,9 +21,11 @@ export const NOTIFICATION_TOPIC_LABELS: Record<NotificationTopic, string> = {
   customers_create: 'Khách hàng mới',
   inventory_low_stock: 'Cần nhập hàng',
   inventory_negative: 'Âm kho',
+  orders_out_of_stock: 'Đơn thiếu hàng',
+  channel_sync_failed: 'Đồng bộ kênh lỗi',
 };
 
-/** Nhóm hiển thị ở /cau-hinh/thong-bao — chia theo đúng cách Sapo chia Cấu hình > Thông báo. */
+/** Nhóm hiển thị ở /settings/notifications — chia theo đúng cách Sapo chia Cấu hình > Thông báo. */
 export const NOTIFICATION_TOPIC_GROUPS: Record<NotificationTopic, string> = {
   orders_create: 'Đơn hàng',
   orders_paid: 'Đơn hàng',
@@ -35,6 +37,9 @@ export const NOTIFICATION_TOPIC_GROUPS: Record<NotificationTopic, string> = {
   customers_create: 'Khách hàng',
   inventory_low_stock: 'Tồn kho',
   inventory_negative: 'Tồn kho',
+  orders_out_of_stock: 'Đơn hàng',
+  // Nhóm riêng: đây là sức khoẻ hệ thống, không phải nghiệp vụ bán hàng.
+  channel_sync_failed: 'Hệ thống',
 };
 
 /**
@@ -54,6 +59,8 @@ export const TOPIC_WIRE: Record<NotificationTopic, string> = {
   // Hai cái dưới KHÔNG phải topic Sapo — xem ghi chú ở enum trong schema.prisma
   inventory_low_stock: 'inventory/low_stock',
   inventory_negative: 'inventory/negative',
+  orders_out_of_stock: 'orders/out_of_stock',
+  channel_sync_failed: 'channel/sync_failed',
 };
 
 /** Chiều ngược lại, cho param `:topic` trên URL cấu hình. */
@@ -65,9 +72,9 @@ export const TOPIC_FROM_WIRE = new Map<string, NotificationTopic>(
  * Đường dẫn frontend để click vào thông báo là nhảy đúng chỗ. Trả null khi không dựng
  * được link — client render item không bấm được, thay vì điều hướng tới route 404.
  *
- * Chỉ `/don-hang/[id]` và `/khach-hang/[id]` là trang chi tiết thật; vận đơn không có
+ * Chỉ `/orders/[id]` và `/customers/[id]` là trang chi tiết thật; vận đơn không có
  * trang riêng nên trỏ về danh sách đã lọc sẵn theo mã vận đơn (`?q=` được
- * `useQueryParams` đọc từ URL ở van-don/page.tsx).
+ * `useQueryParams` đọc từ URL ở shipping/shipments/page.tsx).
  */
 function resolveLink(
   subjectType: string,
@@ -79,20 +86,22 @@ function resolveLink(
 
   switch (subjectType) {
     case 'order':
-      return `/don-hang/${subjectId.toString()}`;
+      return `/orders/${subjectId.toString()}`;
     case 'customer':
-      return `/khach-hang/${subjectId.toString()}`;
+      return `/customers/${subjectId.toString()}`;
     case 'fulfillment': {
       // Người đóng gói cần thấy vận đơn trong danh sách hơn là mở đơn hàng.
       const code =
-        typeof payload.tracking_code === 'string' ? payload.tracking_code : null;
-      if (code) return `/van-chuyen/van-don?q=${encodeURIComponent(code)}`;
-      return orderId ? `/don-hang/${orderId}` : null;
+        typeof payload.tracking_code === 'string'
+          ? payload.tracking_code
+          : null;
+      if (code) return `/shipping/shipments?q=${encodeURIComponent(code)}`;
+      return orderId ? `/orders/${orderId}` : null;
     }
     case 'order_refund':
       // Hoàn tiền không có trang riêng và `subjectId` là id của refund, không phải
       // của đơn — chỉ `payload.order_id` mới dựng được link đúng.
-      return orderId ? `/don-hang/${orderId}` : null;
+      return orderId ? `/orders/${orderId}` : null;
     case 'location': {
       // Cảnh báo tồn kho tổng hợp theo kho. Tuyệt đối KHÔNG dùng `low_stock=true` sẵn
       // có: filter đó là `available <= 5`, khớp 96% số dòng, bấm vào sẽ ra con số hoàn
@@ -104,7 +113,7 @@ function resolveLink(
       // Âm kho biểu diễn được bằng SQL ⇒ dùng bộ lọc thật, không giới hạn số dòng.
       if (payload.stock_status === 'negative') {
         params.set('stockStatus', 'negative');
-        return `/kho/ton-kho?${params.toString()}`;
+        return `/warehouse/inventory?${params.toString()}`;
       }
 
       // "Cần nhập" tính từ bán 15/30/90 ngày, không viết được thành điều kiện SQL ⇒
@@ -112,8 +121,31 @@ function resolveLink(
       const variantIds =
         typeof payload.variant_ids === 'string' ? payload.variant_ids : null;
       if (variantIds) params.set('variantIds', variantIds);
-      return `/kho/ton-kho?${params.toString()}`;
+      return `/warehouse/inventory?${params.toString()}`;
     }
+    case 'order_shortage': {
+      // Digest gom theo kho ⇒ `subjectId` là id KHO, không phải id đơn. Trỏ về danh sách
+      // đơn đã bật sẵn tab "Thiếu hàng" của đúng kho đó, để con số bấm vào khớp con số
+      // ghi trên thông báo — cùng nguyên tắc với cảnh báo tồn kho ở nhánh `location`.
+      const params = new URLSearchParams({
+        stock_status: 'thieu_hang',
+        location_ids: subjectId.toString(),
+      });
+      // BẮT BUỘC kèm mốc ngày: cảnh báo chỉ đếm đơn trong cửa sổ gần đây, còn tab
+      // "Thiếu hàng" không giới hạn thời gian. Thiếu tham số này thì thông báo ghi 16 đơn
+      // mà bấm vào ra 1.244 — phần lớn là đơn Sapo cũ đã giao nhưng không bao giờ đóng.
+      const createdOnMin =
+        typeof payload.created_on_min === 'string'
+          ? payload.created_on_min
+          : null;
+      if (createdOnMin) params.set('created_on_min', createdOnMin);
+      return `/orders?${params.toString()}`;
+    }
+    case 'channel':
+      // Kênh chết thì việc phải làm là vào màn Kênh bán nối lại/ủy quyền lại. `subjectId`
+      // ở đây không định danh được gì (Sapo không có dòng `channel_connections`), tên kênh
+      // nằm ở `payload.channel`.
+      return '/settings/sales-channels';
     default:
       return null;
   }

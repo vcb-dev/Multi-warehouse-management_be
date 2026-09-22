@@ -6,6 +6,7 @@ import {
   resolveChannelSyncActor,
   resolveChannelSyncActorId,
 } from './channel-sync-actor';
+import { ChannelSyncAlertService } from './channel-sync-alert.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { SapoInventorySyncService } from './sapo/sapo-inventory-sync.service';
 import { SapoLocationSyncService } from './sapo/sapo-location-sync.service';
@@ -41,6 +42,7 @@ export class ChannelSyncScheduler {
     private readonly sync: ChannelSyncService,
     private readonly tiktokOrders: TiktokOrderSyncService,
     private readonly tiktokReturns: TiktokReturnSyncService,
+    private readonly syncAlerts: ChannelSyncAlertService,
     private readonly sapoOrders: SapoOrderSyncService,
     private readonly sapoInventory: SapoInventorySyncService,
     private readonly sapoLocations: SapoLocationSyncService,
@@ -225,6 +227,7 @@ export class ChannelSyncScheduler {
       this.logger.error(
         `Cron TikTok thất bại: ${e instanceof Error ? e.message : String(e)}`,
       );
+      this.syncAlerts.report('Đơn TikTok', e);
     } finally {
       this.tiktokRunning = false;
     }
@@ -300,6 +303,7 @@ export class ChannelSyncScheduler {
       this.logger.error(
         `Cron hoàn hàng TikTok thất bại: ${e instanceof Error ? e.message : String(e)}`,
       );
+      this.syncAlerts.report('Hoàn hàng TikTok', e);
     }
   }
 

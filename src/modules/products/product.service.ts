@@ -13,9 +13,11 @@ import {
   parseDateRange,
   parseIdList,
   parseList,
+  parseSort,
   textContainsAny,
 } from '../../common/query/filter-params';
 import { CategoryService } from '../categories/category.service';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   CreateProductDto,
   ListProductsQueryDto,
@@ -37,6 +39,24 @@ import { serializeVariantPriceHistory } from './variant-price-history.serializer
 
 /** SP nhiều variant + DB remote — syncVariants có thể > 5s mặc định của Prisma */
 const PRODUCT_TX_TIMEOUT_MS = 30_000;
+/** Thời gian cộng thêm cho mỗi dòng tồn ban đầu > 0 ghi qua InventoryService */
+const STOCK_ENTRY_TX_MS = 1_000;
+
+/** Trường được phép xếp thứ tự ở màn danh sách (`?sort=price_asc`) */
+const PRODUCT_SORT_FIELDS = ['price'] as const;
+
+/** Quan hệ cần cho một dòng danh sách — dùng chung cho cả hai nhánh của `list()` */
+const LIST_INCLUDE = {
+  variants: {
+    where: { enabled: true },
+    orderBy: { id: 'asc' as const },
+    select: { sku: true, barcode: true, price: true, unit: true },
+  },
+} satisfies Prisma.ProductInclude;
+
+type ProductListRow = Prisma.ProductGetPayload<{
+  include: typeof LIST_INCLUDE;
+}>;
 
 @Injectable()
 export class ProductService {
@@ -45,6 +65,7 @@ export class ProductService {
     private variants: VariantService,
     private categories: CategoryService,
     private priceHistory: VariantPriceHistoryService,
+    private inventory: InventoryService,
   ) {}
 
   async buildListWhere(
@@ -103,20 +124,17 @@ export class ProductService {
     const page = query.page ?? 1;
     const pageSize = query.limit ?? query.page_size ?? 20;
     const where = await this.buildListWhere(query);
+    const sort = parseSort(query.sort, PRODUCT_SORT_FIELDS);
     const [rows, total] = await Promise.all([
-      this.repo.client.product.findMany({
-        where,
-        orderBy: { modifiedOn: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          variants: {
-            where: { enabled: true },
-            orderBy: { id: 'asc' },
-            select: { sku: true, barcode: true, price: true, unit: true },
-          },
-        },
-      }),
+      sort
+        ? this.listPageByPrice(where, sort.dir, page, pageSize)
+        : this.repo.client.product.findMany({
+            where,
+            orderBy: { modifiedOn: 'desc' },
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            include: LIST_INCLUDE,
+          }),
       this.repo.count(where),
     ]);
 
@@ -128,6 +146,66 @@ export class ProductService {
       page,
       page_size: pageSize,
     };
+  }
+
+  /**
+   * Một trang sản phẩm xếp theo "Giá từ" = MIN(giá phiên bản đang bán).
+   *
+   * Prisma không xếp được theo hàm gộp của quan hệ (chỉ có `_count`), nên phần
+   * xếp thứ tự phải nhờ SQL. Chỉ lấy id ở bước này rồi nạp lại bằng Prisma để
+   * nhánh sắp xếp dùng đúng include/serializer của nhánh thường — không phải
+   * dựng lại product + variants từ SQL thô.
+   */
+  private async listPageByPrice(
+    where: Prisma.ProductWhereInput,
+    dir: 'asc' | 'desc',
+    page: number,
+    pageSize: number,
+  ): Promise<ProductListRow[]> {
+    // Không có bộ lọc thì để SQL quét thẳng cả bảng (12.6k dòng, ~100ms). Có
+    // lọc thì lấy id khớp từ Prisma và truyền vào SQL: chép lại toàn bộ điều
+    // kiện lọc sang SQL thô là nguồn sai lệch chắc chắn xảy ra khi thêm bộ lọc mới.
+    const filteredIds = Object.keys(where).length
+      ? (
+          await this.repo.client.product.findMany({
+            where,
+            select: { id: true },
+          })
+        ).map((row) => row.id.toString())
+      : null;
+    if (filteredIds && !filteredIds.length) return [];
+
+    // Mảng id đi vào SQL bằng MỘT tham số `ANY($1)`, không phải `IN (...)`:
+    // bộ lọc rộng khớp gần hết 12.6k sản phẩm thì `IN` thành 12.6k bind
+    // variable, sát trần 32.767 của Postgres.
+    const idFilter = filteredIds
+      ? Prisma.sql`WHERE p.id = ANY(${filteredIds}::bigint[])`
+      : Prisma.empty;
+    const order = dir === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+
+    const ordered = await this.repo.client.$queryRaw<{ id: bigint }[]>`
+      SELECT p.id
+      FROM products p
+      LEFT JOIN (
+        SELECT product_id, MIN(price) AS price_from
+        FROM product_variants
+        WHERE enabled
+        GROUP BY product_id
+      ) v ON v.product_id = p.id
+      ${idFilter}
+      ORDER BY COALESCE(v.price_from, 0) ${order}, p.id ASC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `;
+
+    const ids = ordered.map((row) => row.id);
+    if (!ids.length) return [];
+    const rows = await this.repo.client.product.findMany({
+      where: { id: { in: ids } },
+      include: LIST_INCLUDE,
+    });
+    // `in` không giữ thứ tự — xếp lại theo đúng thứ tự SQL vừa trả về.
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
   }
 
   /**
@@ -161,6 +239,20 @@ export class ProductService {
     };
   }
 
+  /** Nhãn hiệu đang dùng, xếp theo số sản phẩm giảm dần như loại sản phẩm */
+  async listVendors(query: ProductFacetQueryDto) {
+    const rows = await this.repo.listVendors({
+      q: query.q?.trim() || undefined,
+      limit: query.limit ?? 1000,
+    });
+    return {
+      data: rows.map((r) => ({
+        vendor: r.vendor,
+        product_count: Number(r.product_count),
+      })),
+    };
+  }
+
   async findOne(id: bigint) {
     const row = await this.repo.findById(id);
     if (!row) throw new NotFoundException('Không tìm thấy sản phẩm');
@@ -183,9 +275,20 @@ export class ProductService {
     }
 
     const variantRows = this.buildVariantRows(options, dto);
+    if (!variantRows.length) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Sản phẩm phải có ít nhất một phiên bản',
+        422,
+      );
+    }
     for (const row of variantRows) {
       if (!row.sku) throw this.missingSku(row.optionValues);
     }
+    const stockEntries = await this.validateInitialInventories(
+      variantRows,
+      user,
+    );
 
     const product = await this.repo.client.$transaction(
       async (tx) => {
@@ -267,6 +370,17 @@ export class ProductService {
             },
           });
 
+          if (vr.inventories.length) {
+            await this.seedInventory(tx, {
+              variantId: variant.id,
+              productId: p.id,
+              price: vr.price,
+              cost: vr.cost ?? 0,
+              inventories: vr.inventories,
+              userId: user.userId,
+            });
+          }
+
           // await this.priceHistory.logIfChanged({
           //   tx,
           //   variantId: variant.id,
@@ -314,7 +428,8 @@ export class ProductService {
 
         return p;
       },
-      { timeout: PRODUCT_TX_TIMEOUT_MS },
+      // Mỗi dòng tồn ban đầu là thêm vài lượt khoá/ghi tới DB remote
+      { timeout: PRODUCT_TX_TIMEOUT_MS + stockEntries * STOCK_ENTRY_TX_MS },
     );
 
     const count = await this.repo.client.productVariant.count({
@@ -331,6 +446,13 @@ export class ProductService {
   async update(id: bigint, dto: UpdateProductDto, user: AuthUser) {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Không tìm thấy sản phẩm');
+    if (dto.variants?.some((v) => v.inventories?.length)) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Tồn kho chỉ nhập được lúc tạo sản phẩm — sau đó hãy dùng phiếu nhập hàng hoặc kiểm kho',
+        422,
+      );
+    }
 
     const newSkus = dto.variants?.map((v) => v.sku) ?? [];
     const keepSkus = existing.variants.map((v) => v.sku);
@@ -629,18 +751,26 @@ export class ProductService {
           weight: v?.weight,
           weightUnit: v?.weight_unit,
           optionValues: [] as string[],
+          inventories: v?.inventories ?? [],
           ...this.resolveVariantFlags(dto, v),
         },
       ];
     }
 
-    const combos = this.variants.cartesian(options);
     const byKey = new Map(
       (variants ?? []).map((v) => [
         this.variants.optionKey(v.option_values),
         v,
       ]),
     );
+    // Gửi kèm danh sách phiên bản thì chỉ tạo đúng các tổ hợp có trong đó —
+    // người dùng được xoá bớt tổ hợp không bán (giống Sapo). Không gửi thì
+    // sinh đủ tích Descartes như trước.
+    const combos = this.variants
+      .cartesian(options)
+      .filter(
+        (values) => !byKey.size || byKey.has(this.variants.optionKey(values)),
+      );
 
     return combos.map((optionValues) => {
       const key = this.variants.optionKey(optionValues);
@@ -655,9 +785,109 @@ export class ProductService {
         weight: input?.weight,
         weightUnit: input?.weight_unit,
         optionValues,
+        inventories: input?.inventories ?? [],
         ...this.resolveVariantFlags(dto, input),
       };
     });
+  }
+
+  /**
+   * Kiểm tra kho + tồn ban đầu gửi kèm từng phiên bản trước khi mở transaction.
+   * Trả về số dòng có tồn > 0 (mỗi dòng là một bút toán kho) để nới timeout.
+   */
+  private async validateInitialInventories(
+    rows: ReturnType<ProductService['buildVariantRows']>,
+    user: AuthUser,
+  ): Promise<number> {
+    const locationIds = new Set<string>();
+    let stockEntries = 0;
+
+    for (const row of rows) {
+      const label = row.optionValues.join(' / ') || row.sku;
+      const seen = new Set<string>();
+      for (const inv of row.inventories) {
+        if (seen.has(inv.location_id)) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Phiên bản ${label} chọn trùng một kho hai lần`,
+            422,
+          );
+        }
+        seen.add(inv.location_id);
+        locationIds.add(inv.location_id);
+        if (inv.on_hand <= 0) continue;
+        if (row.inventoryManagement === '') {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Phiên bản ${label} không quản lý tồn kho nên không nhập được tồn ban đầu`,
+            422,
+          );
+        }
+        // Nhập tồn ban đầu tương đương nhập hàng vào kho đó
+        assertLocationPermission(user, 'inventory:receive', inv.location_id);
+        stockEntries += 1;
+      }
+    }
+
+    if (locationIds.size) {
+      const active = await this.repo.client.location.findMany({
+        where: {
+          id: { in: [...locationIds].map((id) => BigInt(id)) },
+          status: 'active',
+        },
+        select: { id: true },
+      });
+      if (active.length !== locationIds.size) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Kho đã chọn không tồn tại hoặc đã ngừng hoạt động',
+          422,
+        );
+      }
+    }
+
+    return stockEntries;
+  }
+
+  /**
+   * Gắn phiên bản vừa tạo vào các kho đã chọn (kể cả kho tồn 0, để phiên bản
+   * hiện ở kho đó như Sapo). Tồn ban đầu > 0 đi qua InventoryService như một
+   * lần điều chỉnh để sổ biến động khớp với tồn và truy được về sản phẩm.
+   */
+  private async seedInventory(
+    tx: Prisma.TransactionClient,
+    input: {
+      variantId: bigint;
+      productId: bigint;
+      price: number;
+      cost: number;
+      inventories: { location_id: string; on_hand: number }[];
+      userId: bigint;
+    },
+  ) {
+    await tx.inventoryLevel.createMany({
+      data: input.inventories.map((inv) => ({
+        variantId: input.variantId,
+        locationId: BigInt(inv.location_id),
+        price: input.price,
+        cost: input.cost,
+      })),
+      skipDuplicates: true,
+    });
+    for (const inv of input.inventories) {
+      if (inv.on_hand <= 0) continue;
+      await this.inventory.adjustOnHandTo(
+        {
+          variantId: input.variantId,
+          locationId: BigInt(inv.location_id),
+          targetOnHand: inv.on_hand,
+          referenceType: 'product',
+          referenceId: input.productId,
+          createdById: input.userId,
+        },
+        tx,
+      );
+    }
   }
 
   private sortedOptionValues(
