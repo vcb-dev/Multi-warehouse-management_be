@@ -48,6 +48,54 @@ const METRIC_COLUMNS: ReportColumn[] = [
 ];
 
 /**
+ * Sapo gộp huỷ + trả hàng vào một cột hoàn tiền. Báo cáo theo nhân viên tách 3 túi:
+ * tiền hàng (đơn còn hiệu lực), huỷ trước giao, hoàn sau giao.
+ */
+const STAFF_METRIC_COLUMNS: ReportColumn[] = [
+  { key: 'order_count', label: 'Số đơn', type: 'number', summable: true },
+  {
+    key: 'cancelled_count',
+    label: 'Số đơn huỷ',
+    type: 'number',
+    summable: true,
+  },
+  {
+    key: 'returned_count',
+    label: 'Số đơn hoàn',
+    type: 'number',
+    summable: true,
+  },
+  { key: 'sub_total_price', label: 'Tiền hàng', type: 'money', summable: true },
+  { key: 'total_discounts', label: 'Giảm giá', type: 'money', summable: true },
+  { key: 'total_tax', label: 'Thuế', type: 'money', summable: true },
+  {
+    key: 'total_shipping_price',
+    label: 'Phí vận chuyển',
+    type: 'money',
+    summable: true,
+  },
+  { key: 'total_price', label: 'Doanh thu', type: 'money', summable: true },
+  {
+    key: 'cancelled_amount',
+    label: 'Huỷ đơn',
+    type: 'money',
+    summable: true,
+  },
+  { key: 'total_refunded', label: 'Hoàn tiền', type: 'money', summable: true },
+  {
+    key: 'net_revenue',
+    label: 'Doanh thu thuần',
+    type: 'money',
+    summable: true,
+  },
+  { key: 'total_received', label: 'Đã thu', type: 'money', summable: true },
+  { key: 'outstanding', label: 'Còn phải thu', type: 'money', summable: true },
+];
+
+const STAFF_NOTE =
+  'Tiền hàng / Doanh thu chỉ gồm đơn chưa huỷ. Huỷ đơn = giá trị đơn status=cancelled (huỷ trước khi giao). Hoàn tiền = total_refunded của đơn chưa huỷ (giao rồi bị trả / hoàn). Doanh thu thuần = Doanh thu − Hoàn tiền; tiền huỷ không trừ vì vốn không nằm trong doanh thu.';
+
+/**
  * Chiều gom nhóm: cột nhãn hiển thị + biểu thức SQL. Chiều `variant` phải join sang
  * order_items nên xử lý riêng ở `runByVariant`.
  */
@@ -98,6 +146,12 @@ type RawRow = {
   total_received: Prisma.Decimal | null;
 };
 
+type StaffRawRow = RawRow & {
+  cancelled_count: bigint | number;
+  returned_count: bigint | number;
+  cancelled_amount: Prisma.Decimal | null;
+};
+
 function toRow(r: RawRow): ReportRow {
   const totalPrice = num(r.total_price);
   const refunded = num(r.total_refunded);
@@ -118,9 +172,26 @@ function toRow(r: RawRow): ReportRow {
   };
 }
 
-function sumRows(rows: ReportRow[]): ReportRow {
+/** Công thức dòng báo cáo theo nhân viên — xuất để unit test đối chiếu. */
+export function toStaffRevenueRow(r: StaffRawRow): ReportRow {
+  const totalPrice = num(r.total_price);
+  const refunded = num(r.total_refunded);
+  const received = num(r.total_received);
+  return {
+    ...toRow(r),
+    cancelled_count: Number(r.cancelled_count),
+    returned_count: Number(r.returned_count),
+    cancelled_amount: num(r.cancelled_amount),
+    // Huỷ không trừ: cancelled_amount không nằm trong total_price (FILTER status <> cancelled)
+    net_revenue: totalPrice - refunded,
+    outstanding: totalPrice - received,
+  };
+}
+
+function sumRows(rows: ReportRow[], columns: ReportColumn[]): ReportRow {
   const summary: ReportRow = { label: 'Tổng cộng' };
-  for (const col of METRIC_COLUMNS) {
+  for (const col of columns) {
+    if (!col.summable) continue;
     summary[col.key] = rows.reduce((s, r) => s + Number(r[col.key] ?? 0), 0);
   }
   return summary;
@@ -156,7 +227,7 @@ async function runByOrderDimension(
   // Gom nhóm xong thường chỉ vài chục dòng nên phân trang trong bộ nhớ, tránh phải chạy
   // thêm một query COUNT(DISTINCT ...) chỉ để biết tổng số nhóm.
   const all = rows.map(toRow);
-  const summary = sumRows(all);
+  const summary = sumRows(all, METRIC_COLUMNS);
   const paged = ctx.all
     ? all
     : all.slice((ctx.page - 1) * ctx.pageSize, ctx.page * ctx.pageSize);
@@ -197,9 +268,64 @@ async function runByVariant(ctx: ReportContext): Promise<ReportResult> {
     sku: r.sku,
     quantity: Number(r.quantity),
   }));
-  const summary = sumRows(all);
+  const summary = sumRows(all, METRIC_COLUMNS);
   summary.quantity = all.reduce((s, r) => s + Number(r.quantity ?? 0), 0);
   summary.sku = '';
+  const paged = ctx.all
+    ? all
+    : all.slice((ctx.page - 1) * ctx.pageSize, ctx.page * ctx.pageSize);
+  return { rows: paged, summary, total: all.length };
+}
+
+/**
+ * Gom theo nhân viên phụ trách (`orders.assignee_id`). Khác các chiều khác: giữ đơn huỷ
+ * trong WHERE rồi tách bằng FILTER — Sapo không làm được vì gộp huỷ và trả vào một refund.
+ *
+ * - Huỷ = `status = cancelled` (app chặn huỷ sau khi đã giao, bắt đi đổi trả).
+ * - Hoàn = đơn chưa huỷ có `return_status <> no_return` (số đơn) / `total_refunded` (tiền).
+ */
+async function runByStaff(ctx: ReportContext): Promise<ReportResult> {
+  const group = DIMENSIONS.staff.groupSql(ctx);
+  const scope = orderScopeSql(ctx, { includeCancelled: true });
+
+  const rows = await ctx.prisma.$queryRaw<StaffRawRow[]>`
+    SELECT ${group} AS label,
+           COUNT(*) FILTER (WHERE o."status" <> 'cancelled')
+             AS order_count,
+           COUNT(*) FILTER (WHERE o."status" = 'cancelled')
+             AS cancelled_count,
+           COUNT(*) FILTER (
+             WHERE o."status" <> 'cancelled'
+               AND o."return_status" <> 'no_return'
+           ) AS returned_count,
+           SUM(o."sub_total_price") FILTER (WHERE o."status" <> 'cancelled')
+             AS sub_total_price,
+           SUM(o."total_discounts") FILTER (WHERE o."status" <> 'cancelled')
+             AS total_discounts,
+           SUM(o."total_tax") FILTER (WHERE o."status" <> 'cancelled')
+             AS total_tax,
+           SUM(o."total_shipping_price") FILTER (WHERE o."status" <> 'cancelled')
+             AS total_shipping_price,
+           SUM(o."total_price") FILTER (WHERE o."status" <> 'cancelled')
+             AS total_price,
+           SUM(o."total_price") FILTER (WHERE o."status" = 'cancelled')
+             AS cancelled_amount,
+           SUM(COALESCE(o."total_refunded", 0)) FILTER (
+             WHERE o."status" <> 'cancelled'
+           ) AS total_refunded,
+           SUM(o."total_received") FILTER (WHERE o."status" <> 'cancelled')
+             AS total_received
+    FROM "orders" o
+    LEFT JOIN "locations" l ON l."id" = o."location_id"
+    LEFT JOIN "users" u     ON u."id" = o."assignee_id"
+    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    WHERE ${scope}
+    GROUP BY 1
+    ORDER BY 1
+  `;
+
+  const all = rows.map(toStaffRevenueRow);
+  const summary = sumRows(all, STAFF_METRIC_COLUMNS);
   const paged = ctx.all
     ? all
     : all.slice((ctx.page - 1) * ctx.pageSize, ctx.page * ctx.pageSize);
@@ -253,7 +379,11 @@ function def(
         ]
       : [labelColumn, ...METRIC_COLUMNS],
     run: (ctx) =>
-      isVariant ? runByVariant(ctx) : runByOrderDimension(dim, ctx),
+      isVariant
+        ? runByVariant(ctx)
+        : dim === 'staff'
+          ? runByStaff(ctx)
+          : runByOrderDimension(dim, ctx),
     ...extra,
   };
 }
@@ -283,9 +413,17 @@ export const SALES_REVENUE_REPORTS: ReportDef[] = [
   def(
     'sales-revenue-by-staff',
     'Doanh thu theo nhân viên',
-    'Doanh thu theo nhân viên phụ trách đơn.',
+    'Tiền hàng, huỷ trước giao và hoàn sau giao theo nhân viên phụ trách đơn.',
     'staff',
-    { chart: { type: 'bar', x: 'label', y: ['total_price'] } },
+    {
+      columns: [DIMENSIONS.staff.column, ...STAFF_METRIC_COLUMNS],
+      chart: {
+        type: 'bar',
+        x: 'label',
+        y: ['sub_total_price', 'cancelled_amount', 'total_refunded'],
+      },
+      note: STAFF_NOTE,
+    },
   ),
   def(
     'sales-revenue-by-product',

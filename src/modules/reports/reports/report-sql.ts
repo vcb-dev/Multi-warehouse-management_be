@@ -28,17 +28,25 @@ export function bucketExpr(bucket: TimeBucket): Prisma.Sql {
  * Điều kiện lọc chung cho các báo cáo dựa trên `orders` (alias `o`).
  *
  * Hai điểm bắt buộc đúng:
- * - **Loại đơn huỷ**: doanh thu không được tính đơn `cancelled`.
+ * - **Loại đơn huỷ khỏi doanh thu** (mặc định): `status <> cancelled`. Báo cáo cần đếm
+ *   riêng tiền huỷ thì truyền `includeCancelled` — tự FILTER trong SELECT, không nhét
+ *   đơn huỷ vào cột doanh thu.
  * - **KHÔNG lọc `status='closed'`**: Sapo gần như không đóng đơn (1.144/87.911 đơn thật),
  *   lọc theo đó sẽ mất gần hết doanh thu. Mọi đơn chưa huỷ đều tính.
  */
-export function orderScopeSql(ctx: ReportContext): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [
-    Prisma.sql`o."status" <> 'cancelled'`,
+export function orderScopeSql(
+  ctx: ReportContext,
+  opts?: { includeCancelled?: boolean },
+): Prisma.Sql {
+  const conditions: Prisma.Sql[] = [];
+  if (!opts?.includeCancelled) {
+    conditions.push(Prisma.sql`o."status" <> 'cancelled'`);
+  }
+  conditions.push(
     Prisma.sql`o."created_on" >= ${ctx.from}`,
     Prisma.sql`o."created_on" < ${ctx.to}`,
     Prisma.sql`o."location_id" IN (${Prisma.join(ctx.locationIds)})`,
-  ];
+  );
   if (ctx.channel) {
     conditions.push(Prisma.sql`o."source_name" = ${ctx.channel}`);
   }
