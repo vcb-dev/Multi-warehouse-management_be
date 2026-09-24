@@ -12,16 +12,20 @@ import { ChannelSyncScheduler } from './channel-sync.scheduler';
 import { ChannelSyncAlertService } from './channel-sync-alert.service';
 import { ChannelSyncService } from './channel-sync.service';
 import { ChannelsController } from './channels.controller';
-import { ShopeeAuthService } from './shopee/shopee-auth.service';
-import { ShopeePushWebhookService } from './shopee/shopee-push-webhook.service';
-import { ShopeeSyncService } from './shopee/shopee-sync.service';
+import { ShopeeModule } from './shopee/shopee.module';
 import { TiktokAuthService } from './tiktok/tiktok-auth.service';
 import { TiktokOrderSyncService } from './tiktok/tiktok-order-sync.service';
 import { TiktokReturnSyncService } from './tiktok/tiktok-return-sync.service';
 import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
 
 @Module({
-  imports: [OrdersModule, RbacModule, NotificationsModule, InventoryModule],
+  imports: [
+    OrdersModule,
+    RbacModule,
+    NotificationsModule,
+    InventoryModule,
+    ShopeeModule,
+  ],
   controllers: [ChannelsController],
   providers: [
     // SapoClient không có dependency nào (đọc thẳng env) nên khai lại ở đây rẻ hơn
@@ -32,9 +36,6 @@ import { TiktokWebhookService } from './tiktok/tiktok-webhook.service';
     SapoLocationSyncService,
     ChannelSyncService,
     ChannelSyncScheduler,
-    ShopeeAuthService,
-    ShopeeSyncService,
-    ShopeePushWebhookService,
     TiktokAuthService,
     TiktokOrderSyncService,
     TiktokReturnSyncService,

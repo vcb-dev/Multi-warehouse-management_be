@@ -29,12 +29,6 @@ import { ChannelSyncService } from './channel-sync.service';
 import { SapoInventorySyncService } from './sapo/sapo-inventory-sync.service';
 import { SapoLocationSyncService } from './sapo/sapo-location-sync.service';
 import { SapoOrderSyncService } from './sapo/sapo-order-sync.service';
-import { ShopeeAuthService } from './shopee/shopee-auth.service';
-import {
-  ShopeePushWebhookService,
-  type ShopeePushPayload,
-} from './shopee/shopee-push-webhook.service';
-import { ShopeeSyncService } from './shopee/shopee-sync.service';
 import {
   ChannelOverviewQueryDto,
   UpdateChannelConnectionDto,
@@ -53,9 +47,6 @@ import {
 export class ChannelsController {
   constructor(
     private sync: ChannelSyncService,
-    private shopeeAuth: ShopeeAuthService,
-    private shopeeSync: ShopeeSyncService,
-    private shopeePush: ShopeePushWebhookService,
     private tiktokAuth: TiktokAuthService,
     private tiktokOrders: TiktokOrderSyncService,
     private tiktokWebhook: TiktokWebhookService,
@@ -103,38 +94,6 @@ export class ChannelsController {
       throw new UnauthorizedException('Chữ ký webhook TikTok không hợp lệ');
     }
     return this.tiktokWebhook.handleNotification(payload, valid);
-  }
-
-  @Public()
-  @Get('shopee/push')
-  @HttpCode(200)
-  shopeePushProbe() {
-    return { ok: true };
-  }
-
-  /**
-   * Push Mechanism Shopee (order_status_push, code 3). Đăng ký URL này trên Shopee Console.
-   * Payload chỉ dùng ordersn + shop_id; nội dung đơn kéo lại qua Open API.
-   */
-  @Public()
-  @Post('shopee/push')
-  @HttpCode(200)
-  async shopeePushNotify(
-    @Req() req: RawBodyRequest<Request>,
-    @Body() payload: ShopeePushPayload,
-    @Headers('authorization') authorization?: string,
-  ) {
-    const raw = req.rawBody?.toString('utf8') ?? '';
-    const callbackUrl = this.shopeePush.resolveCallbackUrl();
-    const valid = this.shopeePush.verifySignature(
-      callbackUrl,
-      raw,
-      authorization,
-    );
-    if (!valid && this.shopeePush.isStrict()) {
-      throw new UnauthorizedException('Chữ ký push Shopee không hợp lệ');
-    }
-    return this.shopeePush.handleNotification(payload, valid);
   }
 
   /**
@@ -200,17 +159,6 @@ export class ChannelsController {
     return this.sync.syncConnectedChannels(user);
   }
 
-  /** Kéo đơn từ Shopee Open Platform (sandbox/production theo SHOPEE_ENV). */
-  @Post('shopee/sync')
-  @RequirePermission('order:create')
-  @LocationOptional()
-  syncShopee(
-    @CurrentUser() user: AuthUser,
-    @Query('connection_id') connectionId?: string,
-  ) {
-    return this.shopeeSync.syncShopeeOrders(user.userId, connectionId);
-  }
-
   /**
    * Số liệu bán hàng theo kênh (doanh số, số đơn, đơn huỷ, trạng thái đơn) — nguồn cho
    * màn Tổng quan kênh bán. Đọc từ `orders` nên dùng quyền xem đơn, không phải `order:create`.
@@ -241,42 +189,6 @@ export class ChannelsController {
     @Body() dto: UpdateChannelConnectionDto,
   ) {
     return this.sync.updateConnectionLocation(id, dto.location_id);
-  }
-
-  /** Link ủy quyền shop Shopee — mở trong trình duyệt (seller đăng nhập & đồng ý). */
-  @Get('shopee/authorize-url')
-  @RequirePermission('order:create')
-  @LocationOptional()
-  getShopeeAuthorizeUrl() {
-    return { url: this.shopeeAuth.getAuthorizeUrl() };
-  }
-
-  /**
-   * Redirect URL khai báo trên Shopee Open Platform — Shopee gọi lại (GET) sau khi seller
-   * ủy quyền, kèm `code` và `shop_id`.
-   */
-  @Public()
-  @Get('shopee/callback')
-  async shopeeCallback(
-    @Query('code') code?: string,
-    @Query('shop_id') shopId?: string,
-    @Query('error') error?: string,
-  ) {
-    if (error || !code || !shopId) {
-      return {
-        ok: false,
-        message: 'Ủy quyền Shopee thất bại hoặc thiếu code/shop_id',
-      };
-    }
-    const conn = await this.shopeeAuth.handleAuthorizationCallback(
-      code,
-      shopId,
-    );
-    return {
-      ok: true,
-      shop_id: conn.shopId,
-      shop_name: conn.shopName,
-    };
   }
 
   /**

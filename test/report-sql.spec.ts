@@ -30,6 +30,12 @@ describe('BC-2 quy tắc lọc đơn cho báo cáo', () => {
     expect(sqlText(orderScopeSql(ctx()))).toContain(`"status" <> 'cancelled'`);
   });
 
+  it('includeCancelled bỏ điều kiện loại huỷ — báo cáo tự FILTER từng cột', () => {
+    const text = sqlText(orderScopeSql(ctx(), { includeCancelled: true }));
+    expect(text).not.toContain(`"status" <> 'cancelled'`);
+    expect(text).toContain('"created_on" >=');
+  });
+
   it('KHÔNG lọc theo status=closed — Sapo gần như không đóng đơn', () => {
     const text = sqlText(orderScopeSql(ctx()));
     expect(text).not.toContain(`'closed'`);
