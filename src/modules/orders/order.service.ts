@@ -508,16 +508,44 @@ export class OrderService {
         ? dto.total_shipping_price
         : Number(order.totalShippingPrice);
 
+    const itemDiscounts = new Map<string, number>();
+    for (const update of dto.items ?? []) {
+      const item = order.items.find(
+        (candidate) => candidate.id.toString() === update.id,
+      );
+      if (!item) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Dòng sản phẩm không thuộc đơn hàng này',
+          422,
+        );
+      }
+      const lineAmount = item.quantity * Number(item.price);
+      if (update.discount > lineAmount) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Giảm giá của ${item.sku} không được vượt quá tiền hàng`,
+          422,
+        );
+      }
+      itemDiscounts.set(update.id, update.discount);
+    }
+
     const pricedLines: PricedLine[] = order.items.map((i) => ({
       quantity: i.quantity,
       price: Number(i.price),
-      discount: Number(i.totalDiscount),
+      discount: itemDiscounts.get(i.id.toString()) ?? Number(i.totalDiscount),
     }));
-    const subTotalPrice = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
+    // Thuế suất suy từ số liệu ĐÃ LƯU — giảm giá dòng vừa đổi làm tiền hàng mới
+    // lệch khỏi mức thuế cũ, chia chéo sẽ ra tỷ lệ sai.
     const taxRate =
       dto.tax_rate !== undefined
         ? dto.tax_rate
-        : deriveTaxRate(subTotalPrice, totalDiscounts, Number(order.totalTax));
+        : deriveTaxRate(
+            Number(order.subTotalPrice),
+            Number(order.totalDiscounts),
+            Number(order.totalTax),
+          );
     const totals = calcOrderTotals(
       pricedLines,
       totalDiscounts,
@@ -587,6 +615,19 @@ export class OrderService {
           },
           tx,
         );
+      }
+
+      for (const [itemId, discount] of itemDiscounts) {
+        const item = order.items.find(
+          (candidate) => candidate.id.toString() === itemId,
+        )!;
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: {
+            totalDiscount: discount,
+            discountedTotal: item.quantity * Number(item.price) - discount,
+          },
+        });
       }
 
       const record = await tx.order.update({
@@ -1497,6 +1538,13 @@ export class OrderService {
       }
 
       const discount = item.discount ?? 0;
+      if (discount > item.quantity * price) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Giảm giá của ${variant.sku} không được vượt quá tiền hàng`,
+          422,
+        );
+      }
       result.push({
         variantId,
         locationId,

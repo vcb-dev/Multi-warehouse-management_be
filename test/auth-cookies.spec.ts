@@ -62,7 +62,7 @@ const saved: Record<string, string | undefined> = {};
  * (RFC 2606 dành riêng cho tài liệu) — nhìn là biết placeholder, không ai tưởng là domain
  * của hệ này.
  */
-const FE_ORIGIN = 'https://multi-warehouse-management-fe-beta.vercel.app';
+const FE_ORIGIN = 'https://kho.vienchibao.com';
 const BE_HOST = 'warehouse-be-production.up.railway.app';
 
 beforeEach(() => {
