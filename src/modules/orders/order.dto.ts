@@ -49,6 +49,16 @@ export class UpdateOrderItemDto {
   note?: string;
 }
 
+export class UpdateOrderLineDiscountDto {
+  @IsString()
+  id!: string;
+
+  /** Tổng số tiền giảm của cả dòng (không phải mỗi đơn vị). */
+  @IsNumber()
+  @Min(0)
+  discount!: number;
+}
+
 /** Gợi ý giá trị cho ô nhập tự do của đơn (hiện chỉ có tag) */
 export class OrderFacetQueryDto {
   /** Lọc theo chuỗi con, bỏ dấu tiếng Việt — để ô chọn gõ tìm được */
@@ -490,6 +500,13 @@ export class UpdateOrderDto {
   @ValidateNested()
   @Type(() => ShippingAddressDto)
   shipping_address?: ShippingAddressDto;
+
+  /** Giảm giá tổng cộng của từng dòng hàng */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateOrderLineDiscountDto)
+  items?: UpdateOrderLineDiscountDto[];
 }
 
 export class OrderTransitionDto {
