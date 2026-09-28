@@ -37,10 +37,17 @@ describe('VTP-1 map ORDER_STATUS → ShipmentStatus của Sapo', () => {
     }
   });
 
-  it('không map bừa mã ranh giới mơ hồ (101 VTP yêu cầu hủy, 200 nhập doanh thu, mã lạ)', () => {
+  it('không map bừa mã mơ hồ (101 VTP mới yêu cầu hủy, 202 sửa phiếu, mã lạ)', () => {
     expect(adapter.mapWebhookStatus('101')).toBeNull();
-    expect(adapter.mapWebhookStatus('200')).toBeNull();
+    expect(adapter.mapWebhookStatus('202')).toBeNull();
     expect(adapter.mapWebhookStatus('999')).toBeNull();
+  });
+
+  it('map đủ các mã VTP hay gửi thẳng không qua bước trước', () => {
+    expect(adapter.mapWebhookStatus('200')).toBe(ShipmentStatus.picked_up);
+    expect(adapter.mapWebhookStatus('509')).toBe(ShipmentStatus.delivering);
+    expect(adapter.mapWebhookStatus('515')).toBe(ShipmentStatus.returning);
+    expect(adapter.mapWebhookStatus('-15')).toBe(ShipmentStatus.cancelled);
   });
 });
 

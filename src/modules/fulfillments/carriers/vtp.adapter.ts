@@ -28,27 +28,31 @@ const PROVINCE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Mã `ORDER_STATUS` ViettelPost (mục 8 tài liệu, 101–550) → 8 giá trị `ShipmentStatus` nội bộ.
- * Nhóm dựa theo bảng trạng thái trong tài liệu; cần đối chiếu lại với webhook thật khi test ở
- * dev (Phase E) vì tài liệu không mô tả rõ ranh giới giữa vài mã (vd 200, 202, 509, 515) — để
- * trống các mã đó (không map) thay vì đoán bừa, giống cách GHN bỏ trống damage/lost/exception.
+ * VTP hay nhảy cóc/đẩy sai thứ tự, nên webhook đi qua `shipmentPathTo` thay vì áp thẳng.
+ * Cố ý không map: 202 (sửa phiếu gửi — không đổi vị trí hàng) và 101 (VTP mới *yêu cầu* hủy,
+ * tài liệu không xếp vào trạng thái kết thúc — hủy thật sẽ đến bằng 107/201/-15).
  */
 const WEBHOOK_STATUS_MAP: Record<string, ShipmentStatus> = {
   '102': ShipmentStatus.pending, // Đơn hàng chờ xử lý
   '103': ShipmentStatus.pending, // Giao cho bưu cục
   '104': ShipmentStatus.pending, // Giao cho bưu tá đi nhận
   '105': ShipmentStatus.picked_up, // Bưu tá đã nhận hàng — điểm trừ tồn kho
+  '200': ShipmentStatus.picked_up, // Nhận từ bưu tá - bưu cục gốc (có khi đến mà không có 105)
   '300': ShipmentStatus.delivering, // Khai thác đi
   '400': ShipmentStatus.delivering, // Khai thác đến
   '500': ShipmentStatus.delivering, // Giao bưu tá đi phát
   '508': ShipmentStatus.delivering, // Phát tiếp (đơn vị yêu cầu)
+  '509': ShipmentStatus.delivering, // Chuyển tiếp bưu cục khác
   '550': ShipmentStatus.delivering, // Phát tiếp (khách hàng yêu cầu)
   '501': ShipmentStatus.delivered, // Phát thành công
   '505': ShipmentStatus.retry_delivery, // Tồn - thông báo chuyển hoàn
   '506': ShipmentStatus.retry_delivery, // Tồn - khách nghỉ/không có nhà
   '507': ShipmentStatus.retry_delivery, // Tồn - khách đến bưu cục nhận
   '502': ShipmentStatus.returning, // Chuyển hoàn bưu cục gốc
+  '515': ShipmentStatus.returning, // Bưu cục phát duyệt hoàn
   '504': ShipmentStatus.returned, // Hoàn thành công - chuyển trả người gửi
   '107': ShipmentStatus.cancelled, // Đối tác yêu cầu hủy qua API
+  '-15': ShipmentStatus.cancelled, // Hủy vận đơn (trạng thái kết thúc, mục 7 tài liệu)
   '201': ShipmentStatus.cancelled, // Hủy nhập phiếu gửi
   '503': ShipmentStatus.cancelled, // Hủy - theo yêu cầu khách hàng
 };

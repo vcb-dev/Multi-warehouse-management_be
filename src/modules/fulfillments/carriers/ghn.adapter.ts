@@ -9,6 +9,7 @@ import {
   CarrierShipmentInput,
   CarrierShipmentResult,
   estimateQuote,
+  shipmentPathTo,
 } from './carrier-adapter';
 import { GhnLocationResolver } from './ghn-location-resolver';
 import { GHN_TRACKING_URL, GhnClient, isGhnSandbox } from './ghn.client';
@@ -51,21 +52,6 @@ const WEBHOOK_STATUS_MAP: Record<string, ShipmentStatus> = {
   cancel: ShipmentStatus.cancelled,
   // damage / lost / exception: GHN chưa chốt hướng xử lý, để nguyên trạng thái hiện tại
   // và chờ nghiệp vụ xử lý tay — map bừa sẽ làm sai tồn kho.
-};
-
-/** Các bước trung gian hợp lệ giữa hai trạng thái nội bộ — GHN hay nhảy cóc. */
-const TRANSITIONS: Partial<Record<ShipmentStatus, ShipmentStatus[]>> = {
-  [ShipmentStatus.pending]: [ShipmentStatus.picked_up],
-  [ShipmentStatus.picked_up]: [ShipmentStatus.delivering],
-  [ShipmentStatus.delivering]: [
-    ShipmentStatus.delivered,
-    ShipmentStatus.retry_delivery,
-  ],
-  [ShipmentStatus.retry_delivery]: [
-    ShipmentStatus.delivering,
-    ShipmentStatus.returning,
-  ],
-  [ShipmentStatus.returning]: [ShipmentStatus.returned],
 };
 
 /** `required_note` của GHN ứng với các lựa chọn "Yêu cầu giao hàng" ở UI. */
@@ -138,22 +124,7 @@ export class GhnAdapter implements CarrierAdapter {
    * Trả [] nếu đã ở đích; null nếu không tới được.
    */
   pathTo(from: ShipmentStatus, to: ShipmentStatus): ShipmentStatus[] | null {
-    if (from === to) return [];
-    const queue: { status: ShipmentStatus; path: ShipmentStatus[] }[] = [
-      { status: from, path: [] },
-    ];
-    const seen = new Set<ShipmentStatus>([from]);
-    while (queue.length) {
-      const cur = queue.shift()!;
-      for (const next of TRANSITIONS[cur.status] ?? []) {
-        if (seen.has(next)) continue;
-        const path = [...cur.path, next];
-        if (next === to) return path;
-        seen.add(next);
-        queue.push({ status: next, path });
-      }
-    }
-    return null;
+    return shipmentPathTo(from, to);
   }
 
   async createShipment(

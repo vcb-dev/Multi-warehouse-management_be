@@ -7,6 +7,7 @@ import {
   OrderStatus,
   PackingStatus,
   Prisma,
+  RestockType,
   ShipmentStatus,
   ShippingFeePayer,
   ShippingProviderType,
@@ -28,6 +29,10 @@ import {
   parseList,
 } from '../../common/query/filter-params';
 import { InventoryService } from '../inventory/inventory.service';
+import {
+  recomputeOrderRefundStatuses,
+  returnedQuantities,
+} from '../orders/order-refund-status';
 import { sortForLocking } from '../inventory/inventory.types';
 import { resolveChannelSyncActor } from '../channels/channel-sync-actor';
 import { NotificationService } from '../notifications/notification.service';
@@ -36,6 +41,7 @@ import { RbacService } from '../rbac/rbac.service';
 import {
   CarrierConnectionConfig,
   CarrierShipmentResult,
+  shipmentPathTo,
 } from './carriers/carrier-adapter';
 import { generateFulfillmentCode } from './fulfillment-code';
 import {
@@ -128,6 +134,18 @@ export class FulfillmentService {
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     assertLocationPermission(user, 'order:pack', order.locationId);
     return order;
+  }
+
+  /** Đơn đã hoàn vận đơn về kho thì không giao lại trên chính đơn đó — giống Sapo. */
+  private async assertNotReturned(orderId: bigint) {
+    const returned = await returnedQuantities(this.prisma, orderId);
+    if (returned.size > 0) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Đơn đã hoàn hàng về kho — tạo đơn mới nếu cần giao lại',
+        409,
+      );
+    }
   }
 
   private async loadFulfillment(
@@ -360,6 +378,7 @@ export class FulfillmentService {
         409,
       );
     }
+    await this.assertNotReturned(order.id);
     await this.assertSufficientPhysicalStock(order.locationId, order.items);
     const created = await this.prisma.$transaction(async (tx) => {
       const open = await this.findOpen(order.id, tx);
@@ -511,6 +530,7 @@ export class FulfillmentService {
         409,
       );
     }
+    await this.assertNotReturned(order.id);
     await this.assertSufficientPhysicalStock(order.locationId, order.items);
 
     const provider = await this.prisma.shippingProvider.findUnique({
@@ -1217,42 +1237,61 @@ export class FulfillmentService {
         return;
       }
 
-      // returned: hàng đã về tới kho — nhập lại on_hand và giữ chỗ committed như trước khi xuất
+      // returned: hàng đã về tới kho. Làm theo Sapo (đối chiếu nhật ký sự kiện đơn hoàn thật,
+      // VD HK4963/HK16979): hãng báo đã hoàn là Sapo TỰ nhập kho ("refund_restock") thành hàng
+      // BÁN ĐƯỢC NGAY — không giữ chỗ lại cho đơn — kèm một refund `restock_type=return` không
+      // có giao dịch tiền. Đơn vẫn mở, nhưng không còn gì để giao (Sapo `fulfillable_quantity`
+      // = 0): muốn giao lại thì tạo đơn mới, xem `assertNotReturned`. Hủy đơn sau đó chỉ nhả
+      // phần chưa hoàn, xem `OrderService.transition('cancel')`.
       for (const item of sortForLocking(f.order.items)) {
-        await this.inventory.applyMovements(
-          [
-            {
-              variantId: item.variantId,
-              locationId: f.order.locationId,
-              bucket: InventoryBucket.on_hand,
-              change: item.quantity,
-              type: MovementType.return_in,
-              referenceType: 'order',
-              referenceId: f.orderId,
-              createdById: user.userId,
-            },
-            {
-              variantId: item.variantId,
-              locationId: f.order.locationId,
-              bucket: InventoryBucket.committed,
-              change: item.quantity,
-              type: MovementType.order_reserve,
-              referenceType: 'order',
-              referenceId: f.orderId,
-              createdById: user.userId,
-            },
-          ],
+        await this.inventory.applyMovement(
+          {
+            variantId: item.variantId,
+            locationId: f.order.locationId,
+            bucket: InventoryBucket.on_hand,
+            change: item.quantity,
+            type: MovementType.return_in,
+            referenceType: 'order',
+            referenceId: f.orderId,
+            createdById: user.userId,
+          },
           tx,
         );
       }
+      await tx.orderRefund.create({
+        data: {
+          orderId: f.orderId,
+          returnId: null,
+          note: `Nhận hàng hoàn từ vận đơn ${f.name}${f.trackingNumber ? ` (${f.trackingNumber})` : ''}`,
+          restock: true,
+          totalRefunded: 0,
+          createdById: user.userId,
+          lineItems: {
+            create: f.order.items.map((i) => ({
+              orderItemId: i.id,
+              variantId: i.variantId,
+              locationId: f.order.locationId,
+              productName: i.name,
+              sku: i.sku,
+              variantTitle: i.variantTitle,
+              quantity: i.quantity,
+              price: i.price,
+              subtotal: Number(i.price) * i.quantity,
+              restockType: RestockType.return_item,
+            })),
+          },
+        },
+      });
       await tx.fulfillment.update({
         where: { id: f.id },
         data: { shipmentStatus: status, returnedAt: now, closedAt: now },
       });
+      // Hàng đã quay về ⇒ đơn không còn "đã xuất hàng" — để còn hủy được đơn.
       await tx.order.update({
         where: { id: f.orderId },
         data: { deliveredOn: null },
       });
+      await recomputeOrderRefundStatuses(tx, f.orderId);
       await this.logShipment(tx, f, 'fulfillment.returned', user);
     });
 
@@ -1521,38 +1560,7 @@ export class FulfillmentService {
       return { received: true };
     }
 
-    const path = ghnAdapter.pathTo(f.shipmentStatus, status);
-    if (!path) {
-      this.logger.warn(
-        `Webhook GHN ${orderCode}: không tìm được đường ${f.shipmentStatus} -> ${status}`,
-      );
-      return { received: true };
-    }
-
-    const user = await this.systemUser();
-    let current = f;
-    try {
-      for (const step of path) {
-        await this.applyShipmentStatus(current, step, user);
-        const refreshed = await this.prisma.fulfillment.findUnique({
-          where: { id: f.id },
-          include: { order: { include: { items: true } } },
-        });
-        if (!refreshed) break;
-        current = refreshed;
-        if (refreshed.closedAt) break;
-      }
-    } catch (e) {
-      // Vòng đời nội bộ chặt hơn GHN (vd nhảy thẳng picked -> delivered). Ghi log để xử lý
-      // tay thay vì để GHN retry mãi.
-      if (e instanceof BusinessException) {
-        this.logger.warn(
-          `Webhook GHN ${orderCode}: ${f.shipmentStatus} -> ${status} bị chặn (${e.message})`,
-        );
-        return { received: true };
-      }
-      throw e;
-    }
+    await this.walkShipmentPath(f, status, `Webhook GHN ${orderCode}`);
     return { received: true };
   }
 
@@ -1653,22 +1661,60 @@ export class FulfillmentService {
       );
       return { received: true };
     }
-    if (status === f.shipmentStatus) return { received: true };
+    if (status === f.shipmentStatus || !f.shipmentStatus || f.closedAt) {
+      // closedAt: VTP vẫn có thể đẩy hành trình sau trạng thái kết thúc (501/503/504/201/107)
+      // — tài liệu yêu cầu cứ nhận 200 và bỏ qua.
+      return { received: true };
+    }
+
+    await this.walkShipmentPath(f, status, `Webhook VTP ${orderNumber}`);
+    return { received: true };
+  }
+
+  /**
+   * Đưa vận đơn tới trạng thái hãng báo, áp lần lượt từng bước trung gian (`shipmentPathTo`)
+   * để mỗi bước đụng tồn kho đúng một lần — VD hãng báo thẳng "đã hoàn" khi app còn ở
+   * "đang giao" thì vẫn phải qua `returning` rồi mới nhập kho ở `returned`.
+   *
+   * Không tới được (webhook sai thứ tự) hoặc state machine chặn → chỉ ghi log. Hãng retry
+   * dồn dập khi nhận khác 200 (GHN 10 lần/5s, VTP 5 lần), nên tuyệt đối không ném lỗi nghiệp vụ.
+   */
+  private async walkShipmentPath(
+    f: FulfillmentWithOrder,
+    status: ShipmentStatus,
+    tag: string,
+  ) {
+    if (!f.shipmentStatus) return;
+    const path = shipmentPathTo(f.shipmentStatus, status);
+    if (!path) {
+      this.logger.warn(
+        `${tag}: không tìm được đường ${f.shipmentStatus} -> ${status}, bỏ qua`,
+      );
+      return;
+    }
 
     const user = await this.systemUser();
+    let current = f;
     try {
-      await this.applyShipmentStatus(f, status, user);
+      for (const step of path) {
+        await this.applyShipmentStatus(current, step, user);
+        const refreshed = await this.prisma.fulfillment.findUnique({
+          where: { id: f.id },
+          include: { order: { include: { items: true } } },
+        });
+        if (!refreshed) break;
+        current = refreshed;
+        if (refreshed.closedAt) break;
+      }
     } catch (e) {
-      // Vòng đời nội bộ chặt hơn VTP — ghi log để xử lý tay thay vì để VTP retry mãi.
       if (e instanceof BusinessException) {
         this.logger.warn(
-          `Webhook VTP ${orderNumber}: ${f.shipmentStatus} -> ${status} bị chặn (${e.message})`,
+          `${tag}: ${current.shipmentStatus} -> ${status} bị chặn (${e.message})`,
         );
-        return { received: true };
+        return;
       }
       throw e;
     }
-    return { received: true };
   }
 
   /**
