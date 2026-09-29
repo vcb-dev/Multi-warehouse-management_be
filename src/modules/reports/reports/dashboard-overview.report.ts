@@ -323,14 +323,14 @@ async function queryBusiness(p: DashboardParams, from: Date, to: Date) {
       COUNT(*) FILTER (WHERE o."status" <> 'cancelled'
                          AND o."fulfillment_status" IS NULL)               AS unfulfilled_count,
       COUNT(*) FILTER (WHERE o."status" <> 'cancelled' AND EXISTS (
-                         SELECT 1 FROM "fulfillments" f
+                         SELECT 1 FROM "oms"."fulfillments" f
                          WHERE f."order_id" = o."id" AND f."status" = 'success'
                            AND f."shipment_status" IN ('picked_up', 'delivering', 'retry_delivery')
                        ))                                                  AS shipping_count,
       SUM(o."total_price") FILTER (WHERE o."status" <> 'cancelled')        AS total_price,
       SUM(COALESCE(o."total_refunded", 0)) FILTER (WHERE o."status" <> 'cancelled')
                                                                            AS total_refunded
-    FROM "orders" o
+    FROM "oms"."orders" o
     WHERE ${orderScope(p, from, to)}
   `;
   const r = rows[0];
@@ -351,8 +351,8 @@ async function queryBusiness(p: DashboardParams, from: Date, to: Date) {
 async function queryItemsSold(p: DashboardParams, from: Date, to: Date) {
   const rows = await p.prisma.$queryRaw<{ quantity: bigint | number | null }[]>`
     SELECT SUM(COALESCE(oi."current_quantity", oi."quantity")) AS quantity
-    FROM "order_items" oi
-    JOIN "orders" o ON o."id" = oi."order_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o ON o."id" = oi."order_id"
     WHERE ${orderScope(p, from, to, Prisma.sql`o."status" <> 'cancelled'`)}
   `;
   return Number(rows[0]?.quantity ?? 0);
@@ -372,7 +372,7 @@ async function queryRevenueSeries(
   const rows = await p.prisma.$queryRaw<SeriesRaw[]>`
     SELECT ${idx} AS idx,
            SUM(o."total_price") - SUM(COALESCE(o."total_refunded", 0)) AS revenue
-    FROM "orders" o
+    FROM "oms"."orders" o
     WHERE ${orderScope(p, from, to, Prisma.sql`o."status" <> 'cancelled'`)}
     GROUP BY 1
   `;
@@ -401,12 +401,12 @@ async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
   const rows = await p.prisma.$queryRaw<TrafficRaw[]>`
     WITH sess AS (
       SELECT COUNT(DISTINCT cm."conversation_id") AS total
-      FROM "conversation_messages" cm
+      FROM "oms"."conversation_messages" cm
       WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
     ),
     buyers AS (
       SELECT DISTINCT o."customer_id" AS customer_id
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${orderScope(
         p,
         from,
@@ -417,7 +417,7 @@ async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
     SELECT (SELECT total FROM sess) AS sessions,
            COUNT(*)                 AS buyers,
            COUNT(*) FILTER (WHERE EXISTS (
-             SELECT 1 FROM "orders" o2
+             SELECT 1 FROM "oms"."orders" o2
              WHERE o2."customer_id" = b.customer_id
                AND o2."status" <> 'cancelled'
                AND o2."created_on" < ${from}
@@ -440,14 +440,14 @@ async function queryTrafficSeries(p: DashboardParams, size: number) {
     p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`cm."created_at"`)} AS idx,
              COUNT(DISTINCT cm."conversation_id") AS total
-      FROM "conversation_messages" cm
+      FROM "oms"."conversation_messages" cm
       WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
       GROUP BY 1
     `,
     p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`o."created_on"`)} AS idx,
              COUNT(DISTINCT o."customer_id") AS total
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${orderScope(p, from, to, Prisma.sql`o."status" <> 'cancelled'`)}
       GROUP BY 1
     `,
@@ -493,9 +493,9 @@ async function queryTopProducts(p: DashboardParams, from: Date, to: Date) {
            (ARRAY_AGG(oi."sku" ${recent}))[1]                  AS sku,
            SUM(COALESCE(oi."current_quantity", oi."quantity")) AS quantity,
            SUM(oi."discounted_total")                          AS revenue
-    FROM "order_items" oi
-    JOIN "orders" o                ON o."id" = oi."order_id"
-    LEFT JOIN "product_variants" v ON v."id" = oi."variant_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o                ON o."id" = oi."order_id"
+    LEFT JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
     WHERE ${orderScope(p, from, to, Prisma.sql`o."status" <> 'cancelled'`)}
     GROUP BY oi."variant_id", v."product_id"
     HAVING SUM(COALESCE(oi."current_quantity", oi."quantity")) > 0
@@ -537,7 +537,7 @@ async function queryFunnel(p: DashboardParams, from: Date, to: Date) {
                               AND o."financial_status" = 'paid')         AS paid,
            COUNT(*) FILTER (WHERE o."status" <> 'cancelled'
                               AND o."fulfillment_status" = 'fulfilled')  AS fulfilled
-    FROM "orders" o
+    FROM "oms"."orders" o
     WHERE ${orderScope(p, from, to)}
   `;
   const r = rows[0];

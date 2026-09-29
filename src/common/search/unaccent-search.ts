@@ -79,12 +79,12 @@ export async function findProductIdsByQuery(
   const pattern = `%${q}%`;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT DISTINCT p.id
-    FROM products p
-    LEFT JOIN product_variants v ON v.product_id = p.id
-    WHERE unaccent(p.name) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(p.vendor, '')) ILIKE unaccent(${pattern})
-       OR unaccent(v.sku) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(v.barcode, '')) ILIKE unaccent(${pattern})
+    FROM "oms"."products" p
+    LEFT JOIN "oms"."product_variants" v ON v.product_id = p.id
+    WHERE "public".unaccent(p.name) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(p.vendor, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(v.sku) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(v.barcode, '')) ILIKE "public".unaccent(${pattern})
     ORDER BY p.id DESC
     LIMIT ${limit}
   `;
@@ -100,11 +100,11 @@ export async function findVariantIdsByQuery(
   const pattern = `%${q}%`;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT v.id
-    FROM product_variants v
-    JOIN products p ON p.id = v.product_id
-    WHERE unaccent(v.sku) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(v.barcode, '')) ILIKE unaccent(${pattern})
-       OR unaccent(p.name) ILIKE unaccent(${pattern})
+    FROM "oms"."product_variants" v
+    JOIN "oms"."products" p ON p.id = v.product_id
+    WHERE "public".unaccent(v.sku) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(v.barcode, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(p.name) ILIKE "public".unaccent(${pattern})
     ORDER BY v.id DESC
     LIMIT ${limit}
   `;
@@ -129,7 +129,7 @@ export async function findCustomerIdsByQuery(
        OR ${phoneMatch(Prisma.sql`c.phone`, phone)}
        OR EXISTS (
             SELECT 1
-            FROM customer_addresses a
+            FROM "oms"."customer_addresses" a
             WHERE a.customer_id = c.id
               AND ${phoneMatch(Prisma.sql`a.phone`, phone)}
           )`
@@ -144,21 +144,21 @@ export async function findCustomerIdsByQuery(
    * ra". Khớp từ đầu số thuê bao xếp trên hết, rồi tới số lọt giữa, rồi tới tên
    * khớp từ đầu một chữ (đầu chuỗi hoặc sau dấu cách).
    */
-  const name = Prisma.sql`unaccent(concat_ws(' ', c.first_name, c.last_name))`;
+  const name = Prisma.sql`"public".unaccent(concat_ws(' ', c.first_name, c.last_name))`;
   const rank = Prisma.sql`CASE
         WHEN ${phoneMatch(Prisma.sql`c.phone`, phone, true)} THEN 4
         WHEN ${phoneMatch(Prisma.sql`c.phone`, phone)} THEN 3
-        WHEN ${name} ILIKE unaccent(${`${q}%`})
-          OR ${name} ILIKE unaccent(${`% ${q}%`}) THEN 2
+        WHEN ${name} ILIKE "public".unaccent(${`${q}%`})
+          OR ${name} ILIKE "public".unaccent(${`% ${q}%`}) THEN 2
         ELSE 1
       END`;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT c.id
-    FROM customers c
-    WHERE unaccent(COALESCE(c.first_name, '')) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(c.last_name, '')) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(c.email, '')) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(c.phone, '')) ILIKE unaccent(${pattern})
+    FROM "oms"."customers" c
+    WHERE "public".unaccent(COALESCE(c.first_name, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(c.last_name, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(c.email, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(c.phone, '')) ILIKE "public".unaccent(${pattern})
        ${byPhone}
     ORDER BY ${rank} DESC, c.id DESC
     LIMIT ${limit}
@@ -179,12 +179,12 @@ export async function findSupplierIdsByQuery(
     : Prisma.empty;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT id
-    FROM suppliers
-    WHERE unaccent(code) ILIKE unaccent(${pattern})
-       OR unaccent(name) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(email, '')) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(phone, '')) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(tax_code, '')) ILIKE unaccent(${pattern})
+    FROM "oms"."suppliers"
+    WHERE "public".unaccent(code) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(name) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(email, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(phone, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(tax_code, '')) ILIKE "public".unaccent(${pattern})
        ${byPhone}
     ORDER BY id DESC
     LIMIT ${limit}
@@ -205,9 +205,9 @@ export async function findConversationIdsByQuery(
     : Prisma.empty;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT id
-    FROM conversations
-    WHERE unaccent(customer_name) ILIKE unaccent(${pattern})
-       OR unaccent(customer_phone) ILIKE unaccent(${pattern})
+    FROM "oms"."conversations"
+    WHERE "public".unaccent(customer_name) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(customer_phone) ILIKE "public".unaccent(${pattern})
        ${byPhone}
     ORDER BY id DESC
     LIMIT ${limit}
@@ -228,11 +228,11 @@ export async function findOrderIdsByQuery(
     : Prisma.empty;
   const rows = await prisma.$queryRaw<{ id: bigint }[]>`
     SELECT DISTINCT o.id
-    FROM orders o
-    LEFT JOIN order_items oi ON oi.order_id = o.id
-    WHERE unaccent(o.name) ILIKE unaccent(${pattern})
-       OR unaccent(COALESCE(o.phone, '')) ILIKE unaccent(${pattern})
-       OR unaccent(oi.sku) ILIKE unaccent(${pattern})
+    FROM "oms"."orders" o
+    LEFT JOIN "oms"."order_items" oi ON oi.order_id = o.id
+    WHERE "public".unaccent(o.name) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(COALESCE(o.phone, '')) ILIKE "public".unaccent(${pattern})
+       OR "public".unaccent(oi.sku) ILIKE "public".unaccent(${pattern})
        ${byPhone}
     ORDER BY o.id DESC
     LIMIT ${limit}

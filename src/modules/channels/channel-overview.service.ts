@@ -188,8 +188,8 @@ export class ChannelOverviewService {
              SUM(COALESCE(oi."current_quantity", oi."quantity"))  AS quantity,
              SUM(oi."discounted_total")                           AS revenue,
              COUNT(DISTINCT o."id")                               AS order_count
-      FROM "orders" o
-      JOIN "order_items" oi ON oi."order_id" = o."id"
+      FROM "oms"."orders" o
+      JOIN "oms"."order_items" oi ON oi."order_id" = o."id"
       WHERE ${scope} AND o."status" <> 'cancelled'
       GROUP BY oi."variant_id"
       ORDER BY quantity DESC
@@ -224,7 +224,7 @@ export class ChannelOverviewService {
              COUNT(*)                                                          AS order_count,
              COUNT(*) FILTER (WHERE o."status" = 'cancelled')                   AS cancelled_count,
              SUM(o."total_price") FILTER (WHERE o."status" <> 'cancelled')      AS revenue
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${scope}
       GROUP BY 1
     `;
@@ -237,8 +237,8 @@ export class ChannelOverviewService {
     >`
       SELECT ${CHANNEL_EXPR} AS channel,
              SUM(COALESCE(oi."current_quantity", oi."quantity")) AS quantity
-      FROM "orders" o
-      JOIN "order_items" oi ON oi."order_id" = o."id"
+      FROM "oms"."orders" o
+      JOIN "oms"."order_items" oi ON oi."order_id" = o."id"
       WHERE ${scope} AND o."status" <> 'cancelled'
       GROUP BY 1
     `;
@@ -251,7 +251,7 @@ export class ChannelOverviewService {
       SELECT TO_CHAR(DATE_TRUNC('day', o."created_on"), 'YYYY-MM-DD')      AS day,
              COUNT(*)                                                     AS order_count,
              SUM(o."total_price") FILTER (WHERE o."status" <> 'cancelled') AS revenue
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${scope}
       GROUP BY 1
       ORDER BY 1
@@ -272,7 +272,7 @@ export class ChannelOverviewService {
                ELSE 'processing'
              END AS status_key,
              COUNT(*) AS count
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${scope}
       GROUP BY 1
     `;

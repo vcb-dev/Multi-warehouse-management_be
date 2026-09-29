@@ -320,7 +320,7 @@ export class SapoInventorySyncService {
             Prisma.sql`(${r.variantId}::bigint, ${r.locationId}::bigint, ${r.onHand}, ${r.available}, ${r.committed}, ${r.incoming}, ${r.incomingOwned}, ${r.incomingNotOwned}, ${r.packed}, ${r.reserved}, ${r.unavailable}, now(), now())`,
         );
       await this.prisma.$executeRaw`
-        INSERT INTO inventory_levels
+        INSERT INTO "oms"."inventory_levels"
           (variant_id, location_id, on_hand, available, committed, incoming, incoming_owned, incoming_not_owned, packed, reserved, unavailable, created_at, updated_at)
         VALUES ${Prisma.join(values)}`;
     }
@@ -333,7 +333,7 @@ export class SapoInventorySyncService {
             Prisma.sql`(${r.variantId}::bigint, ${r.locationId}::bigint, ${r.onHand}, ${r.available}, ${r.committed}, ${r.incoming}, ${r.incomingOwned}, ${r.incomingNotOwned}, ${r.packed}, ${r.reserved}, ${r.unavailable})`,
         );
       await this.prisma.$executeRaw`
-        UPDATE inventory_levels AS t SET
+        UPDATE "oms"."inventory_levels" AS t SET
           on_hand = v.on_hand,
           available = v.available,
           committed = v.committed,

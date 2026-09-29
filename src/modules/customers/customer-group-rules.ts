@@ -339,7 +339,7 @@ const RULE_COLUMNS: Record<string, ColumnSpec> = {
         throw new BadRequestException('Tháng sinh nhật phải là số từ 1 đến 12');
       }
       const rows = await prisma.$queryRaw<{ id: bigint }[]>`
-        SELECT id FROM customers
+        SELECT id FROM "oms"."customers"
         WHERE dob IS NOT NULL AND EXTRACT(MONTH FROM dob) = ${m}
       `;
       return { id: { in: rows.map((r) => r.id) } };

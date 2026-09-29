@@ -88,9 +88,9 @@ async function runProfit(
            SUM(${EFFECTIVE_QTY})                        AS quantity,
            SUM(oi."discounted_total")                   AS revenue,
            SUM(${UNIT_COST} * ${EFFECTIVE_QTY})         AS cost
-    FROM "order_items" oi
-    JOIN "orders" o           ON o."id" = oi."order_id"
-    LEFT JOIN "product_variants" v ON v."id" = oi."variant_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+    LEFT JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
     WHERE ${scope}
     ${groupSql}
     ${orderSql}

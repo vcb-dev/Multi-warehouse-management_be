@@ -76,7 +76,7 @@ export class OrderRepository {
       Array<{ total_price: Prisma.Decimal; total_received: Prisma.Decimal }>
     >`
       SELECT total_price, total_received
-      FROM orders
+      FROM "oms"."orders"
       WHERE id = ${id}
       FOR UPDATE
     `;
@@ -97,11 +97,11 @@ export class OrderRepository {
     const pattern = params.q ? `%${params.q}%` : null;
     return this.prisma.$queryRaw<{ tag: string; order_count: bigint }[]>`
       SELECT t AS tag, count(*) AS order_count
-      FROM orders o, unnest(o.tags) AS t
+      FROM "oms"."orders" o, unnest(o.tags) AS t
       WHERE t <> ''
         AND (
           ${pattern}::text IS NULL
-          OR unaccent(t) ILIKE unaccent(${pattern}::text)
+          OR "public".unaccent(t) ILIKE "public".unaccent(${pattern}::text)
         )
       GROUP BY t
       ORDER BY count(*) DESC, t ASC
