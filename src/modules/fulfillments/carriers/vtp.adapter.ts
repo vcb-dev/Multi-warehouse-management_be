@@ -139,7 +139,7 @@ export class VtpAdapter implements CarrierAdapter {
     if (!senderAddress || !receiverAddress || !input.toProvince) {
       throw new BusinessException(
         'VALIDATION_ERROR',
-        'Địa chỉ giao/nhận hàng phải có đủ Tỉnh/Thành, Quận/Huyện, Phường/Xã để tạo vận đơn ViettelPost',
+        'Địa chỉ giao/nhận hàng phải có Tỉnh/Thành và Phường/Xã để tạo vận đơn ViettelPost',
         422,
       );
     }
