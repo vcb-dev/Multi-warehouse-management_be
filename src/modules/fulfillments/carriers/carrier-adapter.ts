@@ -97,6 +97,56 @@ export function estimateQuote(
 }
 
 /**
+ * Vòng đời vận đơn theo Sapo (khớp bảng `allowed` trong `applyShipmentStatus`), dùng để
+ * webhook đi qua các bước trung gian khi hãng nhảy cóc — VD VTP báo 502 (chuyển hoàn) ngay
+ * sau 500 (đang giao) mà không có 505, hoặc lỡ mất 105 (đã lấy hàng) rồi báo thẳng 300.
+ * Không có `cancelled`: hủy đi thẳng từ mọi trạng thái đang mở, xem `shipmentPathTo`.
+ */
+export const SHIPMENT_TRANSITIONS: Partial<
+  Record<ShipmentStatus, ShipmentStatus[]>
+> = {
+  [ShipmentStatus.pending]: [ShipmentStatus.picked_up],
+  [ShipmentStatus.picked_up]: [ShipmentStatus.delivering],
+  [ShipmentStatus.delivering]: [
+    ShipmentStatus.delivered,
+    ShipmentStatus.retry_delivery,
+  ],
+  [ShipmentStatus.retry_delivery]: [
+    ShipmentStatus.delivering,
+    ShipmentStatus.returning,
+  ],
+  [ShipmentStatus.returning]: [ShipmentStatus.returned],
+};
+
+/**
+ * Chuỗi trạng thái cần áp lần lượt để đi từ `from` tới `to` (không gồm `from`).
+ * Trả [] nếu đã ở đích; null nếu không tới được — tức webhook đến sai thứ tự (VD báo
+ * "đang giao" sau khi đã "đang hoàn"), bỏ qua là đúng.
+ */
+export function shipmentPathTo(
+  from: ShipmentStatus,
+  to: ShipmentStatus,
+): ShipmentStatus[] | null {
+  if (from === to) return [];
+  if (to === ShipmentStatus.cancelled) return [ShipmentStatus.cancelled];
+  const queue: { status: ShipmentStatus; path: ShipmentStatus[] }[] = [
+    { status: from, path: [] },
+  ];
+  const seen = new Set<ShipmentStatus>([from]);
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const next of SHIPMENT_TRANSITIONS[cur.status] ?? []) {
+      if (seen.has(next)) continue;
+      const path = [...cur.path, next];
+      if (next === to) return path;
+      seen.add(next);
+      queue.push({ status: next, path });
+    }
+  }
+  return null;
+}
+
+/**
  * Adapter cho từng hãng vận chuyển. `ManualAdapter` là mặc định (báo giá từ
  * services_config, trạng thái cập nhật thủ công); hãng có API thật (GHN) cài thêm
  * `createShipment`/`cancelShipment`.

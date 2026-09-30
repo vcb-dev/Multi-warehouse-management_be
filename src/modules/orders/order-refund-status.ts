@@ -100,3 +100,30 @@ export async function recomputeOrderRefundStatuses(
     totalRefunded,
   };
 }
+
+/**
+ * Số lượng đã quay về kho theo từng dòng đơn (mọi refund dòng khác `cancel`). Đơn mở mà
+ * có số này > 0 là đơn đã hoàn vận đơn (hãng chuyển hoàn, xem nhánh `returned` của
+ * `FulfillmentService.applyShipmentStatus`) — hàng đã nhập lại kho dạng bán được, nên
+ * không còn giữ chỗ `committed` và không giao lại được trên đơn này (Sapo
+ * `fulfillable_quantity` = 0).
+ */
+export async function returnedQuantities(
+  client: Pick<Prisma.TransactionClient, 'orderRefundLineItem'>,
+  orderId: bigint,
+): Promise<Map<bigint, number>> {
+  const lines = await client.orderRefundLineItem.findMany({
+    where: {
+      refund: { orderId },
+      restockType: { not: RestockType.cancel },
+      orderItemId: { not: null },
+    },
+    select: { orderItemId: true, quantity: true },
+  });
+  const byItem = new Map<bigint, number>();
+  for (const l of lines) {
+    const key = l.orderItemId!;
+    byItem.set(key, (byItem.get(key) ?? 0) + l.quantity);
+  }
+  return byItem;
+}

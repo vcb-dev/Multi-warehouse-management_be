@@ -42,7 +42,10 @@ import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
 import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
-import { recomputeOrderRefundStatuses } from './order-refund-status';
+import {
+  recomputeOrderRefundStatuses,
+  returnedQuantities,
+} from './order-refund-status';
 import {
   buildShippingAddressPatch,
   recipientSnapshot,
@@ -1147,6 +1150,18 @@ export class OrderService {
     }
   }
 
+  /** Đơn đã hoàn vận đơn về kho thì không còn gì để xuất — giống Sapo, giao lại là đơn mới. */
+  private async assertNotReturned(orderId: bigint) {
+    const returned = await returnedQuantities(this.repo.client, orderId);
+    if (returned.size > 0) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Đơn đã hoàn hàng về kho — tạo đơn mới nếu cần giao lại',
+        409,
+      );
+    }
+  }
+
   /** Trừ on_hand + committed cho toàn bộ dòng hàng — dùng ở cả action 'ship'
    * và action 'complete' (khi đơn hoàn thành thẳng mà chưa qua bước xuất hàng). */
   private async shipOrderItems(
@@ -1255,7 +1270,16 @@ export class OrderService {
         );
       }
       await this.repo.client.$transaction(async (tx) => {
-        for (const item of sortForLocking(order.items)) {
+        // Phần đã hoàn vận đơn về kho đã được nhập lại dạng bán được (không còn giữ chỗ) —
+        // chỉ nhả và ghi "hủy" cho phần còn lại, nếu không `committed` bị trừ hai lần.
+        const returned = await returnedQuantities(tx, id);
+        const remaining = order.items
+          .map((i) => ({
+            ...i,
+            quantity: i.quantity - (returned.get(i.id) ?? 0),
+          }))
+          .filter((i) => i.quantity > 0);
+        for (const item of sortForLocking(remaining)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -1293,30 +1317,32 @@ export class OrderService {
         // `total_refunded` = số khách đã trả: huỷ đơn chưa thu tiền thì bằng 0,
         // đúng như Sapo (đơn huỷ chưa thu vẫn giữ financial_status cũ).
         const refundedAmount = Number(order.totalReceived);
-        await tx.orderRefund.create({
-          data: {
-            orderId: id,
-            returnId: null,
-            note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
-            restock: false,
-            totalRefunded: refundedAmount,
-            createdById: user.userId,
-            lineItems: {
-              create: order.items.map((i) => ({
-                orderItemId: i.id,
-                variantId: i.variantId,
-                locationId: order.locationId,
-                productName: i.name,
-                sku: i.sku,
-                variantTitle: i.variantTitle,
-                quantity: i.quantity,
-                price: i.price,
-                subtotal: Number(i.price) * i.quantity,
-                restockType: RestockType.cancel,
-              })),
+        if (remaining.length > 0 || refundedAmount > 0) {
+          await tx.orderRefund.create({
+            data: {
+              orderId: id,
+              returnId: null,
+              note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
+              restock: false,
+              totalRefunded: refundedAmount,
+              createdById: user.userId,
+              lineItems: {
+                create: remaining.map((i) => ({
+                  orderItemId: i.id,
+                  variantId: i.variantId,
+                  locationId: order.locationId,
+                  productName: i.name,
+                  sku: i.sku,
+                  variantTitle: i.variantTitle,
+                  quantity: i.quantity,
+                  price: i.price,
+                  subtotal: Number(i.price) * i.quantity,
+                  restockType: RestockType.cancel,
+                })),
+              },
             },
-          },
-        });
+          });
+        }
 
         await tx.order.update({
           where: { id },
@@ -1362,6 +1388,7 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
+      await this.assertNotReturned(id);
       if (order.deliveredOn) {
         throw new BusinessException(
           'INVALID_TRANSITION',
@@ -1414,6 +1441,7 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
+      await this.assertNotReturned(id);
       await this.repo.client.$transaction(async (tx) => {
         // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
         // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
