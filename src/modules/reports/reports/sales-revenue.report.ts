@@ -215,10 +215,10 @@ async function runByOrderDimension(
            SUM(o."total_price")                AS total_price,
            SUM(COALESCE(o."total_refunded",0)) AS total_refunded,
            SUM(o."total_received")             AS total_received
-    FROM "orders" o
-    LEFT JOIN "locations" l ON l."id" = o."location_id"
-    LEFT JOIN "users" u     ON u."id" = o."assignee_id"
-    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    FROM "oms"."orders" o
+    LEFT JOIN "oms"."locations" l ON l."id" = o."location_id"
+    LEFT JOIN "oms"."users" u     ON u."id" = o."assignee_id"
+    LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
     WHERE ${scope}
     GROUP BY 1
     ORDER BY 1
@@ -253,11 +253,11 @@ async function runByVariant(ctx: ReportContext): Promise<ReportResult> {
            SUM(oi."discounted_total")                                   AS total_price,
            0::numeric                                                   AS total_refunded,
            0::numeric                                                   AS total_received
-    FROM "order_items" oi
-    JOIN "orders" o ON o."id" = oi."order_id"
-    LEFT JOIN "locations" l ON l."id" = o."location_id"
-    LEFT JOIN "users" u     ON u."id" = o."assignee_id"
-    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o ON o."id" = oi."order_id"
+    LEFT JOIN "oms"."locations" l ON l."id" = o."location_id"
+    LEFT JOIN "oms"."users" u     ON u."id" = o."assignee_id"
+    LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
     WHERE ${scope}
     GROUP BY oi."name", oi."sku"
     ORDER BY SUM(oi."discounted_total") DESC
@@ -315,10 +315,10 @@ async function runByStaff(ctx: ReportContext): Promise<ReportResult> {
            ) AS total_refunded,
            SUM(o."total_received") FILTER (WHERE o."status" <> 'cancelled')
              AS total_received
-    FROM "orders" o
-    LEFT JOIN "locations" l ON l."id" = o."location_id"
-    LEFT JOIN "users" u     ON u."id" = o."assignee_id"
-    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    FROM "oms"."orders" o
+    LEFT JOIN "oms"."locations" l ON l."id" = o."location_id"
+    LEFT JOIN "oms"."users" u     ON u."id" = o."assignee_id"
+    LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
     WHERE ${scope}
     GROUP BY 1
     ORDER BY 1

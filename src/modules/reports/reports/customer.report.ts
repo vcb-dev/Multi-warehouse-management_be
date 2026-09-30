@@ -79,8 +79,8 @@ async function runByGender(ctx: ReportContext): Promise<ReportResult> {
       COUNT(DISTINCT o."customer_id") AS customer_count,
       COUNT(*)                        AS order_count,
       SUM(o."total_price")            AS total_spent
-    FROM "orders" o
-    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    FROM "oms"."orders" o
+    LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
     WHERE ${scope}
     GROUP BY 1
     ORDER BY 3 DESC
@@ -104,7 +104,7 @@ async function runByRegion(ctx: ReportContext): Promise<ReportResult> {
       COUNT(DISTINCT o."customer_id") AS customer_count,
       COUNT(*)                        AS order_count,
       SUM(o."total_price")            AS total_spent
-    FROM "orders" o
+    FROM "oms"."orders" o
     WHERE ${scope}
     GROUP BY 1
     ORDER BY 3 DESC
@@ -142,8 +142,8 @@ async function runByAge(ctx: ReportContext): Promise<ReportResult> {
         END AS label,
         o."customer_id" AS customer_id,
         o."total_price" AS total_price
-      FROM "orders" o
-      LEFT JOIN "customers" c ON c."id" = o."customer_id"
+      FROM "oms"."orders" o
+      LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
       WHERE ${scope}
     ) t
     GROUP BY sort_order, label
@@ -160,7 +160,7 @@ async function runBySpending(ctx: ReportContext): Promise<ReportResult> {
       SELECT o."customer_id" AS customer_id,
              COUNT(*)             AS order_count,
              SUM(o."total_price") AS total_spent
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE ${scope} AND o."customer_id" IS NOT NULL
       GROUP BY o."customer_id"
     )
@@ -206,10 +206,10 @@ async function runByProductType(ctx: ReportContext): Promise<ReportResult> {
       COUNT(DISTINCT o."customer_id")   AS customer_count,
       COUNT(DISTINCT o."id")            AS order_count,
       SUM(oi."discounted_total")        AS total_spent
-    FROM "order_items" oi
-    JOIN "orders" o ON o."id" = oi."order_id"
-    LEFT JOIN "product_variants" v ON v."id" = oi."variant_id"
-    LEFT JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o ON o."id" = oi."order_id"
+    LEFT JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+    LEFT JOIN "oms"."products" p         ON p."id" = v."product_id"
     WHERE ${scope}
     GROUP BY 1
     ORDER BY 4 DESC
@@ -261,8 +261,8 @@ async function runByPhoneRepeat(ctx: ReportContext): Promise<ReportResult> {
       SUM(o."total_price")            AS total_spent,
       MIN(o."created_on")             AS first_order_on,
       MAX(o."created_on")             AS last_order_on
-    FROM "orders" o
-    LEFT JOIN "customers" c ON c."id" = o."customer_id"
+    FROM "oms"."orders" o
+    LEFT JOIN "oms"."customers" c ON c."id" = o."customer_id"
     WHERE ${scope}
       AND COALESCE(NULLIF(c."phone", ''), NULLIF(o."phone", '')) IS NOT NULL
     GROUP BY 1

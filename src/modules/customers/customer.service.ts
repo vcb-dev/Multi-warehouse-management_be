@@ -334,7 +334,7 @@ export class CustomerService {
   private async customersWithPhone(key: string) {
     const rows = await this.prisma.$queryRaw<{ id: bigint; phone: string }[]>`
       SELECT id, phone
-      FROM customers
+      FROM "oms"."customers"
       WHERE regexp_replace(phone, '\\D', '', 'g') LIKE ${`%${key.slice(-9)}`}
     `;
     return rows.filter((r) => phoneKey(r.phone) === key).map((r) => r.id);
@@ -361,8 +361,8 @@ export class CustomerService {
       { id: bigint; first_name: string | null; last_name: string | null }[]
     >`
       SELECT id, first_name, last_name
-      FROM customers
-      WHERE unaccent(concat_ws(' ', first_name, last_name)) ~* ${pattern}
+      FROM "oms"."customers"
+      WHERE "public".unaccent(concat_ws(' ', first_name, last_name)) ~* ${pattern}
       LIMIT 2000
     `;
     return rows
@@ -375,9 +375,9 @@ export class CustomerService {
     const pattern = `\\m${placeKey(input.ward).split(' ').join('\\M.*\\m')}\\M`;
     const rows = await this.prisma.$queryRaw<MatchedAddressRow[]>`
       SELECT id, customer_id, address1, ward, district, province
-      FROM customer_addresses
+      FROM "oms"."customer_addresses"
       WHERE address1 IS NOT NULL
-        AND unaccent(ward) ~* ${pattern}
+        AND "public".unaccent(ward) ~* ${pattern}
     `;
     return rows.filter((r) => isSameAddress(input, r));
   }

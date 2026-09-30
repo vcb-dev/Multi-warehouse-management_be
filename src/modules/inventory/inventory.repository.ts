@@ -25,7 +25,7 @@ export class InventoryRepository {
       }>
     >`
       SELECT variant_id, location_id, on_hand, committed, packed, unavailable, incoming, available
-      FROM inventory_levels
+      FROM "oms"."inventory_levels"
       WHERE variant_id = ${variantId} AND location_id = ${locationId}
       FOR UPDATE
     `;

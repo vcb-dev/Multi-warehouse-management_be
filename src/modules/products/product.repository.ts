@@ -185,11 +185,11 @@ export class ProductRepository {
     const pattern = params.q ? `%${params.q}%` : null;
     return this.prisma.$queryRaw<{ tag: string; product_count: bigint }[]>`
       SELECT t AS tag, count(*) AS product_count
-      FROM products p, unnest(p.tags) AS t
+      FROM "oms"."products" p, unnest(p.tags) AS t
       WHERE t <> ''
         AND (
           ${pattern}::text IS NULL
-          OR unaccent(t) ILIKE unaccent(${pattern}::text)
+          OR "public".unaccent(t) ILIKE "public".unaccent(${pattern}::text)
         )
       GROUP BY t
       ORDER BY count(*) DESC, t ASC
@@ -208,12 +208,12 @@ export class ProductRepository {
       { product_type: string; product_count: bigint }[]
     >`
       SELECT product_type, count(*) AS product_count
-      FROM products
+      FROM "oms"."products"
       WHERE product_type IS NOT NULL
         AND product_type <> ''
         AND (
           ${pattern}::text IS NULL
-          OR unaccent(product_type) ILIKE unaccent(${pattern}::text)
+          OR "public".unaccent(product_type) ILIKE "public".unaccent(${pattern}::text)
         )
       GROUP BY product_type
       ORDER BY count(*) DESC, product_type ASC
@@ -230,12 +230,12 @@ export class ProductRepository {
     const pattern = params.q ? `%${params.q}%` : null;
     return this.prisma.$queryRaw<{ vendor: string; product_count: bigint }[]>`
       SELECT vendor, count(*) AS product_count
-      FROM products
+      FROM "oms"."products"
       WHERE vendor IS NOT NULL
         AND vendor <> ''
         AND (
           ${pattern}::text IS NULL
-          OR unaccent(vendor) ILIKE unaccent(${pattern}::text)
+          OR "public".unaccent(vendor) ILIKE "public".unaccent(${pattern}::text)
         )
       GROUP BY vendor
       ORDER BY count(*) DESC, vendor ASC

@@ -659,7 +659,7 @@ export class StockTransferService {
 
   private generateCode(tx: Prisma.TransactionClient) {
     return nextSequentialCode(tx, {
-      table: Prisma.sql`stock_transfers`,
+      table: Prisma.sql`"oms"."stock_transfers"`,
       column: Prisma.sql`code`,
       prefix: 'STN',
     });

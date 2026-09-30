@@ -17,7 +17,7 @@ export async function generateOrderCode(
     .toUpperCase()
     .slice(0, 6);
   return nextSequentialCode(prisma, {
-    table: Prisma.sql`orders`,
+    table: Prisma.sql`"oms"."orders"`,
     column: Prisma.sql`name`,
     prefix,
   });
@@ -27,7 +27,7 @@ export async function generateDraftCode(prisma: Db): Promise<string> {
   // Giữ nguyên tiền tố `#D` của dữ liệu cũ. `#` là ký tự thường trong regex Postgres
   // nên nhúng thẳng vào `^#D[0-9]{6}$` là an toàn.
   return nextSequentialCode(prisma, {
-    table: Prisma.sql`draft_orders`,
+    table: Prisma.sql`"oms"."draft_orders"`,
     column: Prisma.sql`code`,
     prefix: '#D',
   });
@@ -35,7 +35,7 @@ export async function generateDraftCode(prisma: Db): Promise<string> {
 
 export async function generateReturnCode(prisma: Db): Promise<string> {
   return nextSequentialCode(prisma, {
-    table: Prisma.sql`order_returns`,
+    table: Prisma.sql`"oms"."order_returns"`,
     column: Prisma.sql`code`,
     prefix: 'RTN',
   });

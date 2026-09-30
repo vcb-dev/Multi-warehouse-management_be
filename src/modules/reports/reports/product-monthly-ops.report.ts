@@ -43,7 +43,7 @@ function round1(v: number): number {
 function categoryExistsSql(categoryId: bigint | undefined): Prisma.Sql {
   if (categoryId == null) return Prisma.empty;
   return Prisma.sql`AND EXISTS (
-    SELECT 1 FROM "product_categories" pc
+    SELECT 1 FROM "oms"."product_categories" pc
     WHERE pc."product_id" = p."id" AND pc."category_id" = ${categoryId}
   )`;
 }
@@ -60,10 +60,10 @@ async function queryProductsOrdered(p: ProductMonthlyOpsParams) {
     SELECT
       COUNT(DISTINCT v."product_id") FILTER (WHERE o."created_on" >= ${p.from}) AS current_count,
       COUNT(DISTINCT v."product_id") FILTER (WHERE o."created_on" < ${p.from})  AS previous_count
-    FROM "order_items" oi
-    JOIN "orders" o           ON o."id" = oi."order_id"
-    JOIN "product_variants" v ON v."id" = oi."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+    JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
     WHERE o."status" <> 'cancelled'
       AND o."created_on" >= ${p.prevFrom} AND o."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -83,11 +83,11 @@ async function queryProductsShipped(p: ProductMonthlyOpsParams) {
     SELECT
       COUNT(DISTINCT v."product_id") FILTER (WHERE f."created_on" >= ${p.from}) AS current_count,
       COUNT(DISTINCT v."product_id") FILTER (WHERE f."created_on" < ${p.from})  AS previous_count
-    FROM "fulfillment_line_items" fli
-    JOIN "fulfillments" f     ON f."id" = fli."fulfillment_id"
-    JOIN "orders" o           ON o."id" = f."order_id"
-    JOIN "product_variants" v ON v."id" = fli."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."fulfillment_line_items" fli
+    JOIN "oms"."fulfillments" f     ON f."id" = fli."fulfillment_id"
+    JOIN "oms"."orders" o           ON o."id" = f."order_id"
+    JOIN "oms"."product_variants" v ON v."id" = fli."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
     WHERE f."status" = 'success'
       AND f."created_on" >= ${p.prevFrom} AND f."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -117,10 +117,10 @@ async function queryOutOfStock(p: ProductMonthlyOpsParams) {
       SELECT v."id" AS variant_id, v."sku" AS sku, p."name" AS product_name,
              SUM(COALESCE(oi."current_quantity", oi."quantity")) AS demand_qty,
              COUNT(DISTINCT o."id") AS stuck_orders
-      FROM "order_items" oi
-      JOIN "orders" o           ON o."id" = oi."order_id"
-      JOIN "product_variants" v ON v."id" = oi."variant_id"
-      JOIN "products" p         ON p."id" = v."product_id"
+      FROM "oms"."order_items" oi
+      JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+      JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+      JOIN "oms"."products" p         ON p."id" = v."product_id"
       WHERE o."status" <> 'cancelled'
         AND o."created_on" >= ${p.from} AND o."created_on" < ${p.to}
         AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -130,7 +130,7 @@ async function queryOutOfStock(p: ProductMonthlyOpsParams) {
     ),
     avail AS (
       SELECT "variant_id", SUM("available") AS available_qty
-      FROM "inventory_levels"
+      FROM "oms"."inventory_levels"
       WHERE "location_id" IN (${Prisma.join(p.locationIds)})
       GROUP BY "variant_id"
     )
@@ -156,8 +156,8 @@ async function queryOutOfStock(p: ProductMonthlyOpsParams) {
     const variantIds = rows.map((r) => r.variant_id);
     const stuck = await p.prisma.$queryRaw<{ total: bigint | number }[]>`
       SELECT COUNT(DISTINCT o."id") AS total
-      FROM "order_items" oi
-      JOIN "orders" o ON o."id" = oi."order_id"
+      FROM "oms"."order_items" oi
+      JOIN "oms"."orders" o ON o."id" = oi."order_id"
       WHERE oi."variant_id" IN (${Prisma.join(variantIds)})
         AND o."status" <> 'cancelled'
         AND o."created_on" >= ${p.from} AND o."created_on" < ${p.to}
@@ -187,18 +187,18 @@ type TopOrderedRaw = {
 async function queryTopOrderedProducts(p: ProductMonthlyOpsParams) {
   const rows = await p.prisma.$queryRaw<TopOrderedRaw[]>`
     SELECT p."id" AS product_id, p."name" AS product_name,
-           (SELECT c."name" FROM "product_categories" pc
-              JOIN "categories" c ON c."id" = pc."category_id"
+           (SELECT c."name" FROM "oms"."product_categories" pc
+              JOIN "oms"."categories" c ON c."id" = pc."category_id"
               WHERE pc."product_id" = p."id"
               ORDER BY pc."position" ASC LIMIT 1)            AS category_name,
            COUNT(DISTINCT o."id") FILTER (WHERE o."created_on" >= ${p.from})    AS order_count,
            SUM(COALESCE(oi."current_quantity", oi."quantity"))
              FILTER (WHERE o."created_on" >= ${p.from})                        AS quantity,
            COUNT(DISTINCT o."id") FILTER (WHERE o."created_on" < ${p.from})     AS prev_order_count
-    FROM "order_items" oi
-    JOIN "orders" o           ON o."id" = oi."order_id"
-    JOIN "product_variants" v ON v."id" = oi."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+    JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
     WHERE o."status" <> 'cancelled'
       AND o."created_on" >= ${p.prevFrom} AND o."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -237,10 +237,10 @@ async function queryRevenue(p: ProductMonthlyOpsParams) {
     SELECT
       SUM(oi."discounted_total") FILTER (WHERE o."created_on" >= ${p.from}) AS current_revenue,
       SUM(oi."discounted_total") FILTER (WHERE o."created_on" < ${p.from})  AS previous_revenue
-    FROM "order_items" oi
-    JOIN "orders" o           ON o."id" = oi."order_id"
-    JOIN "product_variants" v ON v."id" = oi."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+    JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
     WHERE o."status" <> 'cancelled'
       AND o."created_on" >= ${p.prevFrom} AND o."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -262,13 +262,13 @@ type CategoryDistRaw = {
 async function queryCategoryDistribution(p: ProductMonthlyOpsParams) {
   const rows = await p.prisma.$queryRaw<CategoryDistRaw[]>`
     SELECT cat."name" AS category_name, SUM(oi."discounted_total") AS revenue
-    FROM "order_items" oi
-    JOIN "orders" o           ON o."id" = oi."order_id"
-    JOIN "product_variants" v ON v."id" = oi."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
+    FROM "oms"."order_items" oi
+    JOIN "oms"."orders" o           ON o."id" = oi."order_id"
+    JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
     LEFT JOIN LATERAL (
-      SELECT c."name" FROM "product_categories" pc
-        JOIN "categories" c ON c."id" = pc."category_id"
+      SELECT c."name" FROM "oms"."product_categories" pc
+        JOIN "oms"."categories" c ON c."id" = pc."category_id"
         WHERE pc."product_id" = p."id"
         ORDER BY pc."position" ASC LIMIT 1
     ) cat ON true
@@ -298,7 +298,7 @@ async function queryProductsWithoutOrders(
   // vẫn phát sinh đơn thật — lọc theo status sẽ khiến chỉ số này sai gần như toàn bộ.
   const rows = await p.prisma.$queryRaw<{ total: bigint | number }[]>`
     SELECT COUNT(*) AS total
-    FROM "products" p
+    FROM "oms"."products" p
     WHERE p."is_discontinued" = false
       ${categoryExistsSql(p.categoryId)}
   `;
@@ -311,15 +311,15 @@ async function queryAvgProcessingDays(p: ProductMonthlyOpsParams) {
     p.categoryId == null
       ? Prisma.empty
       : Prisma.sql`AND EXISTS (
-          SELECT 1 FROM "fulfillment_line_items" fli
-          JOIN "product_variants" v2 ON v2."id" = fli."variant_id"
-          JOIN "product_categories" pc ON pc."product_id" = v2."product_id"
+          SELECT 1 FROM "oms"."fulfillment_line_items" fli
+          JOIN "oms"."product_variants" v2 ON v2."id" = fli."variant_id"
+          JOIN "oms"."product_categories" pc ON pc."product_id" = v2."product_id"
           WHERE fli."fulfillment_id" = f."id" AND pc."category_id" = ${p.categoryId}
         )`;
   const rows = await p.prisma.$queryRaw<{ avg_days: Prisma.Decimal | null }[]>`
     SELECT AVG(EXTRACT(EPOCH FROM (f."created_on" - o."created_on")) / 86400.0) AS avg_days
-    FROM "fulfillments" f
-    JOIN "orders" o ON o."id" = f."order_id"
+    FROM "oms"."fulfillments" f
+    JOIN "oms"."orders" o ON o."id" = f."order_id"
     WHERE f."status" = 'success'
       AND f."created_on" >= ${p.from} AND f."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
@@ -333,10 +333,10 @@ async function queryCancelReturnRate(p: ProductMonthlyOpsParams) {
     p.categoryId == null
       ? Prisma.empty
       : Prisma.sql`AND EXISTS (
-          SELECT 1 FROM "order_items" oi
-          JOIN "product_variants" v ON v."id" = oi."variant_id"
-          JOIN "products" p2 ON p2."id" = v."product_id"
-          JOIN "product_categories" pc ON pc."product_id" = p2."id"
+          SELECT 1 FROM "oms"."order_items" oi
+          JOIN "oms"."product_variants" v ON v."id" = oi."variant_id"
+          JOIN "oms"."products" p2 ON p2."id" = v."product_id"
+          JOIN "oms"."product_categories" pc ON pc."product_id" = p2."id"
           WHERE oi."order_id" = o."id" AND pc."category_id" = ${p.categoryId}
         )`;
   const rows = await p.prisma.$queryRaw<
@@ -347,7 +347,7 @@ async function queryCancelReturnRate(p: ProductMonthlyOpsParams) {
       COUNT(DISTINCT o."id") FILTER (
         WHERE o."status" = 'cancelled' OR o."return_status" <> 'no_return'
       ) AS cancelled_or_returned
-    FROM "orders" o
+    FROM "oms"."orders" o
     WHERE o."created_on" >= ${p.from} AND o."created_on" < ${p.to}
       AND o."location_id" IN (${Prisma.join(p.locationIds)})
       ${categoryFilter}
