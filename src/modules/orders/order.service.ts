@@ -1590,10 +1590,12 @@ export class OrderService {
   }
 
   private shippingAddressComplete(sa?: ShippingAddressDto | null) {
+    // Địa chỉ hành chính mới sau 01/07/2025 chỉ có 2 cấp và gửi district=''.
+    const hasAdministrativeLevels = sa?.district?.trim() || sa?.district === '';
     return !!(
       sa?.address1?.trim() &&
       sa?.ward?.trim() &&
-      sa?.district?.trim() &&
+      hasAdministrativeLevels &&
       sa?.province?.trim()
     );
   }
