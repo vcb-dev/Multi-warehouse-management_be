@@ -42,7 +42,10 @@ import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
 import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
-import { recomputeOrderRefundStatuses } from './order-refund-status';
+import {
+  recomputeOrderRefundStatuses,
+  returnedQuantities,
+} from './order-refund-status';
 import {
   buildShippingAddressPatch,
   recipientSnapshot,
@@ -508,16 +511,44 @@ export class OrderService {
         ? dto.total_shipping_price
         : Number(order.totalShippingPrice);
 
+    const itemDiscounts = new Map<string, number>();
+    for (const update of dto.items ?? []) {
+      const item = order.items.find(
+        (candidate) => candidate.id.toString() === update.id,
+      );
+      if (!item) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Dòng sản phẩm không thuộc đơn hàng này',
+          422,
+        );
+      }
+      const lineAmount = item.quantity * Number(item.price);
+      if (update.discount > lineAmount) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Giảm giá của ${item.sku} không được vượt quá tiền hàng`,
+          422,
+        );
+      }
+      itemDiscounts.set(update.id, update.discount);
+    }
+
     const pricedLines: PricedLine[] = order.items.map((i) => ({
       quantity: i.quantity,
       price: Number(i.price),
-      discount: Number(i.totalDiscount),
+      discount: itemDiscounts.get(i.id.toString()) ?? Number(i.totalDiscount),
     }));
-    const subTotalPrice = pricedLines.reduce((s, l) => s + calcLineTotal(l), 0);
+    // Thuế suất suy từ số liệu ĐÃ LƯU — giảm giá dòng vừa đổi làm tiền hàng mới
+    // lệch khỏi mức thuế cũ, chia chéo sẽ ra tỷ lệ sai.
     const taxRate =
       dto.tax_rate !== undefined
         ? dto.tax_rate
-        : deriveTaxRate(subTotalPrice, totalDiscounts, Number(order.totalTax));
+        : deriveTaxRate(
+            Number(order.subTotalPrice),
+            Number(order.totalDiscounts),
+            Number(order.totalTax),
+          );
     const totals = calcOrderTotals(
       pricedLines,
       totalDiscounts,
@@ -587,6 +618,19 @@ export class OrderService {
           },
           tx,
         );
+      }
+
+      for (const [itemId, discount] of itemDiscounts) {
+        const item = order.items.find(
+          (candidate) => candidate.id.toString() === itemId,
+        )!;
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: {
+            totalDiscount: discount,
+            discountedTotal: item.quantity * Number(item.price) - discount,
+          },
+        });
       }
 
       const record = await tx.order.update({
@@ -1106,6 +1150,18 @@ export class OrderService {
     }
   }
 
+  /** Đơn đã hoàn vận đơn về kho thì không còn gì để xuất — giống Sapo, giao lại là đơn mới. */
+  private async assertNotReturned(orderId: bigint) {
+    const returned = await returnedQuantities(this.repo.client, orderId);
+    if (returned.size > 0) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Đơn đã hoàn hàng về kho — tạo đơn mới nếu cần giao lại',
+        409,
+      );
+    }
+  }
+
   /** Trừ on_hand + committed cho toàn bộ dòng hàng — dùng ở cả action 'ship'
    * và action 'complete' (khi đơn hoàn thành thẳng mà chưa qua bước xuất hàng). */
   private async shipOrderItems(
@@ -1214,7 +1270,16 @@ export class OrderService {
         );
       }
       await this.repo.client.$transaction(async (tx) => {
-        for (const item of sortForLocking(order.items)) {
+        // Phần đã hoàn vận đơn về kho đã được nhập lại dạng bán được (không còn giữ chỗ) —
+        // chỉ nhả và ghi "hủy" cho phần còn lại, nếu không `committed` bị trừ hai lần.
+        const returned = await returnedQuantities(tx, id);
+        const remaining = order.items
+          .map((i) => ({
+            ...i,
+            quantity: i.quantity - (returned.get(i.id) ?? 0),
+          }))
+          .filter((i) => i.quantity > 0);
+        for (const item of sortForLocking(remaining)) {
           await this.inventory.applyMovement(
             {
               variantId: item.variantId,
@@ -1252,30 +1317,32 @@ export class OrderService {
         // `total_refunded` = số khách đã trả: huỷ đơn chưa thu tiền thì bằng 0,
         // đúng như Sapo (đơn huỷ chưa thu vẫn giữ financial_status cũ).
         const refundedAmount = Number(order.totalReceived);
-        await tx.orderRefund.create({
-          data: {
-            orderId: id,
-            returnId: null,
-            note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
-            restock: false,
-            totalRefunded: refundedAmount,
-            createdById: user.userId,
-            lineItems: {
-              create: order.items.map((i) => ({
-                orderItemId: i.id,
-                variantId: i.variantId,
-                locationId: order.locationId,
-                productName: i.name,
-                sku: i.sku,
-                variantTitle: i.variantTitle,
-                quantity: i.quantity,
-                price: i.price,
-                subtotal: Number(i.price) * i.quantity,
-                restockType: RestockType.cancel,
-              })),
+        if (remaining.length > 0 || refundedAmount > 0) {
+          await tx.orderRefund.create({
+            data: {
+              orderId: id,
+              returnId: null,
+              note: dto.reason?.trim() || `Hủy đơn hàng ${order.name}`,
+              restock: false,
+              totalRefunded: refundedAmount,
+              createdById: user.userId,
+              lineItems: {
+                create: remaining.map((i) => ({
+                  orderItemId: i.id,
+                  variantId: i.variantId,
+                  locationId: order.locationId,
+                  productName: i.name,
+                  sku: i.sku,
+                  variantTitle: i.variantTitle,
+                  quantity: i.quantity,
+                  price: i.price,
+                  subtotal: Number(i.price) * i.quantity,
+                  restockType: RestockType.cancel,
+                })),
+              },
             },
-          },
-        });
+          });
+        }
 
         await tx.order.update({
           where: { id },
@@ -1321,6 +1388,7 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
+      await this.assertNotReturned(id);
       if (order.deliveredOn) {
         throw new BusinessException(
           'INVALID_TRANSITION',
@@ -1373,6 +1441,7 @@ export class OrderService {
         id,
         'Đơn đang xử lý qua vận đơn — cập nhật trạng thái trên vận đơn',
       );
+      await this.assertNotReturned(id);
       await this.repo.client.$transaction(async (tx) => {
         // Đơn có thể đã xuất hàng trước đó qua action 'ship' — chỉ xuất
         // kho ở đây nếu chưa từng xuất, tránh trừ tồn kho hai lần.
@@ -1497,6 +1566,13 @@ export class OrderService {
       }
 
       const discount = item.discount ?? 0;
+      if (discount > item.quantity * price) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Giảm giá của ${variant.sku} không được vượt quá tiền hàng`,
+          422,
+        );
+      }
       result.push({
         variantId,
         locationId,
@@ -1514,10 +1590,12 @@ export class OrderService {
   }
 
   private shippingAddressComplete(sa?: ShippingAddressDto | null) {
+    // Địa chỉ hành chính mới sau 01/07/2025 chỉ có 2 cấp và gửi district=''.
+    const hasAdministrativeLevels = sa?.district?.trim() || sa?.district === '';
     return !!(
       sa?.address1?.trim() &&
       sa?.ward?.trim() &&
-      sa?.district?.trim() &&
+      hasAdministrativeLevels &&
       sa?.province?.trim()
     );
   }

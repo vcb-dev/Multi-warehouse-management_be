@@ -394,7 +394,7 @@ export class StocktakeService {
 
   private generateCode(tx: Prisma.TransactionClient) {
     return nextSequentialCode(tx, {
-      table: Prisma.sql`stocktakes`,
+      table: Prisma.sql`"oms"."stocktakes"`,
       column: Prisma.sql`code`,
       prefix: 'KK',
     });

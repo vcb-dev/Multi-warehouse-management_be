@@ -204,7 +204,7 @@ export class InventoryNxtService {
           COALESCE(SUM(change) FILTER (
             WHERE bucket = 'incoming' AND type = 'incoming_transfer'
           ), 0)::int AS ck_dang_ve
-        FROM inventory_movements
+        FROM "oms"."inventory_movements"
         WHERE (variant_id, location_id) IN (${pairs})
         GROUP BY variant_id, location_id
       `,
@@ -215,8 +215,8 @@ export class InventoryNxtService {
           COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d15}), 0)::int AS ban_15,
           COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d30}), 0)::int AS ban_30,
           COALESCE(SUM(${EFFECTIVE_QTY}) FILTER (WHERE o.created_on >= ${d90}), 0)::int AS ban_90
-        FROM order_items oi
-        JOIN orders o ON o.id = oi.order_id
+        FROM "oms"."order_items" oi
+        JOIN "oms"."orders" o ON o.id = oi.order_id
         WHERE o.status <> 'cancelled'
           AND o.created_on >= ${d90}
           AND (oi.variant_id, o.location_id) IN (${pairs})
@@ -224,9 +224,9 @@ export class InventoryNxtService {
       `,
       this.prisma.$queryRaw<{ variant_id: bigint; name: string }[]>`
         SELECT DISTINCT gri.variant_id, s.name
-        FROM goods_receipt_items gri
-        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
-        JOIN suppliers s ON s.id = gr.supplier_id
+        FROM "oms"."goods_receipt_items" gri
+        JOIN "oms"."goods_receipts" gr ON gr.id = gri.goods_receipt_id
+        JOIN "oms"."suppliers" s ON s.id = gr.supplier_id
         WHERE gri.variant_id IN (${Prisma.join(variantIds)})
       `,
       this.prisma.productCategory.findMany({

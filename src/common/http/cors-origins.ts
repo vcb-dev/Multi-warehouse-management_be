@@ -1,4 +1,3 @@
-
 export function allowedOrigins(): string[] {
   const configured = process.env.CORS_ORIGIN?.split(',')
     .map((o) => o.trim().replace(/\/$/, ''))
@@ -8,14 +7,13 @@ export function allowedOrigins(): string[] {
     throw new Error(
       'Thiếu biến môi trường bắt buộc: CORS_ORIGIN — khai origin của FE, nhiều giá trị ' +
         'ngăn cách bằng dấu phẩy. Dev: CORS_ORIGIN="http://localhost:4002" — production: ' +
-        'CORS_ORIGIN="https://multi-warehouse-management-fe-beta.vercel.app"',
+        'CORS_ORIGIN="https://kho.vienchibao.com"',
     );
   }
 
   configured.forEach(assertValidOrigin);
   return configured;
 }
-
 
 function assertValidOrigin(origin: string): void {
   const hint = `CORS_ORIGIN chứa giá trị không hợp lệ: "${origin}".`;

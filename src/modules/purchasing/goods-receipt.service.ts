@@ -558,7 +558,7 @@ export class GoodsReceiptService {
         Array<{ amount_due: Prisma.Decimal; paid_amount: Prisma.Decimal }>
       >`
         SELECT amount_due, paid_amount
-        FROM goods_receipts
+        FROM "oms"."goods_receipts"
         WHERE id = ${id}
         FOR UPDATE
       `;
@@ -685,7 +685,7 @@ export class GoodsReceiptService {
 
   private generateReiCode(tx: Prisma.TransactionClient) {
     return nextSequentialCode(tx, {
-      table: Prisma.sql`goods_receipts`,
+      table: Prisma.sql`"oms"."goods_receipts"`,
       column: Prisma.sql`code`,
       prefix: 'REI',
     });

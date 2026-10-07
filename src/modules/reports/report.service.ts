@@ -78,7 +78,7 @@ export class ReportService {
       { source_name: string; order_count: bigint }[]
     >`
       SELECT o."source_name" AS source_name, COUNT(*) AS order_count
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE o."location_id" IN (${Prisma.join(locationIds)})
         AND NULLIF(TRIM(o."source_name"), '') IS NOT NULL
       GROUP BY 1

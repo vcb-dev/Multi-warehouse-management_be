@@ -22,13 +22,13 @@ export async function findRepeatCustomerIds(
             THEN '0' || regexp_replace(o.phone, '\\D', '', 'g')
           ELSE regexp_replace(o.phone, '\\D', '', 'g')
         END AS phone_key
-      FROM orders o
+      FROM "oms"."orders" o
       WHERE o.phone IS NOT NULL AND btrim(o.phone) <> ''
       GROUP BY phone_key
       HAVING count(*) > 1
     )
     SELECT c.id
-    FROM customers c
+    FROM "oms"."customers" c
     WHERE c.phone IS NOT NULL AND btrim(c.phone) <> ''
       AND (
         CASE

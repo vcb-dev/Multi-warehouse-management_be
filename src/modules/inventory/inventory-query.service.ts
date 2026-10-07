@@ -383,8 +383,8 @@ export class InventoryQueryService {
 
     const rows = await this.prisma.$queryRaw<{ id: bigint }[]>`
       SELECT v.id
-      FROM product_variants v
-      LEFT JOIN inventory_levels l
+      FROM "oms"."product_variants" v
+      LEFT JOIN "oms"."inventory_levels" l
         ON l.variant_id = v.id AND l.location_id = ${locationId}
       WHERE TRUE ${idFilter}
       ORDER BY COALESCE(l.on_hand, 0) ${order}, v.sku ASC

@@ -185,10 +185,10 @@ export class ProductService {
 
     const ordered = await this.repo.client.$queryRaw<{ id: bigint }[]>`
       SELECT p.id
-      FROM products p
+      FROM "oms"."products" p
       LEFT JOIN (
         SELECT product_id, MIN(price) AS price_from
-        FROM product_variants
+        FROM "oms"."product_variants"
         WHERE enabled
         GROUP BY product_id
       ) v ON v.product_id = p.id

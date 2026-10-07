@@ -40,10 +40,10 @@ async function runStock(ctx: ReportContext): Promise<ReportResult> {
            il."packed"                  AS packed,
            il."incoming"                AS incoming,
            COALESCE(NULLIF(il."cost", 0), v."cost", 0) AS cost
-    FROM "inventory_levels" il
-    JOIN "product_variants" v ON v."id" = il."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
-    JOIN "locations" l        ON l."id" = il."location_id"
+    FROM "oms"."inventory_levels" il
+    JOIN "oms"."product_variants" v ON v."id" = il."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
+    JOIN "oms"."locations" l        ON l."id" = il."location_id"
     WHERE il."location_id" IN (${Prisma.join(ctx.locationIds)})
       AND (il."on_hand" <> 0 OR il."committed" <> 0 OR il."incoming" <> 0)
     ORDER BY p."name", v."sku"
@@ -117,11 +117,11 @@ async function runLedger(ctx: ReportContext): Promise<ReportResult> {
            COALESCE(-SUM(m."change") FILTER (
              WHERE m."created_at" >= ${ctx.from} AND m."created_at" < ${ctx.to} AND m."change" < 0
            ), 0) AS qty_out
-    FROM "inventory_movements" m
-    JOIN "product_variants" v ON v."id" = m."variant_id"
-    JOIN "products" p         ON p."id" = v."product_id"
-    JOIN "locations" l        ON l."id" = m."location_id"
-    WHERE m."bucket" = 'on_hand'::"InventoryBucket"
+    FROM "oms"."inventory_movements" m
+    JOIN "oms"."product_variants" v ON v."id" = m."variant_id"
+    JOIN "oms"."products" p         ON p."id" = v."product_id"
+    JOIN "oms"."locations" l        ON l."id" = m."location_id"
+    WHERE m."bucket" = 'on_hand'::"oms"."InventoryBucket"
       AND m."location_id" IN (${Prisma.join(ctx.locationIds)})
       AND m."created_at" < ${ctx.to}
     GROUP BY p."name", v."sku", l."name"

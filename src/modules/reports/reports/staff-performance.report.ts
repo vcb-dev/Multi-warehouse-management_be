@@ -86,7 +86,7 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
       SELECT o."assignee_id"                      AS staff_id,
              COUNT(*)                              AS orders_closed,
              COUNT(DISTINCT o."customer_id")        AS customers_ordered
-      FROM "orders" o
+      FROM "oms"."orders" o
       WHERE o."status" <> 'cancelled'
         AND o."created_on" >= ${ctx.from}
         AND o."created_on" < ${ctx.to}
@@ -98,7 +98,7 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
     conversation_stats AS (
       SELECT c."assigned_to"                                                    AS staff_id,
              COUNT(DISTINCT COALESCE(c."customer_id"::text, c."customer_phone")) AS customers_received
-      FROM "conversations" c
+      FROM "oms"."conversations" c
       WHERE c."created_at" >= ${ctx.from}
         AND c."created_at" < ${ctx.to}
         AND c."assigned_to" IS NOT NULL
@@ -110,7 +110,7 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
            COALESCE(os.orders_closed, 0)       AS orders_closed,
            COALESCE(os.customers_ordered, 0)   AS customers_ordered,
            COALESCE(cs.customers_received, 0)  AS customers_received
-    FROM "users" u
+    FROM "oms"."users" u
     LEFT JOIN order_stats os ON os.staff_id = u."id"
     LEFT JOIN conversation_stats cs ON cs.staff_id = u."id"
     WHERE os.staff_id IS NOT NULL OR cs.staff_id IS NOT NULL
