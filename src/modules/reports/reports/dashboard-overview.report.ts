@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ACTIVITY_ACTION_LABELS } from '../../activity-log/activity-log.serializer';
-import { num } from './report-sql';
+import { num, orWhenTableMissing } from './report-sql';
 
 /**
  * Màn "Tổng quan" (trang chủ) — dựng theo bố cục dashboard của Sapo: kết quả kinh doanh,
@@ -386,23 +386,6 @@ async function queryRevenueSeries(
 
 // --- Thống kê truy cập ---
 
-/**
- * Bảng CSKH (`conversations`, `conversation_messages`) không có ở mọi môi trường — bản
- * Postgres tách khỏi Supabase đã bỏ nhóm bảng này. Thiếu bảng thì coi như không có số liệu
- * tương tác, đừng để một khối phụ kéo sập cả màn Tổng quan.
- */
-async function orWhenTableMissing<T>(run: Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await run;
-  } catch (err) {
-    const meta = (err as { meta?: { code?: string } }).meta;
-    if (meta?.code === '42P01') return fallback;
-    throw err;
-  }
-}
-
-const NO_TRAFFIC = { sessions: 0, buyers: 0, returningRate: 0 };
-
 type TrafficRaw = {
   sessions: bigint | number;
   buyers: bigint | number;
@@ -415,11 +398,24 @@ type TrafficRaw = {
  * nên gộp bằng CROSS JOIN thay vì join theo khoá — không có khoá chung nào để join.
  */
 async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
-  const rows = await p.prisma.$queryRaw<TrafficRaw[]>`
-    WITH sess AS (
+  const sessions = Prisma.sql`
       SELECT COUNT(DISTINCT cm."conversation_id") AS total
       FROM "oms"."conversation_messages" cm
-      WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
+      WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}`;
+  // Thiếu bảng CSKH thì chỉ số phiên về 0 — số khách mua lấy từ `orders`, vẫn phải đúng
+  return orWhenTableMissing(queryTrafficWith(p, from, to, sessions), () =>
+    queryTrafficWith(p, from, to, Prisma.sql`SELECT 0 AS total`),
+  );
+}
+
+async function queryTrafficWith(
+  p: DashboardParams,
+  from: Date,
+  to: Date,
+  sessions: Prisma.Sql,
+) {
+  const rows = await p.prisma.$queryRaw<TrafficRaw[]>`
+    WITH sess AS (${sessions}
     ),
     buyers AS (
       SELECT DISTINCT o."customer_id" AS customer_id
@@ -454,13 +450,16 @@ async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
 async function queryTrafficSeries(p: DashboardParams, size: number) {
   const { from, to, bucket } = p.period;
   const [sessionRows, buyerRows] = await Promise.all([
-    p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
+    orWhenTableMissing(
+      p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`cm."created_at"`)} AS idx,
              COUNT(DISTINCT cm."conversation_id") AS total
       FROM "oms"."conversation_messages" cm
       WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
       GROUP BY 1
     `,
+      [],
+    ),
     p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`o."created_on"`)} AS idx,
              COUNT(DISTINCT o."customer_id") AS total
@@ -633,15 +632,9 @@ export async function runDashboardOverview(p: DashboardParams) {
     queryItemsSold(p, period.prevFrom, period.prevTo),
     queryRevenueSeries(p, period.from, period.to, size),
     queryRevenueSeries(p, period.prevFrom, period.prevTo, size),
-    orWhenTableMissing(queryTraffic(p, period.from, period.to), NO_TRAFFIC),
-    orWhenTableMissing(
-      queryTraffic(p, period.prevFrom, period.prevTo),
-      NO_TRAFFIC,
-    ),
-    orWhenTableMissing(queryTrafficSeries(p, size), {
-      sessions: new Array<number>(size).fill(0),
-      buyers: new Array<number>(size).fill(0),
-    }),
+    queryTraffic(p, period.from, period.to),
+    queryTraffic(p, period.prevFrom, period.prevTo),
+    queryTrafficSeries(p, size),
     queryTopProducts(p, period.from, period.to),
     queryFunnel(p, period.from, period.to),
     queryFunnel(p, period.prevFrom, period.prevTo),

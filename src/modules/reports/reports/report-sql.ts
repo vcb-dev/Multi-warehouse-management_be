@@ -68,3 +68,23 @@ export const EFFECTIVE_QTY = Prisma.sql`COALESCE(oi."current_quantity", oi."quan
  * phiên bản (đơn tạo trước khi có cột `order_items.cost_price`).
  */
 export const UNIT_COST = Prisma.sql`COALESCE(oi."cost_price", v."cost", 0)`;
+
+/**
+ * Nhóm bảng CSKH (`conversations`, `conversation_messages`) không có ở mọi môi trường — bản
+ * Postgres tách khỏi Supabase đã bỏ nhóm này. Query nào đụng tới chúng thì bọc bằng hàm
+ * này: thiếu bảng (Postgres `42P01`) trả `fallback`, lỗi khác vẫn ném ra như thường.
+ */
+export async function orWhenTableMissing<T>(
+  run: Promise<T>,
+  fallback: T | (() => Promise<T>),
+): Promise<T> {
+  try {
+    return await run;
+  } catch (err) {
+    const meta = (err as { meta?: { code?: string } }).meta;
+    if (meta?.code !== '42P01') throw err;
+    return typeof fallback === 'function'
+      ? (fallback as () => Promise<T>)()
+      : fallback;
+  }
+}
