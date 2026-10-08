@@ -61,7 +61,7 @@ const MS_DAY = 24 * 60 * 60 * 1000;
 
 // --- Khoảng thời gian ---
 
-function startOfDay(d: Date) {
+export function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
@@ -210,7 +210,7 @@ export function resolveDashboardPeriod(
 
 // --- Tiện ích ---
 
-function pctChange(current: number, previous: number): number | null {
+export function pctChange(current: number, previous: number): number | null {
   if (previous === 0) return current === 0 ? 0 : null;
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
@@ -219,11 +219,11 @@ function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
-function rate(part: number, total: number): number {
+export function rate(part: number, total: number): number {
   return total > 0 ? round1((part / total) * 100) : 0;
 }
 
-function metric(current: number, previous: number) {
+export function metric(current: number, previous: number) {
   return { value: current, previous, change_pct: pctChange(current, previous) };
 }
 
@@ -238,7 +238,7 @@ function ymd(d: Date) {
  * trước dùng chung biểu thức này với `start` riêng, nhờ vậy hai chuỗi tự khớp nhau theo
  * index mà không phải đối chiếu ngày tháng.
  */
-function bucketIdxSql(
+export function bucketIdxSql(
   bucket: DashboardBucket,
   start: Date,
   column: Prisma.Sql,
@@ -385,6 +385,23 @@ async function queryRevenueSeries(
 }
 
 // --- Thống kê truy cập ---
+
+/**
+ * Bảng CSKH (`conversations`, `conversation_messages`) không có ở mọi môi trường — bản
+ * Postgres tách khỏi Supabase đã bỏ nhóm bảng này. Thiếu bảng thì coi như không có số liệu
+ * tương tác, đừng để một khối phụ kéo sập cả màn Tổng quan.
+ */
+async function orWhenTableMissing<T>(run: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await run;
+  } catch (err) {
+    const meta = (err as { meta?: { code?: string } }).meta;
+    if (meta?.code === '42P01') return fallback;
+    throw err;
+  }
+}
+
+const NO_TRAFFIC = { sessions: 0, buyers: 0, returningRate: 0 };
 
 type TrafficRaw = {
   sessions: bigint | number;
@@ -616,9 +633,15 @@ export async function runDashboardOverview(p: DashboardParams) {
     queryItemsSold(p, period.prevFrom, period.prevTo),
     queryRevenueSeries(p, period.from, period.to, size),
     queryRevenueSeries(p, period.prevFrom, period.prevTo, size),
-    queryTraffic(p, period.from, period.to),
-    queryTraffic(p, period.prevFrom, period.prevTo),
-    queryTrafficSeries(p, size),
+    orWhenTableMissing(queryTraffic(p, period.from, period.to), NO_TRAFFIC),
+    orWhenTableMissing(
+      queryTraffic(p, period.prevFrom, period.prevTo),
+      NO_TRAFFIC,
+    ),
+    orWhenTableMissing(queryTrafficSeries(p, size), {
+      sessions: new Array<number>(size).fill(0),
+      buyers: new Array<number>(size).fill(0),
+    }),
     queryTopProducts(p, period.from, period.to),
     queryFunnel(p, period.from, period.to),
     queryFunnel(p, period.prevFrom, period.prevTo),
