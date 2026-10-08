@@ -26,10 +26,28 @@ describe('mapRecipientAddress', () => {
           address_line1: 'Ph**************',
           region_code: 'VN',
           district_info: [
-            { address_level: 'L0', address_level_name: 'Country', address_name: 'Việt Nam', iso_code: 'VN' },
-            { address_level: 'L1', address_level_name: 'city', address_name: 'Hải Phòng', iso_code: 'HP' },
-            { address_level: 'L2', address_level_name: 'district', address_name: 'Tiên Lãng' },
-            { address_level: 'L3', address_level_name: 'ward', address_name: 'Bạ*******' },
+            {
+              address_level: 'L0',
+              address_level_name: 'Country',
+              address_name: 'Việt Nam',
+              iso_code: 'VN',
+            },
+            {
+              address_level: 'L1',
+              address_level_name: 'city',
+              address_name: 'Hải Phòng',
+              iso_code: 'HP',
+            },
+            {
+              address_level: 'L2',
+              address_level_name: 'district',
+              address_name: 'Tiên Lãng',
+            },
+            {
+              address_level: 'L3',
+              address_level_name: 'ward',
+              address_name: 'Bạ*******',
+            },
           ],
         }),
       ),
@@ -52,9 +70,22 @@ describe('mapRecipientAddress', () => {
     const r = mapRecipientAddress(
       order({
         district_info: [
-          { address_level: 'L1', address_level_name: 'city', address_name: 'Hà Nội', iso_code: 'HN' },
-          { address_level: 'L2', address_level_name: 'city', address_name: 'Phường Hai Bà Trưng' },
-          { address_level: 'L3', address_level_name: 'ward', address_name: 'Ph*****************' },
+          {
+            address_level: 'L1',
+            address_level_name: 'city',
+            address_name: 'Hà Nội',
+            iso_code: 'HN',
+          },
+          {
+            address_level: 'L2',
+            address_level_name: 'city',
+            address_name: 'Phường Hai Bà Trưng',
+          },
+          {
+            address_level: 'L3',
+            address_level_name: 'ward',
+            address_name: 'Ph*****************',
+          },
         ],
       }),
     );

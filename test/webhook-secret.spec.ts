@@ -36,9 +36,7 @@ describe('assertWebhookSecret', () => {
 
   it('thông báo lỗi nói rõ thiếu biến nào — để người vận hành sửa được', () => {
     delete process.env[KEY];
-    expect(() => assertWebhookSecret(KEY, 'bat-ky')).toThrow(
-      new RegExp(KEY),
-    );
+    expect(() => assertWebhookSecret(KEY, 'bat-ky')).toThrow(new RegExp(KEY));
   });
 
   it('khớp -> cho qua', () => {
