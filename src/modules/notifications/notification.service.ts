@@ -168,7 +168,11 @@ export class NotificationService {
     try {
       notificationIds = ids.map((id) => BigInt(id));
     } catch {
-      throw new BusinessException('INVALID_ID', 'Id thông báo không hợp lệ', 400);
+      throw new BusinessException(
+        'INVALID_ID',
+        'Id thông báo không hợp lệ',
+        400,
+      );
     }
 
     // `userId` trong where vừa là bộ lọc vừa là kiểm quyền: không đánh dấu hộ được
@@ -217,7 +221,9 @@ export class NotificationService {
         select: { key: true },
       });
       const knownKeys = new Set(known.map((p) => p.key));
-      const unknown = dto.recipient_permissions.filter((k) => !knownKeys.has(k));
+      const unknown = dto.recipient_permissions.filter(
+        (k) => !knownKeys.has(k),
+      );
       // Chặn ở đây vì permission sai chính tả sẽ làm fan-out lặng lẽ ra 0 người —
       // topic vẫn "bật" trên UI nhưng không ai nhận được gì, rất khó lần ra.
       if (unknown.length) {
@@ -232,7 +238,9 @@ export class NotificationService {
     const updated = await this.prisma.notificationSetting.update({
       where: { topic },
       data: {
-        ...(dto.app_enabled !== undefined ? { appEnabled: dto.app_enabled } : {}),
+        ...(dto.app_enabled !== undefined
+          ? { appEnabled: dto.app_enabled }
+          : {}),
         ...(dto.email_enabled !== undefined
           ? { emailEnabled: dto.email_enabled }
           : {}),

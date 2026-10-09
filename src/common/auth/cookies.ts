@@ -4,7 +4,6 @@ import { allowedOrigins } from '../http/cors-origins';
 export const ACCESS_COOKIE = 'vcb_access_token';
 export const REFRESH_COOKIE = 'vcb_refresh_token';
 
-
 const REFRESH_COOKIE_PATH = '/api/auth';
 
 type SameSite = 'lax' | 'strict' | 'none';
@@ -32,7 +31,6 @@ function readSecure(sameSite: SameSite): boolean {
 function browserOnHttps(): boolean {
   return allowedOrigins().every((o) => o.startsWith('https://'));
 }
-
 
 export function assertAuthCookieConfig(): void {
   const origins = allowedOrigins();

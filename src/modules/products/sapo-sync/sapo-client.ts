@@ -80,8 +80,8 @@ export class SapoClient {
   isConfigured(): boolean {
     return Boolean(
       process.env.SAPO_STORE &&
-        process.env.SAPO_API_KEY &&
-        process.env.SAPO_API_SECRET,
+      process.env.SAPO_API_KEY &&
+      process.env.SAPO_API_SECRET,
     );
   }
 

@@ -22,7 +22,12 @@ describe('summarizeReturns', () => {
   it('phiếu hoàn tất, hoàn đủ tiền', () => {
     expect(
       summarizeReturns(
-        [ret({ return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '720900' } })],
+        [
+          ret({
+            return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+            refund_amount: { refund_total: '720900' },
+          }),
+        ],
         d('720900'),
       ),
     ).toEqual({ returnStatus: 'returned', refundStatus: 'refunded' });
@@ -32,7 +37,12 @@ describe('summarizeReturns', () => {
     // 96/563 phiếu ở trạng thái này — coi là "xong" sẽ báo hoàn cho gần 1/6 số phiếu
     expect(
       summarizeReturns(
-        [ret({ return_status: 'RETURN_OR_REFUND_REQUEST_CANCEL', refund_amount: { refund_total: '720900' } })],
+        [
+          ret({
+            return_status: 'RETURN_OR_REFUND_REQUEST_CANCEL',
+            refund_amount: { refund_total: '720900' },
+          }),
+        ],
         d('720900'),
       ),
     ).toEqual({ returnStatus: 'no_return', refundStatus: 'no_refund' });
@@ -40,17 +50,26 @@ describe('summarizeReturns', () => {
 
   it('hàng đang trên đường về thì đơn vẫn đang xử lý', () => {
     expect(
-      summarizeReturns([ret({ return_status: 'BUYER_SHIPPED_ITEM' })], d('720900')),
+      summarizeReturns(
+        [ret({ return_status: 'BUYER_SHIPPED_ITEM' })],
+        d('720900'),
+      ),
     ).toEqual({ returnStatus: 'in_progress', refundStatus: 'no_refund' });
     expect(
-      summarizeReturns([ret({ return_status: 'AWAITING_BUYER_SHIP' })], d('720900')),
+      summarizeReturns(
+        [ret({ return_status: 'AWAITING_BUYER_SHIP' })],
+        d('720900'),
+      ),
     ).toEqual({ returnStatus: 'in_progress', refundStatus: 'no_refund' });
   });
 
   it('trạng thái lạ thì coi là đang xử lý, không coi là đã hoàn', () => {
     // Đoán nhầm thành "đã hoàn" là báo sai tiền; nhầm thành "đang xử lý" chỉ chốt muộn
     expect(
-      summarizeReturns([ret({ return_status: 'MOT_TRANG_THAI_MOI_CUA_TIKTOK' })], d('100')),
+      summarizeReturns(
+        [ret({ return_status: 'MOT_TRANG_THAI_MOI_CUA_TIKTOK' })],
+        d('100'),
+      ),
     ).toEqual({ returnStatus: 'in_progress', refundStatus: 'no_refund' });
   });
 
@@ -58,7 +77,11 @@ describe('summarizeReturns', () => {
     expect(
       summarizeReturns(
         [
-          ret({ return_id: '1', return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '300000' } }),
+          ret({
+            return_id: '1',
+            return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+            refund_amount: { refund_total: '300000' },
+          }),
           ret({ return_id: '2', return_status: 'BUYER_SHIPPED_ITEM' }),
         ],
         d('720900'),
@@ -69,8 +92,16 @@ describe('summarizeReturns', () => {
   it('nhiều phiếu hoàn từng phần thì cộng dồn tiền', () => {
     const r = summarizeReturns(
       [
-        ret({ return_id: '1', return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '300000' } }),
-        ret({ return_id: '2', return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '420900' } }),
+        ret({
+          return_id: '1',
+          return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+          refund_amount: { refund_total: '300000' },
+        }),
+        ret({
+          return_id: '2',
+          return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+          refund_amount: { refund_total: '420900' },
+        }),
       ],
       d('720900'),
     );
@@ -80,7 +111,12 @@ describe('summarizeReturns', () => {
   it('hoàn ít hơn tiền đơn là hoàn một phần', () => {
     expect(
       summarizeReturns(
-        [ret({ return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '300000' } })],
+        [
+          ret({
+            return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+            refund_amount: { refund_total: '300000' },
+          }),
+        ],
         d('720900'),
       ).refundStatus,
     ).toBe('partial');
@@ -89,7 +125,12 @@ describe('summarizeReturns', () => {
   it('hoàn vượt tiền đơn (kèm phí ship) vẫn là hoàn đủ', () => {
     expect(
       summarizeReturns(
-        [ret({ return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '760900' } })],
+        [
+          ret({
+            return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+            refund_amount: { refund_total: '760900' },
+          }),
+        ],
         d('720900'),
       ).refundStatus,
     ).toBe('refunded');
@@ -99,7 +140,13 @@ describe('summarizeReturns', () => {
     // 3/563 phiếu — không có hàng nào về kho nên return_status phải là no_return
     expect(
       summarizeReturns(
-        [ret({ return_type: 'REFUND', return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE', refund_amount: { refund_total: '720900' } })],
+        [
+          ret({
+            return_type: 'REFUND',
+            return_status: 'RETURN_OR_REFUND_REQUEST_COMPLETE',
+            refund_amount: { refund_total: '720900' },
+          }),
+        ],
         d('720900'),
       ),
     ).toEqual({ returnStatus: 'no_return', refundStatus: 'refunded' });

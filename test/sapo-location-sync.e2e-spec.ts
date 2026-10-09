@@ -82,9 +82,9 @@ describeIfDb('đồng bộ kho từ Sapo', () => {
   it('kho thật trong DB không bị đụng, chỉ báo là Sapo không trả về', async () => {
     const r = await service.syncLocations();
     expect(r.missing_in_sapo.length).toBeGreaterThan(0);
-    expect(
-      r.missing_in_sapo.some((l) => l.sapo_id === String(SAPO_A)),
-    ).toBe(false);
+    expect(r.missing_in_sapo.some((l) => l.sapo_id === String(SAPO_A))).toBe(
+      false,
+    );
   });
 
   it('lượt chạy lại không đổi gì thì đếm vào unchanged', async () => {
@@ -99,12 +99,19 @@ describeIfDb('đồng bộ kho từ Sapo', () => {
       where: { sapoId: BigInt(SAPO_A) },
     });
     // `modified_on` là @updatedAt — lượt chạy vô nghĩa mà vẫn ghi thì cột này sẽ nhảy
-    expect(after.modifiedOn.toISOString()).toBe(before.modifiedOn.toISOString());
+    expect(after.modifiedOn.toISOString()).toBe(
+      before.modifiedOn.toISOString(),
+    );
   });
 
   it('đổi tên/trạng thái bên Sapo thì cập nhật về', async () => {
     sapo.locations = [
-      { id: SAPO_A, name: 'Kho E2E A (đổi tên)', code: CODE, status: 'inactive' },
+      {
+        id: SAPO_A,
+        name: 'Kho E2E A (đổi tên)',
+        code: CODE,
+        status: 'inactive',
+      },
     ];
     const r = await service.syncLocations();
 
@@ -118,7 +125,12 @@ describeIfDb('đồng bộ kho từ Sapo', () => {
 
   it('code trùng kho khác thì bỏ riêng trường code, vẫn tạo kho', async () => {
     sapo.locations = [
-      { id: SAPO_A, name: 'Kho E2E A (đổi tên)', code: CODE, status: 'inactive' },
+      {
+        id: SAPO_A,
+        name: 'Kho E2E A (đổi tên)',
+        code: CODE,
+        status: 'inactive',
+      },
       // Cùng `code` với kho A — nếu ghi thẳng sẽ vỡ UNIQUE và chết cả lượt đồng bộ
       { id: SAPO_B, name: 'Kho E2E B', code: CODE, status: 'active' },
     ];
