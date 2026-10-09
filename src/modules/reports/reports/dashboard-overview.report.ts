@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ACTIVITY_ACTION_LABELS } from '../../activity-log/activity-log.serializer';
-import { num } from './report-sql';
+import { num, orWhenTableMissing } from './report-sql';
 
 /**
  * Màn "Tổng quan" (trang chủ) — dựng theo bố cục dashboard của Sapo: kết quả kinh doanh,
@@ -61,7 +61,7 @@ const MS_DAY = 24 * 60 * 60 * 1000;
 
 // --- Khoảng thời gian ---
 
-function startOfDay(d: Date) {
+export function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
@@ -210,7 +210,7 @@ export function resolveDashboardPeriod(
 
 // --- Tiện ích ---
 
-function pctChange(current: number, previous: number): number | null {
+export function pctChange(current: number, previous: number): number | null {
   if (previous === 0) return current === 0 ? 0 : null;
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
@@ -219,11 +219,11 @@ function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
-function rate(part: number, total: number): number {
+export function rate(part: number, total: number): number {
   return total > 0 ? round1((part / total) * 100) : 0;
 }
 
-function metric(current: number, previous: number) {
+export function metric(current: number, previous: number) {
   return { value: current, previous, change_pct: pctChange(current, previous) };
 }
 
@@ -238,7 +238,7 @@ function ymd(d: Date) {
  * trước dùng chung biểu thức này với `start` riêng, nhờ vậy hai chuỗi tự khớp nhau theo
  * index mà không phải đối chiếu ngày tháng.
  */
-function bucketIdxSql(
+export function bucketIdxSql(
   bucket: DashboardBucket,
   start: Date,
   column: Prisma.Sql,
@@ -398,11 +398,24 @@ type TrafficRaw = {
  * nên gộp bằng CROSS JOIN thay vì join theo khoá — không có khoá chung nào để join.
  */
 async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
-  const rows = await p.prisma.$queryRaw<TrafficRaw[]>`
-    WITH sess AS (
+  const sessions = Prisma.sql`
       SELECT COUNT(DISTINCT cm."conversation_id") AS total
       FROM "oms"."conversation_messages" cm
-      WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
+      WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}`;
+  // Thiếu bảng CSKH thì chỉ số phiên về 0 — số khách mua lấy từ `orders`, vẫn phải đúng
+  return orWhenTableMissing(queryTrafficWith(p, from, to, sessions), () =>
+    queryTrafficWith(p, from, to, Prisma.sql`SELECT 0 AS total`),
+  );
+}
+
+async function queryTrafficWith(
+  p: DashboardParams,
+  from: Date,
+  to: Date,
+  sessions: Prisma.Sql,
+) {
+  const rows = await p.prisma.$queryRaw<TrafficRaw[]>`
+    WITH sess AS (${sessions}
     ),
     buyers AS (
       SELECT DISTINCT o."customer_id" AS customer_id
@@ -437,13 +450,16 @@ async function queryTraffic(p: DashboardParams, from: Date, to: Date) {
 async function queryTrafficSeries(p: DashboardParams, size: number) {
   const { from, to, bucket } = p.period;
   const [sessionRows, buyerRows] = await Promise.all([
-    p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
+    orWhenTableMissing(
+      p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`cm."created_at"`)} AS idx,
              COUNT(DISTINCT cm."conversation_id") AS total
       FROM "oms"."conversation_messages" cm
       WHERE cm."created_at" >= ${from} AND cm."created_at" < ${to}
       GROUP BY 1
     `,
+      [],
+    ),
     p.prisma.$queryRaw<{ idx: number; total: bigint | number }[]>`
       SELECT ${bucketIdxSql(bucket, from, Prisma.sql`o."created_on"`)} AS idx,
              COUNT(DISTINCT o."customer_id") AS total

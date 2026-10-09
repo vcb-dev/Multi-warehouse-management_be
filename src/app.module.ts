@@ -33,6 +33,7 @@ import { SavedFiltersModule } from './modules/saved-filters/saved-filters.module
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
 import { StorageModule } from './common/storage/storage.module';
 
 @Module({
@@ -42,6 +43,7 @@ import { StorageModule } from './common/storage/storage.module';
     ThrottlerModule.forRoot(throttlerDefinitions),
     PrismaModule,
     StorageModule,
+    CloudinaryModule,
     VouchersModule,
     AuthModule,
     ConfigModule,

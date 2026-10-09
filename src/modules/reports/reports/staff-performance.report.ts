@@ -6,6 +6,7 @@ import {
   ReportResult,
   ReportRow,
 } from '../report.types';
+import { orWhenTableMissing } from './report-sql';
 
 /**
  * Báo cáo "Hiệu suất nhân viên" — không nằm trong catalog Sapo, tự thêm theo yêu cầu nội
@@ -81,7 +82,22 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
       ? Prisma.sql`AND c."assigned_to" = ${ctx.staffId}`
       : Prisma.empty;
 
-  const rows = await ctx.prisma.$queryRaw<RawRow[]>`
+  const conversations = Prisma.sql`
+      SELECT c."assigned_to"                                                    AS staff_id,
+             COUNT(DISTINCT COALESCE(c."customer_id"::text, c."customer_phone")) AS customers_received
+      FROM "oms"."conversations" c
+      WHERE c."created_at" >= ${ctx.from}
+        AND c."created_at" < ${ctx.to}
+        AND c."assigned_to" IS NOT NULL
+        ${staffFilterConv}
+      GROUP BY c."assigned_to"`;
+  // Môi trường không có bảng CSKH: vẫn ra số đơn chốt, cột "khách tiếp nhận" bằng 0
+  const noConversations = Prisma.sql`
+      SELECT NULL::bigint AS staff_id, 0::bigint AS customers_received WHERE FALSE`;
+
+  const query = (conversationStats: Prisma.Sql) => ctx.prisma.$queryRaw<
+    RawRow[]
+  >`
     WITH order_stats AS (
       SELECT o."assignee_id"                      AS staff_id,
              COUNT(*)                              AS orders_closed,
@@ -95,15 +111,7 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
         ${staffFilter}
       GROUP BY o."assignee_id"
     ),
-    conversation_stats AS (
-      SELECT c."assigned_to"                                                    AS staff_id,
-             COUNT(DISTINCT COALESCE(c."customer_id"::text, c."customer_phone")) AS customers_received
-      FROM "oms"."conversations" c
-      WHERE c."created_at" >= ${ctx.from}
-        AND c."created_at" < ${ctx.to}
-        AND c."assigned_to" IS NOT NULL
-        ${staffFilterConv}
-      GROUP BY c."assigned_to"
+    conversation_stats AS (${conversationStats}
     )
     SELECT u."id"                                                                       AS staff_id,
            COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u."first_name", u."last_name")), ''), u."email") AS label,
@@ -116,6 +124,9 @@ async function run(ctx: ReportContext): Promise<ReportResult> {
     WHERE os.staff_id IS NOT NULL OR cs.staff_id IS NOT NULL
     ORDER BY orders_closed DESC, customers_received DESC
   `;
+  const rows = await orWhenTableMissing(query(conversations), () =>
+    query(noConversations),
+  );
 
   const all = rows.map(toRow);
   const summary = sumRows(all);
