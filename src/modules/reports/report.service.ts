@@ -16,6 +16,7 @@ import {
   resolveDashboardPeriod,
   runDashboardOverview,
 } from './reports/dashboard-overview.report';
+import { runDashboardSales } from './reports/dashboard-sales.report';
 import { runProductMonthlyOps } from './reports/product-monthly-ops.report';
 import {
   ReportColumn,
@@ -123,14 +124,18 @@ export class ReportService {
     }
 
     const locationIds = await this.resolveLocations(query.location_id, user);
-    const result = await runDashboardOverview({
+    const params = {
       prisma: this.prisma,
       period,
       locationIds,
       channel: query.channel?.trim() || undefined,
       topLimit: DASHBOARD_TOP_PRODUCTS,
       activityLimit: DASHBOARD_ACTIVITY_LIMIT,
-    });
+    };
+    const [result, sales] = await Promise.all([
+      runDashboardOverview(params),
+      runDashboardSales(params),
+    ]);
 
     return {
       filters: {
@@ -138,6 +143,7 @@ export class ReportService {
         channel: query.channel ?? null,
       },
       ...result,
+      ...sales,
     };
   }
 
