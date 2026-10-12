@@ -5,7 +5,6 @@ import {
   OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
-  PackingStatus,
   Prisma,
   ShipmentStatus,
 } from '@prisma/client';
@@ -20,6 +19,7 @@ import {
   TiktokOrderLine,
 } from './tiktok-api.client';
 import { TiktokAuthService } from './tiktok-auth.service';
+import { syncedPackedStatus } from '../marketplace-packing';
 
 /**
  * Hạn cho giao dịch ghi một đơn. Mặc định của Prisma là 5 giây — quá ngắn cho DB dùng
@@ -409,7 +409,6 @@ export class TiktokOrderSyncService {
         const shippingFields = {
           status: rest.status,
           shipmentStatus: rest.shipmentStatus,
-          packedStatus: rest.packedStatus,
           deliveryMethod: rest.deliveryMethod,
           trackingNumber: rest.trackingNumber,
           carrierName: rest.carrierName,
@@ -424,13 +423,20 @@ export class TiktokOrderSyncService {
 
         const target = await tx.fulfillment.findFirst({
           where: { OR: [{ name }, { orderId, closedAt: null }] },
-          select: { id: true },
+          select: { id: true, packedStatus: true },
         });
 
         if (target) {
           await tx.fulfillment.update({
             where: { id: target.id },
-            data: shippingFields,
+            data: {
+              ...shippingFields,
+              // Đóng gói là việc của kho — giữ nguyên thao tác đã có.
+              packedStatus: syncedPackedStatus(
+                rest.shipmentStatus,
+                target.packedStatus,
+              ),
+            },
           });
         } else {
           await tx.fulfillment.create({ data: { ...rest, name, orderId } });
@@ -867,8 +873,8 @@ function mapFulfillmentRecord(
     status: order.status === 'CANCELLED' ? 'cancelled' : 'success',
     shipmentStatus,
     deliveryMethod: FulfillmentDeliveryMethod.ecommerce,
-    // Sàn đã đóng gói xong mới sinh được mã vận đơn
-    packedStatus: PackingStatus.packed,
+    // Giá trị lúc TẠO MỚI; vận đơn đã có thì giữ thao tác của kho (xem syncedPackedStatus)
+    packedStatus: syncedPackedStatus(shipmentStatus, null),
     trackingNumber: tracking,
     carrierName: order.shipping_provider?.trim() || null,
     trackingCompany: order.delivery_option_name?.trim() || null,

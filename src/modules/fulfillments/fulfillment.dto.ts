@@ -1,4 +1,8 @@
 import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -6,6 +10,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
   MinLength,
@@ -462,6 +467,68 @@ export class ListShipmentsQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+}
+
+/** Màn "In & đóng gói" — kiện hàng còn trong kho, chờ in/đóng gói. */
+export class ListPackagesQueryDto {
+  @IsOptional() @IsString() q?: string;
+  /** not_shipped | not_printed | printed | not_packed | packed */
+  @IsOptional() @IsString() tab?: string;
+  @IsOptional() @IsString() location_id?: string;
+  @IsOptional() @IsString() location_ids?: string;
+  @IsOptional() @IsString() provider_ids?: string;
+  /** Nguồn đơn của đơn hàng gốc */
+  @IsOptional() @IsString() sources?: string;
+  /** Đã in phiếu giao hàng hay chưa */
+  @IsOptional() @IsString() printed?: string;
+  /** Trạng thái đóng gói — nhận nhiều giá trị ngăn bằng dấu phẩy */
+  @IsOptional() @IsString() packing_status?: string;
+  /** Loại kiện hàng — nhận nhiều giá trị ngăn bằng dấu phẩy */
+  @IsOptional() @IsString() package_category?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page_size?: number;
+  /** Tên theo Sapo Open API của `page_size` */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+}
+
+/** Trần số kiện mỗi lần thao tác hàng loạt — mỗi kiện là một transaction riêng. */
+export const BULK_PACKAGE_LIMIT = 200;
+
+export class BulkMarkPrintedDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(BULK_PACKAGE_LIMIT)
+  @Matches(/^\d+$/, { each: true })
+  ids!: string[];
+
+  /** Bỏ trống = đánh dấu đã in; `false` = gỡ dấu đã in */
+  @IsOptional()
+  @IsBoolean()
+  printed?: boolean;
+}
+
+export class BulkPackingStatusDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(BULK_PACKAGE_LIMIT)
+  @Matches(/^\d+$/, { each: true })
+  ids!: string[];
+
+  @IsIn([PackingStatus.packing, PackingStatus.packed])
+  status!: PackingStatus;
 }
 
 export class ShipmentOverviewQueryDto {

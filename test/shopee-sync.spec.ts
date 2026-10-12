@@ -203,12 +203,26 @@ describe('ShopeeSyncService', () => {
   });
 
   it.each([
-    ['PROCESSED', null, null, 'pending'],
-    ['SHIPPED', 'fulfilled', null, 'picked_up'],
-    ['COMPLETED', 'fulfilled', new Date(1704153600 * 1000), 'delivered'],
+    // Kiện còn chờ lấy hàng thì việc đóng gói thuộc về kho; hãng cầm hàng rồi mới
+    // mặc nhiên là đã đóng gói.
+    ['PROCESSED', null, null, 'pending', 'unknown'],
+    ['SHIPPED', 'fulfilled', null, 'picked_up', 'packed'],
+    [
+      'COMPLETED',
+      'fulfilled',
+      new Date(1704153600 * 1000),
+      'delivered',
+      'packed',
+    ],
   ] as const)(
     'map trạng thái giao hàng %s → fulfillment=%s',
-    async (orderStatus, fulfillmentStatus, deliveredOn, shipmentStatus) => {
+    async (
+      orderStatus,
+      fulfillmentStatus,
+      deliveredOn,
+      shipmentStatus,
+      packedStatus,
+    ) => {
       client.getOrderList.mockResolvedValue({
         order_list: [{ order_sn: '240101SHP', order_status: orderStatus }],
         more: false,
@@ -264,7 +278,7 @@ describe('ShopeeSyncService', () => {
           data: expect.objectContaining({
             name: 'SPE-OFG123',
             shipmentStatus,
-            packedStatus: 'packed',
+            packedStatus,
             trackingNumber: 'SPX123456',
             carrierName: 'SPX Express',
           }),
@@ -272,4 +286,56 @@ describe('ShopeeSyncService', () => {
       );
     },
   );
+
+  it('đồng bộ lại không ghi đè trạng thái đóng gói kho đã ghi', async () => {
+    client.getOrderList.mockResolvedValue({
+      order_list: [{ order_sn: '240101SHP', order_status: 'PROCESSED' }],
+      more: false,
+    });
+    client.getOrderDetail.mockResolvedValue({
+      order_list: [
+        {
+          order_sn: '240101SHP',
+          order_status: 'PROCESSED',
+          create_time: 1704067200,
+          update_time: 1704153600,
+          total_amount: 100000,
+          cod: false,
+          shipping_carrier: 'SPX Express',
+          package_list: [
+            {
+              package_number: 'OFG123',
+              logistics_status: 'LOGISTICS_REQUEST_CREATED',
+              tracking_number: 'SPX123456',
+            },
+          ],
+          item_list: [
+            {
+              item_name: 'Item',
+              model_sku: 'SKU-1',
+              model_quantity_purchased: 1,
+              model_original_price: 100000,
+              model_discounted_price: 100000,
+            },
+          ],
+          recipient_address: { name: 'Buyer', phone: '0901111111' },
+        },
+      ],
+    });
+    // Kho đã bấm "Đã đóng gói" ở màn In & đóng gói trước lần đồng bộ này
+    tx.fulfillment.findFirst.mockResolvedValueOnce({
+      id: BigInt(7),
+      packedStatus: 'packed',
+    });
+
+    await service.syncShopeeOrders(createdById);
+
+    expect(tx.fulfillment.update).toHaveBeenCalledWith({
+      where: { id: BigInt(7) },
+      data: expect.objectContaining({
+        shipmentStatus: 'pending',
+        packedStatus: 'packed',
+      }),
+    });
+  });
 });

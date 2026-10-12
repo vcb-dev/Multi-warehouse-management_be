@@ -6,7 +6,6 @@ import {
   OrderFulfillmentStatus,
   OrderSource,
   OrderStatus,
-  PackingStatus,
   Prisma,
   ShipmentStatus,
 } from '@prisma/client';
@@ -19,6 +18,7 @@ import {
   ShopeeOrderDetail,
   ShopeeOrderItem,
 } from './shopee.client';
+import { syncedPackedStatus } from '../marketplace-packing';
 
 /** Shopee `get_order_list` lọc theo `order_status` — phải gọi mỗi trạng thái. */
 const SYNC_STATUSES = [
@@ -389,7 +389,6 @@ export class ShopeeSyncService {
         const shippingFields = {
           status: rest.status,
           shipmentStatus: rest.shipmentStatus,
-          packedStatus: rest.packedStatus,
           deliveryMethod: rest.deliveryMethod,
           trackingNumber: rest.trackingNumber,
           carrierName: rest.carrierName,
@@ -404,13 +403,20 @@ export class ShopeeSyncService {
 
         const target = await tx.fulfillment.findFirst({
           where: { OR: [{ name }, { orderId, closedAt: null }] },
-          select: { id: true },
+          select: { id: true, packedStatus: true },
         });
 
         if (target) {
           await tx.fulfillment.update({
             where: { id: target.id },
-            data: shippingFields,
+            data: {
+              ...shippingFields,
+              // Đóng gói là việc của kho — giữ nguyên thao tác đã có.
+              packedStatus: syncedPackedStatus(
+                rest.shipmentStatus,
+                target.packedStatus,
+              ),
+            },
           });
         } else {
           await tx.fulfillment.create({ data: { ...rest, name, orderId } });
@@ -771,12 +777,8 @@ function mapFulfillmentRecord(
         : 'success',
     shipmentStatus,
     deliveryMethod: FulfillmentDeliveryMethod.ecommerce,
-    packedStatus:
-      orderStatus === 'PROCESSED' ||
-      orderStatus === 'SHIPPED' ||
-      orderStatus === 'COMPLETED'
-        ? PackingStatus.packed
-        : PackingStatus.unknown,
+    // Giá trị lúc TẠO MỚI; vận đơn đã có thì giữ thao tác của kho (xem syncedPackedStatus)
+    packedStatus: syncedPackedStatus(shipmentStatus, null),
     trackingNumber: validTracking,
     carrierName: carrier,
     trackingCompany: carrier,
