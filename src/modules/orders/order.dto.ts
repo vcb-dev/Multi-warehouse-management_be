@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -263,6 +264,12 @@ export class ListOrdersQueryDto {
   @IsOptional()
   @IsString()
   stock_status?: string;
+
+  /** 'awaiting_confirmation' (chờ xác nhận) | 'awaiting_processing' (chờ xử lý)
+   * — hàng đợi xử lý đơn; khi có thì `status` bị bỏ qua. */
+  @IsOptional()
+  @IsString()
+  stage?: string;
 
   @IsOptional()
   @IsString()
@@ -546,6 +553,66 @@ export class PayOrderDto {
   amount?: number;
 }
 
+/** Lý do trả hàng theo danh sách của Sapo (file xuất "danh sách trả hàng"). */
+export const ORDER_RETURN_REASON_CODES = [
+  'customer_changed_mind',
+  'not_as_described',
+  'defective',
+  'wrong_item',
+  'other',
+  'unknown',
+] as const;
+
+export type OrderReturnReasonCode = (typeof ORDER_RETURN_REASON_CODES)[number];
+
+/** Danh sách PHIẾU trả hàng (khác `ListOrderReturnsQueryDto` — cái đó theo dòng hoàn). */
+export class ListReturnDocumentsQueryDto {
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  /** in_progress | completed | cancelled — nhiều giá trị ngăn bằng dấu phẩy */
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  location_ids?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page_size?: number;
+}
+
+export class ReceiveOrderReturnDto {
+  /** Nhập lại kho thành hàng bán được (mặc định) hay chỉ ghi nhận đã nhận */
+  @IsOptional()
+  @IsBoolean()
+  restock?: boolean;
+}
+
+export class RefundOrderReturnDto {
+  /** Bỏ trống = hoàn hết số còn lại của phiếu */
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  amount?: number;
+
+  /** true: trừ vào công nợ KH (không tạo phiếu chi) */
+  @IsOptional()
+  @IsBoolean()
+  deduct_from_debt?: boolean;
+}
+
 export class CreateOrderReturnDto {
   @IsString()
   order_id!: string;
@@ -565,6 +632,34 @@ export class CreateOrderReturnDto {
   @IsOptional()
   @IsBoolean()
   deduct_from_debt?: boolean;
+
+  /** Lý do chọn từ danh sách — xem ORDER_RETURN_REASON_CODES */
+  @IsOptional()
+  @IsIn(ORDER_RETURN_REASON_CODES)
+  reason_code?: OrderReturnReasonCode;
+
+  /**
+   * Nhận hàng / hoàn tiền ngay lúc lập phiếu. Mặc định `true` để client cũ (lập
+   * phiếu là xong) chạy y như trước; giao diện mới gửi tường minh hai cờ này.
+   */
+  @IsOptional()
+  @IsBoolean()
+  receive_now?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  refund_now?: boolean;
+
+  /** Vận chuyển hàng trả lại (khách tự gửi) — chỉ để tra cứu */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  tracking_number?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  carrier_name?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

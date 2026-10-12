@@ -94,6 +94,41 @@ describe('OrderService.buildListWhere — trạng thái', () => {
   });
 });
 
+describe('OrderService.buildListWhere — hàng đợi xử lý đơn', () => {
+  const queueScope = {
+    status: 'open',
+    fulfillmentStatus: null,
+    deliveredOn: null,
+    returnStatus: 'no_return',
+    fulfillments: { none: { closedAt: null } },
+  };
+
+  it('chờ xác nhận = đơn mở, chưa xác nhận, chưa có kiện hàng', async () => {
+    const where = await build({ stage: 'awaiting_confirmation' });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: null });
+  });
+
+  it('chờ xử lý = đã xác nhận nhưng chưa có kiện hàng', async () => {
+    const where = await build({ stage: 'awaiting_processing' });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: { not: null } });
+  });
+
+  it('hàng đợi thắng `status` và kết hợp được với đủ/thiếu hàng', async () => {
+    const where = await build({
+      stage: 'awaiting_processing',
+      status: 'cancelled',
+      stock_status: 'thieu_hang',
+    });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: { not: null } });
+  });
+
+  it('giá trị lạ thì bỏ qua, không thu hẹp danh sách', async () => {
+    const where = await build({ stage: 'khong_ton_tai' });
+    expect(where.confirmedOn).toBeUndefined();
+    expect(where.status).toBeUndefined();
+  });
+});
+
 describe('OrderService.buildListWhere — thực thể và khoảng', () => {
   it('nhận nhiều tag (trước đây chỉ nhận một)', async () => {
     const where = await build({ tags: 'vip, giao gap' });

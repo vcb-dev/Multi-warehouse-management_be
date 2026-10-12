@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -8,6 +16,9 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 import {
   CreateOrderReturnDto,
   ListOrderReturnsQueryDto,
+  ListReturnDocumentsQueryDto,
+  ReceiveOrderReturnDto,
+  RefundOrderReturnDto,
 } from '../orders/order.dto';
 import { OrderReturnService } from './order-return.service';
 
@@ -30,5 +41,58 @@ export class OrderReturnController {
   @RequirePermission('order_return:manage')
   create(@Body() dto: CreateOrderReturnDto, @CurrentUser() user: AuthUser) {
     return this.returns.create(dto, user);
+  }
+
+  // --- Phiếu trả hàng theo quy trình: tạo → nhận hàng → hoàn tiền → hoàn thành ---
+
+  @Get('documents')
+  @RequirePermission('order_return:view')
+  listDocuments(
+    @Query() query: ListReturnDocumentsQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.returns.listDocuments(query, user);
+  }
+
+  @Get('documents/:id')
+  @RequirePermission('order_return:view')
+  findDocument(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.returns.findDocument(BigInt(id), user);
+  }
+
+  @Post(':id/receive')
+  @HttpCode(200)
+  @RequirePermission('order_return:manage')
+  receive(
+    @Param('id') id: string,
+    @Body() dto: ReceiveOrderReturnDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.returns.receive(BigInt(id), dto, user);
+  }
+
+  @Post(':id/refund')
+  @HttpCode(200)
+  @RequirePermission('order_return:manage')
+  refund(
+    @Param('id') id: string,
+    @Body() dto: RefundOrderReturnDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.returns.refund(BigInt(id), dto, user);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @RequirePermission('order_return:manage')
+  cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.returns.cancel(BigInt(id), user);
+  }
+
+  @Post(':id/complete')
+  @HttpCode(200)
+  @RequirePermission('order_return:manage')
+  complete(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.returns.complete(BigInt(id), user);
   }
 }

@@ -1,11 +1,26 @@
 import {
   OrderFinancialStatus,
+  OrderReturnDocStatus,
   OrderRefundStatus,
   OrderRestockStatus,
   OrderReturnStatus,
   Prisma,
   RestockType,
 } from '@prisma/client';
+
+/** `return_status` của đơn từ số lượng đã về kho và việc còn phiếu trả đang mở. */
+export function deriveReturnStatus(
+  returnedQty: number,
+  totalOrderedQty: number,
+  hasOpenReturn: boolean,
+): OrderReturnStatus {
+  if (returnedQty > 0 && returnedQty >= totalOrderedQty && !hasOpenReturn) {
+    return OrderReturnStatus.returned;
+  }
+  return returnedQty > 0 || hasOpenReturn
+    ? OrderReturnStatus.in_progress
+    : OrderReturnStatus.no_return;
+}
 
 /**
  * Tính lại `return_status` / `refund_status` / `restock_status` của đơn từ toàn
@@ -37,12 +52,16 @@ export async function recomputeOrderRefundStatuses(
   const returnedQty = lines
     .filter((l) => l.restockType !== RestockType.cancel)
     .reduce((s, l) => s + l.quantity, 0);
-  const returnStatus =
-    returnedQty === 0
-      ? OrderReturnStatus.no_return
-      : returnedQty >= totalOrderedQty
-        ? OrderReturnStatus.returned
-        : OrderReturnStatus.in_progress;
+  // Phiếu trả đang mở (chưa nhận hàng / chưa hoàn tiền xong) cũng là "đang trả
+  // hàng" — đúng nghĩa `in_progress` của Sapo — dù chưa có dòng refund nào.
+  const openReturns = await tx.orderReturn.count({
+    where: { orderId, status: OrderReturnDocStatus.in_progress },
+  });
+  const returnStatus = deriveReturnStatus(
+    returnedQty,
+    totalOrderedQty,
+    openReturns > 0,
+  );
 
   // --- refund_status: tính trên tổng tiền đã hoàn (mọi loại refund) ---
   const agg = await tx.orderRefund.aggregate({

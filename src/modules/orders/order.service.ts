@@ -41,7 +41,12 @@ import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
-import { PENDING_ORDER_WHERE, computeStockReady } from './order-stock';
+import {
+  PENDING_ORDER_WHERE,
+  computeStockReady,
+  orderStageWhere,
+  parseOrderStage,
+} from './order-stock';
 import {
   recomputeOrderRefundStatuses,
   returnedQuantities,
@@ -185,8 +190,13 @@ export class OrderService {
     }
 
     const stockFilter = stockStatusOf(query);
+    const stage = parseOrderStage(query.stage);
 
-    if (stockFilter) {
+    if (stage) {
+      // Hàng đợi xử lý đã bao trùm PENDING_ORDER_WHERE nên kết hợp được với
+      // đủ/thiếu hàng; `status` không còn ý nghĩa trong một hàng đợi.
+      Object.assign(where, orderStageWhere(stage));
+    } else if (stockFilter) {
       // Đủ/thiếu hàng chỉ có ý nghĩa với đơn CÒN PHẢI XỬ LÝ — xem PENDING_ORDER_WHERE.
       Object.assign(where, PENDING_ORDER_WHERE);
     } else if (query.status === 'closed') {
