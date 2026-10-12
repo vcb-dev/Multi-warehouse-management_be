@@ -28,7 +28,6 @@ function header(req: CsrfRequest, name: string): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-
 @Injectable()
 export class CsrfGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {

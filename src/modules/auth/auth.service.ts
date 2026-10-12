@@ -30,7 +30,7 @@ export class AuthService {
     private rbac: RbacService,
     private tokens: TokenService,
   ) {}
-  
+
   private buildUserPayload(user: User, resolved: ResolvedPermissions) {
     return {
       id: user.id.toString(),

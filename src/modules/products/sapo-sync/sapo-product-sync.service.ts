@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SapoClient, SapoOption, SapoProduct, SapoVariant } from './sapo-client';
+import {
+  SapoClient,
+  SapoOption,
+  SapoProduct,
+  SapoVariant,
+} from './sapo-client';
 
 export interface SapoProductSyncCounts {
   productsSeen: number;
@@ -41,7 +46,12 @@ const t = (v: string | null | undefined): string | null =>
   v == null ? null : String(v).trim() || null;
 
 const parseTags = (v: string | null): string[] =>
-  v ? String(v).split(',').map((x) => x.trim()).filter(Boolean) : [];
+  v
+    ? String(v)
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : [];
 
 /** Option chỉ có đúng Title/Default Title là placeholder của Sapo cho hàng
  *  không phân loại — tạo vào DB chỉ tổ làm rác màn hình chi tiết. */
@@ -203,7 +213,8 @@ export class SapoProductSyncService {
     if ((t(s.status) ?? 'draft') !== t(existing.status)) return true;
     if ((t(s.type) ?? 'normal') !== t(existing.type)) return true;
     if (t(s.template_layout) !== t(existing.templateLayout)) return true;
-    if (t(s.vat_pit_category_code) !== t(existing.vatPitCategoryCode)) return true;
+    if (t(s.vat_pit_category_code) !== t(existing.vatPitCategoryCode))
+      return true;
     const sTags = parseTags(s.tags).slice().sort().join('|');
     const dTags = [...existing.tags].sort().join('|');
     if (sTags !== dTags) return true;
@@ -228,7 +239,9 @@ export class SapoProductSyncService {
     }
 
     const dVarBySapoId = new Map(
-      existing.variants.filter((v) => v.sapoId != null).map((v) => [v.sapoId!.toString(), v]),
+      existing.variants
+        .filter((v) => v.sapoId != null)
+        .map((v) => [v.sapoId!.toString(), v]),
     );
     for (const v of s.variants ?? []) {
       const dv = dVarBySapoId.get(String(v.id));
@@ -250,8 +263,10 @@ export class SapoProductSyncService {
       if (t(v.unit) !== t(dv.unit)) return true;
       if (Boolean(v.taxable) !== dv.taxable) return true;
       if (Boolean(v.requires_shipping) !== dv.requiresShipping) return true;
-      if ((v.inventory_management ?? 'bizweb') !== dv.inventoryManagement) return true;
-      if ((t(v.inventory_policy) ?? 'deny') !== t(dv.inventoryPolicy)) return true;
+      if ((v.inventory_management ?? 'bizweb') !== dv.inventoryManagement)
+        return true;
+      if ((t(v.inventory_policy) ?? 'deny') !== t(dv.inventoryPolicy))
+        return true;
       if (Boolean(v.lot_management) !== dv.lotManagement) return true;
       if ((v.position ?? 0) !== dv.position) return true;
       if ((t(v.type) ?? 'normal') !== t(dv.type)) return true;
@@ -328,14 +343,22 @@ export class SapoProductSyncService {
   ): Promise<{ sku: string; conflict: boolean; reason?: string }> {
     const want = t(desired);
     if (!want) {
-      return { sku: `SKU-PENDING-${sapoVariantId}`, conflict: true, reason: 'Sapo không có SKU' };
+      return {
+        sku: `SKU-PENDING-${sapoVariantId}`,
+        conflict: true,
+        reason: 'Sapo không có SKU',
+      };
     }
     const holder = await tx.productVariant.findUnique({
       where: { sku: want },
       select: { id: true },
     });
     if (!holder) return { sku: want, conflict: false };
-    return { sku: `SKU-PENDING-${sapoVariantId}`, conflict: true, reason: 'SKU đã bị dòng khác chiếm' };
+    return {
+      sku: `SKU-PENDING-${sapoVariantId}`,
+      conflict: true,
+      reason: 'SKU đã bị dòng khác chiếm',
+    };
   }
 
   private async resolveAliasForCreate(
@@ -352,14 +375,16 @@ export class SapoProductSyncService {
     return { alias: `sapo-${sapoId}`, conflict: true };
   }
 
-  private async createNewProduct(s: SapoProduct, counts: SapoProductSyncCounts) {
+  private async createNewProduct(
+    s: SapoProduct,
+    counts: SapoProductSyncCounts,
+  ) {
     const options = s.options ?? [];
     const includeOptions = options.length > 0 && !isDegenerateOptions(options);
 
     await this.prisma.$transaction(async (tx) => {
-      const { alias, conflict: aliasConflict } = await this.resolveAliasForCreate(
-        tx, t(s.alias), s.id,
-      );
+      const { alias, conflict: aliasConflict } =
+        await this.resolveAliasForCreate(tx, t(s.alias), s.id);
       if (aliasConflict) {
         counts.aliasConflicts++;
         this.logger.warn(
@@ -389,12 +414,18 @@ export class SapoProductSyncService {
         },
       });
 
-      let optionIds: bigint[] = [];
+      const optionIds: bigint[] = [];
       if (includeOptions) {
-        const sorted = [...options].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+        const sorted = [...options].sort(
+          (a, b) => (a.position ?? 0) - (b.position ?? 0),
+        );
         for (let i = 0; i < sorted.length; i++) {
           const o = await tx.productOption.create({
-            data: { productId: product.id, name: sorted[i].name.trim(), position: i },
+            data: {
+              productId: product.id,
+              name: sorted[i].name.trim(),
+              position: i,
+            },
           });
           optionIds.push(o.id);
         }
@@ -402,7 +433,11 @@ export class SapoProductSyncService {
       }
 
       for (const v of s.variants ?? []) {
-        const { sku, conflict, reason } = await this.resolveSkuForCreate(tx, v.sku, v.id);
+        const { sku, conflict, reason } = await this.resolveSkuForCreate(
+          tx,
+          v.sku,
+          v.id,
+        );
         if (conflict) {
           counts.skuConflicts++;
           this.logger.warn(
@@ -443,7 +478,11 @@ export class SapoProductSyncService {
             const val = t(vals[i]);
             if (!val) continue;
             await tx.variantOptionValue.create({
-              data: { variantId: variant.id, optionId: optionIds[i], value: val },
+              data: {
+                variantId: variant.id,
+                optionId: optionIds[i],
+                value: val,
+              },
             });
           }
         }
@@ -526,7 +565,13 @@ export class SapoProductSyncService {
         if (local) {
           await this.updateVariant(tx, local, v, s.id, counts);
         } else {
-          await this.createVariantOnExistingProduct(tx, existing.id, v, s.id, counts);
+          await this.createVariantOnExistingProduct(
+            tx,
+            existing.id,
+            v,
+            s.id,
+            counts,
+          );
         }
       }
 
@@ -538,7 +583,12 @@ export class SapoProductSyncService {
       if (currentOptionCount === 0) {
         const options = s.options ?? [];
         if (options.length && !isDegenerateOptions(options)) {
-          await this.createOptionsForProduct(tx, existing.id, options, s.variants ?? []);
+          await this.createOptionsForProduct(
+            tx,
+            existing.id,
+            options,
+            s.variants ?? [],
+          );
           counts.optionsCreated++;
         }
       }
@@ -612,7 +662,11 @@ export class SapoProductSyncService {
     sapoProductId: number,
     counts: SapoProductSyncCounts,
   ) {
-    const { sku, conflict, reason } = await this.resolveSkuForCreate(tx, v.sku, v.id);
+    const { sku, conflict, reason } = await this.resolveSkuForCreate(
+      tx,
+      v.sku,
+      v.id,
+    );
     if (conflict) {
       counts.skuConflicts++;
       this.logger.warn(
@@ -623,7 +677,8 @@ export class SapoProductSyncService {
       data: {
         productId,
         sapoId: BigInt(v.id),
-        inventoryItemId: v.inventory_item_id != null ? BigInt(v.inventory_item_id) : null,
+        inventoryItemId:
+          v.inventory_item_id != null ? BigInt(v.inventory_item_id) : null,
         sku,
         barcode: t(v.barcode),
         title: t(v.title),
@@ -672,7 +727,9 @@ export class SapoProductSyncService {
     options: SapoOption[],
     sapoVariants: SapoVariant[],
   ) {
-    const sorted = [...options].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    const sorted = [...options].sort(
+      (a, b) => (a.position ?? 0) - (b.position ?? 0),
+    );
     const optionIds: bigint[] = [];
     for (let i = 0; i < sorted.length; i++) {
       const o = await tx.productOption.create({
@@ -685,7 +742,9 @@ export class SapoProductSyncService {
       select: { id: true, sapoId: true },
     });
     const bySapoId = new Map(
-      localVariants.filter((v) => v.sapoId != null).map((v) => [v.sapoId!.toString(), v.id]),
+      localVariants
+        .filter((v) => v.sapoId != null)
+        .map((v) => [v.sapoId!.toString(), v.id]),
     );
     for (const v of sapoVariants) {
       const localId = bySapoId.get(String(v.id));
@@ -733,7 +792,10 @@ export class SapoProductSyncService {
 
     const wantUrl = t(s.image?.src ?? null);
     if (wantUrl) {
-      await tx.product.update({ where: { id: productId }, data: { imageUrl: wantUrl } });
+      await tx.product.update({
+        where: { id: productId },
+        data: { imageUrl: wantUrl },
+      });
     }
   }
 }

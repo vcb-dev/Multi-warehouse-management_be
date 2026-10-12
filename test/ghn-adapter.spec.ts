@@ -96,8 +96,16 @@ describe('GHN-2 báo giá vẫn dùng biểu phí nội bộ', () => {
 
 describe('GHN-3 tạo vận đơn — payload create', () => {
   it('gửi to_* theo tên GHN; không gửi from_* (ShopId); sandbox retry HCM', async () => {
-    const prevEnv = process.env.GHN_ENV;
+    // URL khai tường minh ghi đè GHN_ENV (xem resolveGhnBaseUrl) — máy nào có sẵn
+    // GHN_API_BASE_URL trong .env thì test này không còn ở chế độ sandbox nếu không gỡ ra.
+    const prevEnv = {
+      GHN_ENV: process.env.GHN_ENV,
+      GHN_API_BASE_URL: process.env.GHN_API_BASE_URL,
+      GHN_BASE_URL: process.env.GHN_BASE_URL,
+    };
     process.env.GHN_ENV = 'sandbox';
+    delete process.env.GHN_API_BASE_URL;
+    delete process.env.GHN_BASE_URL;
     let attempt = 0;
     let captured: Record<string, unknown> | undefined;
     const client = {
@@ -192,6 +200,9 @@ describe('GHN-3 tạo vận đơn — payload create', () => {
     expect(captured?.from_province_name).toBe('HCM');
     expect(captured?.to_ward_name).toBe('Phường 5');
     expect(client.createOrder).toHaveBeenCalledTimes(2);
-    process.env.GHN_ENV = prevEnv;
+    for (const [key, value] of Object.entries(prevEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 });

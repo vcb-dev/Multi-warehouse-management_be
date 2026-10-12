@@ -171,9 +171,8 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
   });
 
   it('KC6 — export ghi file Excel xuống response', async () => {
-    const { ProductExportService } = await import(
-      '../src/modules/products/product-export.service'
-    );
+    const { ProductExportService } =
+      await import('../src/modules/products/product-export.service');
     const exporter = new ProductExportService(products, productRepo);
 
     // Export stream thẳng vào response: giả một Writable có setHeader để hứng byte

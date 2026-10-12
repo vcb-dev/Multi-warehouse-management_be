@@ -4,7 +4,7 @@
  * thông báo — link sai thì con số người dùng thấy sau khi bấm vào lệch với con số ghi
  * trên thông báo, và lỗi này KHÔNG lộ ra ở tsc hay ở test happy-path.
  */
-import { NotificationRecipient, NotificationTopic } from '@prisma/client';
+import { NotificationTopic } from '@prisma/client';
 import {
   serializeNotification,
   serializeNotificationSetting,

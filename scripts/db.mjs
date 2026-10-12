@@ -28,13 +28,22 @@ loadEnv();
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 if (!url) { console.error('Không tìm thấy DATABASE_URL trong backend/.env'); process.exit(1); }
 
-// pg >= 8.16 hiểu sslmode=require là verify-full -> gỡ tham số ra, tự bật SSL
-const clean = url.replace(/[?&]sslmode=[^&]*/g, (m) => (m[0] === '?' ? '?' : '')).replace(/\?$/, '');
-const client = new pg.Client({ connectionString: clean, ssl: { rejectUnauthorized: false } });
+// `schema` là tham số riêng của Prisma, `pg` không hiểu -> tự đọc ra để đặt search_path.
+// pg >= 8.16 hiểu sslmode=require là verify-full -> gỡ tham số ra, tự bật SSL.
+const parsed = new URL(url);
+const schema = parsed.searchParams.get('schema');
+const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+parsed.searchParams.delete('schema');
+parsed.searchParams.delete('sslmode');
+// Postgres chạy Docker trên máy không bật SSL; các host còn lại (Supabase) bắt buộc SSL.
+const client = new pg.Client({
+  connectionString: parsed.toString(),
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+});
 
 const SHORTCUTS = {
-  '\\dt': `SELECT table_name, (SELECT reltuples::bigint FROM pg_class WHERE oid = ('public.'||quote_ident(table_name))::regclass) AS rows_est
-           FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name`,
+  '\\dt': `SELECT table_name, (SELECT reltuples::bigint FROM pg_class WHERE oid = (quote_ident(table_schema)||'.'||quote_ident(table_name))::regclass) AS rows_est
+           FROM information_schema.tables WHERE table_schema=current_schema() ORDER BY table_name`,
   '\\l': `SELECT datname FROM pg_database WHERE datistemplate = false`,
 };
 
@@ -43,7 +52,7 @@ function expand(sql) {
   if (SHORTCUTS[t]) return SHORTCUTS[t];
   const d = t.match(/^\\d\s+(\S+)$/);
   if (d) return `SELECT column_name, data_type, is_nullable, column_default
-                 FROM information_schema.columns WHERE table_schema='public' AND table_name='${d[1]}'
+                 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='${d[1]}'
                  ORDER BY ordinal_position`;
   return sql;
 }
@@ -62,6 +71,9 @@ async function run(sql) {
 }
 
 await client.connect();
+if (schema) {
+  await client.query(`SET search_path TO ${client.escapeIdentifier(schema)}, public`);
+}
 
 const args = process.argv.slice(2);
 if (args[0] === '-f') {

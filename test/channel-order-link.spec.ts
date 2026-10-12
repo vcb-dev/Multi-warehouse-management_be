@@ -49,19 +49,27 @@ describe('linkableChannelOf', () => {
  */
 describe('normalizeChannelShopName', () => {
   it('cắt đuôi kênh Sapo gắn thêm', () => {
-    expect(normalizeChannelShopName('tiktokshop', 'Viễn Chí Bảo - Tiktokshop')).toBe(
-      'Viễn Chí Bảo',
-    );
     expect(
-      normalizeChannelShopName('tiktokshop', 'Viễn Chí Bảo Silver - Tiktokshop'),
+      normalizeChannelShopName('tiktokshop', 'Viễn Chí Bảo - Tiktokshop'),
+    ).toBe('Viễn Chí Bảo');
+    expect(
+      normalizeChannelShopName(
+        'tiktokshop',
+        'Viễn Chí Bảo Silver - Tiktokshop',
+      ),
     ).toBe('Viễn Chí Bảo Silver');
     expect(
-      normalizeChannelShopName('tiktokshop', 'Trang sức Viễn Chí Bảo - Tiktokshop'),
+      normalizeChannelShopName(
+        'tiktokshop',
+        'Trang sức Viễn Chí Bảo - Tiktokshop',
+      ),
     ).toBe('Trang sức Viễn Chí Bảo');
-    expect(normalizeChannelShopName('shopee', 'Miêu Bạc - Shopee')).toBe('Miêu Bạc');
-    expect(normalizeChannelShopName('shopee', 'Minco Accessories - Shopee')).toBe(
-      'Minco Accessories',
+    expect(normalizeChannelShopName('shopee', 'Miêu Bạc - Shopee')).toBe(
+      'Miêu Bạc',
     );
+    expect(
+      normalizeChannelShopName('shopee', 'Minco Accessories - Shopee'),
+    ).toBe('Minco Accessories');
     expect(
       normalizeChannelShopName('shopee', 'Viễn Chí Bảo Art Silver - Shopee'),
     ).toBe('Viễn Chí Bảo Art Silver');
@@ -70,24 +78,26 @@ describe('normalizeChannelShopName', () => {
   it('idempotent — tên trần của API sàn giữ nguyên', () => {
     // Sync trực tiếp lấy tên từ API sàn, vốn đã không có đuôi; chạy lại backfill nhiều lần
     // cũng không được gặm dần tên gian hàng.
-    expect(normalizeChannelShopName('tiktokshop', 'Viễn Chí Bảo')).toBe('Viễn Chí Bảo');
+    expect(normalizeChannelShopName('tiktokshop', 'Viễn Chí Bảo')).toBe(
+      'Viễn Chí Bảo',
+    );
     expect(normalizeChannelShopName('shopee', 'Miêu Bạc')).toBe('Miêu Bạc');
   });
 
   it('chỉ cắt đuôi của ĐÚNG kênh đang xét', () => {
     // Không được cắt bừa mọi cụm " - X": gian hàng có thể tên thật như vậy.
-    expect(normalizeChannelShopName('shopee', 'Minco Accessories - Outlet')).toBe(
-      'Minco Accessories - Outlet',
-    );
+    expect(
+      normalizeChannelShopName('shopee', 'Minco Accessories - Outlet'),
+    ).toBe('Minco Accessories - Outlet');
     expect(normalizeChannelShopName('tiktokshop', 'Miêu Bạc - Shopee')).toBe(
       'Miêu Bạc - Shopee',
     );
   });
 
   it('kênh không phải sàn thì giữ nguyên, rỗng thì null', () => {
-    expect(normalizeChannelShopName('facebook', 'Viễn Chí Bảo - Tiktokshop')).toBe(
-      'Viễn Chí Bảo - Tiktokshop',
-    );
+    expect(
+      normalizeChannelShopName('facebook', 'Viễn Chí Bảo - Tiktokshop'),
+    ).toBe('Viễn Chí Bảo - Tiktokshop');
     expect(normalizeChannelShopName('tiktokshop', null)).toBeNull();
     expect(normalizeChannelShopName('tiktokshop', '   ')).toBeNull();
   });

@@ -8,7 +8,7 @@
  * 2. Cache cấu hình 60s — tránh 1 query mỗi lần tạo đơn — và invalidate đúng lúc.
  * 3. `list()`/`markRead()` luôn khoá theo `userId` — đây là chốt chặn riêng tư duy nhất.
  */
-import { NotificationTopic, PermissionScope } from '@prisma/client';
+import { NotificationTopic } from '@prisma/client';
 import type { AuthUser } from '../src/common/decorators/current-user.decorator';
 import { BusinessException } from '../src/common/exceptions/business.exception';
 import { NotificationService } from '../src/modules/notifications/notification.service';
@@ -212,7 +212,9 @@ describe('NotificationService — cấu hình & cache invalidation', () => {
     const svc = new NotificationService(prisma, fakeRbac());
     await expect(
       svc.updateSetting('khong/ton-tai', { app_enabled: true }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' } as Partial<BusinessException>);
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    } as Partial<BusinessException>);
     expect(prisma.notificationSetting.update).not.toHaveBeenCalled();
   });
 
@@ -294,7 +296,10 @@ describe('NotificationService.list — riêng tư & phân trang', () => {
     const svc = new NotificationService(prisma, fakeRbac());
     const res = await svc.list(user(9n), { limit: 5 });
 
-    expect((prisma.notificationRecipient.findMany as jest.Mock).mock.calls[0][0].take).toBe(6);
+    expect(
+      (prisma.notificationRecipient.findMany as jest.Mock).mock.calls[0][0]
+        .take,
+    ).toBe(6);
     expect(res.data).toHaveLength(5); // cắt bớt dòng dư trước khi trả ra
     expect(res.has_more).toBe(true);
     expect(res.next_before_id).toBe(res.data[4].id);

@@ -45,8 +45,16 @@ const assignment = (opts: {
 describe('RbacService.usersWithPermissions', () => {
   it('quyền scope=location chỉ khớp user có role ĐÚNG kho đang xét', async () => {
     const prisma = fakePrisma([
-      assignment({ userId: 1n, locationId: 1n, permissions: [perm('order:view')] }),
-      assignment({ userId: 2n, locationId: 2n, permissions: [perm('order:view')] }),
+      assignment({
+        userId: 1n,
+        locationId: 1n,
+        permissions: [perm('order:view')],
+      }),
+      assignment({
+        userId: 2n,
+        locationId: 2n,
+        permissions: [perm('order:view')],
+      }),
     ]);
     const res = await new RbacService(prisma).usersWithPermissions(
       ['order:view'],
@@ -72,7 +80,11 @@ describe('RbacService.usersWithPermissions', () => {
 
   it('locationId=null (sự kiện không thuộc kho nào) → quyền location khớp ở BẤT KỲ kho nào user có', async () => {
     const prisma = fakePrisma([
-      assignment({ userId: 1n, locationId: 3n, permissions: [perm('customer:view')] }),
+      assignment({
+        userId: 1n,
+        locationId: 3n,
+        permissions: [perm('customer:view')],
+      }),
     ]);
     const res = await new RbacService(prisma).usersWithPermissions(
       ['customer:view'],
@@ -139,7 +151,13 @@ describe('RbacService.usersWithPermissions', () => {
 
   it('override REVOKED rút quyền dù role đã cấp — user KHÔNG được nhận nữa', async () => {
     const prisma = fakePrisma(
-      [assignment({ userId: 1n, locationId: 1n, permissions: [perm('order:view')] })],
+      [
+        assignment({
+          userId: 1n,
+          locationId: 1n,
+          permissions: [perm('order:view')],
+        }),
+      ],
       [
         {
           userId: 1n,
@@ -158,7 +176,13 @@ describe('RbacService.usersWithPermissions', () => {
 
   it('override ở KHO KHÁC với sự kiện thì không áp dụng', async () => {
     const prisma = fakePrisma(
-      [assignment({ userId: 1n, locationId: 1n, permissions: [perm('order:view')] })],
+      [
+        assignment({
+          userId: 1n,
+          locationId: 1n,
+          permissions: [perm('order:view')],
+        }),
+      ],
       [
         {
           userId: 1n,
@@ -215,8 +239,16 @@ describe('RbacService.usersWithPermissions', () => {
 
   it('không trùng lặp id khi user có nhiều assignment cùng khớp điều kiện', async () => {
     const prisma = fakePrisma([
-      assignment({ userId: 1n, locationId: 1n, permissions: [perm('order:view')] }),
-      assignment({ userId: 1n, locationId: 1n, permissions: [perm('order:pack')] }),
+      assignment({
+        userId: 1n,
+        locationId: 1n,
+        permissions: [perm('order:view')],
+      }),
+      assignment({
+        userId: 1n,
+        locationId: 1n,
+        permissions: [perm('order:pack')],
+      }),
     ]);
     const res = await new RbacService(prisma).usersWithPermissions(
       ['order:view'],
