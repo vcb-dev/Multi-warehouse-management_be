@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   NotificationTopic,
   OrderRefundStatus,
+  OrderReturnDocStatus,
   OrderReturnStatus,
   Prisma,
   ShipmentStatus,
@@ -247,10 +248,11 @@ export class TiktokReturnSyncService {
             code,
             orderId: order.id,
             reason: returnReason(r),
+            status: returnDocStatus(r),
             createdById,
             createdOn,
           },
-          update: { reason: returnReason(r) },
+          update: { reason: returnReason(r), status: returnDocStatus(r) },
         });
         returnsSaved++;
         if (!knownCodes.has(code)) {
@@ -395,6 +397,14 @@ export class TiktokReturnSyncService {
 /** Tiền tố để không đụng dải mã phiếu hoàn nội bộ lẫn của Sapo. */
 function returnCode(r: TiktokReturn) {
   return `TTR-${r.return_id}`;
+}
+
+/** Trạng thái phiếu trả theo TikTok — sàn điều khiển, app chỉ chép lại. */
+function returnDocStatus(r: TiktokReturn): OrderReturnDocStatus {
+  const state = classify(r.return_status);
+  if (state === 'done') return OrderReturnDocStatus.completed;
+  if (state === 'dropped') return OrderReturnDocStatus.cancelled;
+  return OrderReturnDocStatus.in_progress;
 }
 
 /** Ưu tiên chuỗi người đọc được; mã máy (`ecom_order_..._no_longer_needed_new`) là lùi. */

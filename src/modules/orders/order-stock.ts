@@ -1,4 +1,4 @@
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderReturnStatus, OrderStatus, Prisma } from '@prisma/client';
 
 /**
  * Định nghĩa "đơn đủ/thiếu hàng" — NGUỒN DUY NHẤT cho cả màn danh sách đơn và cảnh báo
@@ -25,6 +25,38 @@ export const PENDING_ORDER_WHERE: Prisma.OrderWhereInput = {
   status: OrderStatus.open,
   fulfillmentStatus: null,
 };
+
+/** Hai hàng đợi của nhóm "Xử lý đơn hàng" trên Sapo. */
+export const ORDER_STAGES = [
+  'awaiting_confirmation',
+  'awaiting_processing',
+] as const;
+
+export type OrderStage = (typeof ORDER_STAGES)[number];
+
+export function parseOrderStage(raw?: string | null): OrderStage | undefined {
+  return ORDER_STAGES.find((stage) => stage === raw?.trim());
+}
+
+/**
+ * Điều kiện của một hàng đợi xử lý đơn:
+ * - `awaiting_confirmation` ("Chờ xác nhận"): đơn mới đặt, chưa ai xác nhận.
+ * - `awaiting_processing` ("Chờ xử lý"): đã xác nhận nhưng chưa tạo kiện hàng.
+ *
+ * Cả hai đều nằm trong {@link PENDING_ORDER_WHERE} và chưa có phiếu xử lý đang
+ * mở — đơn đã có kiện thuộc màn "In & đóng gói". Đơn có hàng hoàn về không vào
+ * hàng đợi: nó không giao lại được (xem `assertNotReturned`), để lại đây thì nằm
+ * mãi không ai xử lý nổi.
+ */
+export function orderStageWhere(stage: OrderStage): Prisma.OrderWhereInput {
+  return {
+    ...PENDING_ORDER_WHERE,
+    confirmedOn: stage === 'awaiting_confirmation' ? null : { not: null },
+    deliveredOn: null,
+    returnStatus: OrderReturnStatus.no_return,
+    fulfillments: { none: { closedAt: null } },
+  };
+}
 
 /** Bảng tra tồn tối thiểu mà {@link computeStockReady} cần — nhận cả PrismaService lẫn tx. */
 type InventoryReader = {

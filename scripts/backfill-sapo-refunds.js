@@ -159,6 +159,9 @@ async function importWindow(query, label, maps, stats) {
                     code: `RT-SAPO-${rf.return_id}`,
                     orderId: localOrderId,
                     reason: rf.note || null,
+                    // Chép từ một refund Sapo đã xử lý xong, không phải phiếu đang mở
+                    status: 'completed',
+                    completedOn: toDate(rf.created_on) ?? new Date(),
                     createdById: maps.fallbackUserId,
                     createdOn: toDate(rf.created_on) ?? new Date(),
                   },

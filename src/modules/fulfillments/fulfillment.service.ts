@@ -1,8 +1,10 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  FulfillmentDeliveryMethod,
   InventoryBucket,
   MovementType,
   NotificationTopic,
+  OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
   PackingStatus,
@@ -45,10 +47,13 @@ import {
 } from './carriers/carrier-adapter';
 import { generateFulfillmentCode } from './fulfillment-code';
 import {
+  BulkMarkPrintedDto,
+  BulkPackingStatusDto,
   CancelFulfillmentDto,
   CarrierWebhookDto,
   CreatePackingDto,
   GhnWebhookDto,
+  ListPackagesQueryDto,
   ListShipmentsQueryDto,
   PushShipmentDto,
   ShipmentOverviewQueryDto,
@@ -69,8 +74,29 @@ import {
   serializeShipmentListItem,
   shipmentListInclude,
 } from './shipment-list.serializer';
+import {
+  buildPackingListWhere,
+  packingListInclude,
+  requestedLocationIds,
+  serializePackingListItem,
+} from './packing-list';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
+
+/**
+ * `orders.fulfillment_status` theo Sapo: `fulfilled` ngay khi đơn CÓ KIỆN HÀNG,
+ * không phải khi giao xong. Đối chiếu ~72k vận đơn Sapo thật (bản sao lưu
+ * 14/09/2026): mọi đơn có vận đơn `pending`/`picked_up`/`delivering` đều đã là
+ * `fulfilled`. Trước đây app chỉ đặt lúc giao thành công, nên đơn đang trên
+ * đường giao vẫn bị đếm là "chưa xuất kho".
+ *
+ * Mỗi đơn chỉ có MỘT phiếu đang mở, nên huỷ phiếu là đơn hết kiện hàng. Hàng
+ * hoàn về (`returned`) thì giữ `fulfilled` — Sapo cũng vậy.
+ */
+const ORDER_HAS_PACKAGE = {
+  fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+} as const;
+const ORDER_HAS_NO_PACKAGE = { fulfillmentStatus: null } as const;
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
@@ -285,6 +311,11 @@ export class FulfillmentService {
       where.deliveryNotePrintedAt = printed ? { not: null } : null;
     }
 
+    const reconciled = parseBool(query.reconciled);
+    if (reconciled !== undefined) {
+      where.codReconciledOn = reconciled ? { not: null } : null;
+    }
+
     // Nguồn đơn và tag nằm trên đơn hàng gốc, không nằm trên vận đơn.
     const sources = parseList(query.sources);
     if (sources) appendAnd(where, { order: { sourceName: { in: sources } } });
@@ -356,6 +387,77 @@ export class FulfillmentService {
     };
   }
 
+  /** Màn "In & đóng gói" — kiện hàng còn trong kho, chờ in phiếu/đóng gói. */
+  async listPackages(query: ListPackagesQueryDto, user: AuthUser) {
+    const page = query.page ?? 1;
+    const pageSize = query.limit ?? query.page_size ?? 20;
+
+    const requested = requestedLocationIds(query);
+    if (requested) {
+      for (const locationId of requested) {
+        assertLocationPermission(user, 'order:view', locationId);
+      }
+    }
+    const where = buildPackingListWhere(
+      query,
+      requested ?? locationScopeFilter(user, 'order:view')?.in,
+    );
+
+    const [rows, total] = await Promise.all([
+      this.prisma.fulfillment.findMany({
+        where,
+        orderBy: [{ createdOn: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: packingListInclude,
+      }),
+      this.prisma.fulfillment.count({ where }),
+    ]);
+
+    return {
+      data: rows.map(serializePackingListItem),
+      total,
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  /**
+   * Chạy một thao tác trên từng kiện, mỗi kiện một transaction riêng: kiện lỗi
+   * (sai trạng thái, không có quyền ở kho đó...) không kéo các kiện khác rollback
+   * theo, và được trả về kèm lý do để màn hình báo lại đúng kiện nào.
+   */
+  private async runBulk(
+    ids: string[],
+    action: (id: bigint) => Promise<unknown>,
+  ) {
+    const succeeded: string[] = [];
+    const failed: { id: string; message: string }[] = [];
+    for (const id of [...new Set(ids)]) {
+      try {
+        await action(BigInt(id));
+        succeeded.push(id);
+      } catch (err) {
+        failed.push({
+          id,
+          message: err instanceof Error ? err.message : 'Lỗi không xác định',
+        });
+      }
+    }
+    return { succeeded, failed };
+  }
+
+  bulkMarkPrinted(dto: BulkMarkPrintedDto, user: AuthUser) {
+    const printed = dto.printed ?? true;
+    return this.runBulk(dto.ids, (id) => this.setPrinted(id, printed, user));
+  }
+
+  bulkUpdatePackingStatus(dto: BulkPackingStatusDto, user: AuthUser) {
+    return this.runBulk(dto.ids, (id) =>
+      this.applyPackingStatus(id, dto.status, user),
+    );
+  }
+
   /** Đơn có fulfillment đang mở thì các thao tác thủ công cũ bị chặn. */
   async hasOpenFulfillment(orderId: bigint) {
     return (await this.findOpen(orderId)) !== null;
@@ -401,6 +503,10 @@ export class FulfillmentService {
           packer: { select: { firstName: true, lastName: true, email: true } },
         },
       });
+      await tx.order.update({
+        where: { id: order.id },
+        data: ORDER_HAS_PACKAGE,
+      });
       await tx.activityLog.create({
         data: {
           userId: user.userId,
@@ -426,6 +532,15 @@ export class FulfillmentService {
     dto: UpdatePackingStatusDto,
     user: AuthUser,
   ) {
+    await this.applyPackingStatus(id, dto.status, user);
+    return this.serializeById(id);
+  }
+
+  private async applyPackingStatus(
+    id: bigint,
+    status: PackingStatus,
+    user: AuthUser,
+  ) {
     const f = await this.loadFulfillment(id, user);
     if (f.closedAt) {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã đóng', 409);
@@ -435,15 +550,20 @@ export class FulfillmentService {
       [PackingStatus.packing]: [PackingStatus.packed],
       [PackingStatus.packed]: [],
     };
-    if (!f.packedStatus || !allowed[f.packedStatus]?.includes(dto.status)) {
+    if (!f.packedStatus || !allowed[f.packedStatus]?.includes(status)) {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Trạng thái đóng gói không hợp lệ',
         409,
       );
     }
+    // Đơn sàn (TikTok/Shopee) đã trừ kho ở phía sàn và đồng bộ về không giữ chỗ
+    // `committed`, nên đóng gói chỉ là đánh dấu: chuyển committed → packed ở đây
+    // sẽ kéo `committed` xuống âm. Cũng vì thế không ghi `packedOn` — các luồng
+    // lấy hàng/huỷ dùng `packedOn` làm dấu hiệu "hàng đang nằm ở bucket packed".
+    const movesStock = f.deliveryMethod !== FulfillmentDeliveryMethod.ecommerce;
     await this.prisma.$transaction(async (tx) => {
-      if (dto.status === PackingStatus.packed) {
+      if (status === PackingStatus.packed && movesStock) {
         // committed → packed: giữ nguyên available, hàng vào khu đóng gói
         for (const item of sortForLocking(f.order.items)) {
           await this.inventory.applyMovements(
@@ -476,8 +596,8 @@ export class FulfillmentService {
       await tx.fulfillment.update({
         where: { id },
         data: {
-          packedStatus: dto.status,
-          ...(dto.status === PackingStatus.packed
+          packedStatus: status,
+          ...(status === PackingStatus.packed && movesStock
             ? { packedOn: new Date() }
             : {}),
         },
@@ -491,34 +611,37 @@ export class FulfillmentService {
           metadata: {
             code: f.order.name,
             fulfillment_code: f.name,
-            status: dto.status,
+            status,
           },
         },
       });
     });
-    return this.serializeById(id);
   }
 
   async markPrinted(id: bigint, user: AuthUser) {
-    const f = await this.loadFulfillment(id, user);
-    if (!f.deliveryNotePrintedAt) {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.fulfillment.update({
-          where: { id },
-          data: { deliveryNotePrintedAt: new Date() },
-        });
-        await tx.activityLog.create({
-          data: {
-            userId: user.userId,
-            action: 'fulfillment.print',
-            entityType: 'order',
-            entityId: f.orderId,
-            metadata: { code: f.order.name, fulfillment_code: f.name },
-          },
-        });
-      });
-    }
+    await this.setPrinted(id, true, user);
     return this.serializeById(id);
+  }
+
+  /** Đặt/gỡ dấu "đã in phiếu giao hàng". Không đổi gì thì không ghi lịch sử. */
+  private async setPrinted(id: bigint, printed: boolean, user: AuthUser) {
+    const f = await this.loadFulfillment(id, user);
+    if (!!f.deliveryNotePrintedAt === printed) return;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.fulfillment.update({
+        where: { id },
+        data: { deliveryNotePrintedAt: printed ? new Date() : null },
+      });
+      await tx.activityLog.create({
+        data: {
+          userId: user.userId,
+          action: printed ? 'fulfillment.print' : 'fulfillment.unprint',
+          entityType: 'order',
+          entityId: f.orderId,
+          metadata: { code: f.order.name, fulfillment_code: f.name },
+        },
+      });
+    });
   }
 
   async pushShipment(dto: PushShipmentDto, user: AuthUser) {
@@ -649,6 +772,11 @@ export class FulfillmentService {
       }
       const shipmentData = {
         shipmentStatus: ShipmentStatus.pending,
+        // Sapo `delivery_method`: hãng tích hợp API vs đối tác tự liên hệ ("Shipper ngoài")
+        deliveryMethod:
+          dto.shipping_type === ShippingProviderType.tich_hop
+            ? FulfillmentDeliveryMethod.external_service
+            : FulfillmentDeliveryMethod.external_shipper,
         shippingType: dto.shipping_type,
         providerId: provider.id,
         serviceCode: dto.service_code ?? null,
@@ -701,14 +829,19 @@ export class FulfillmentService {
               name: await generateFulfillmentCode(tx, order.id, order.name),
               orderId: order.id,
               createdById: user.userId,
+              // Đẩy thẳng không qua yêu cầu đóng gói vẫn là một kiện "chờ đóng gói"
+              // như Sapo — để NULL thì màn In & đóng gói không chuyển trạng thái được.
+              packedStatus: PackingStatus.unknown,
               ...shipmentData,
             },
           });
 
-      // Đồng bộ cột "Dịch vụ vận chuyển" ở danh sách đơn
+      // Đồng bộ cột "Dịch vụ vận chuyển" ở danh sách đơn; có kiện hàng là đơn
+      // "đã xuất kho" theo Sapo (xem ORDER_HAS_PACKAGE).
       await tx.order.update({
         where: { id: order.id },
         data: {
+          ...ORDER_HAS_PACKAGE,
           shippingMethod: serviceName
             ? `${provider.name} - ${serviceName}`
             : provider.name,
@@ -1120,13 +1253,17 @@ export class FulfillmentService {
           where: { id: f.id },
           data: { shipmentStatus: status, deliveredOn: now, closedAt: now },
         });
+        // Giao xong CHƯA phải hoàn thành: như Sapo, đơn chỉ hoàn thành khi vừa
+        // giao xong vừa thu đủ tiền. Đơn COD chưa đối soát vẫn mở, chờ thu tiền
+        // (`OrderService.pay` sẽ đóng đơn khi khoản cuối về).
+        const paid = f.order.financialStatus === OrderFinancialStatus.paid;
         await tx.order.update({
           where: { id: f.orderId },
           data: {
-            status: OrderStatus.closed,
-            closedOn: now,
-            completedOn: now,
-            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            ...ORDER_HAS_PACKAGE,
+            ...(paid
+              ? { status: OrderStatus.closed, closedOn: now, completedOn: now }
+              : {}),
           },
         });
         await this.logShipment(tx, f, 'fulfillment.delivered', user);
@@ -1232,6 +1369,10 @@ export class FulfillmentService {
             closedAt: now,
             cancelReason: 'Hủy bởi đối tác vận chuyển (webhook)',
           },
+        });
+        await tx.order.update({
+          where: { id: f.orderId },
+          data: ORDER_HAS_NO_PACKAGE,
         });
         await this.logShipment(tx, f, 'fulfillment.cancel', user);
         return;
@@ -1399,6 +1540,10 @@ export class FulfillmentService {
           closedAt: now,
           cancelReason: dto.reason,
         },
+      });
+      await tx.order.update({
+        where: { id: f.orderId },
+        data: ORDER_HAS_NO_PACKAGE,
       });
       await tx.activityLog.create({
         data: {

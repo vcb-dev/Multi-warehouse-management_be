@@ -43,6 +43,8 @@ export function serializeShipmentListItem(f: ShipmentListRow) {
     order_tags: f.order.tags ?? [],
     cancelled_on: f.cancelledOn?.toISOString() ?? null,
     expected_delivery_date: f.expectedDeliveryDate?.toISOString() ?? null,
-    reconciliation_status: null, // chưa có field DB — để null như UI hiện tại
+    // Sapo: mọi vận đơn qua đối tác đều có trạng thái đối soát
+    reconciliation_status: f.codReconciledOn ? 'reconciled' : 'pending',
+    cod_reconciled_on: f.codReconciledOn?.toISOString() ?? null,
   };
 }

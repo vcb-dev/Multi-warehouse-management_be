@@ -1,5 +1,6 @@
 import { OrderService } from './order.service';
 import { ListOrdersQueryDto } from './order.dto';
+import { IN_FLIGHT_FULFILLMENT_WHERE } from './order-completion';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
@@ -71,9 +72,13 @@ describe('OrderService.buildListWhere — trạng thái', () => {
       status: 'closed',
       fulfillment_status: 'unfulfilled',
     });
+    // Nhánh `fulfilled` loại đơn còn kiện đang trên đường (xem order-completion.ts)
     expect(where.OR).toEqual([
       { status: 'closed' },
-      { fulfillmentStatus: 'fulfilled' },
+      {
+        fulfillmentStatus: 'fulfilled',
+        fulfillments: { none: IN_FLIGHT_FULFILLMENT_WHERE },
+      },
     ]);
     expect(andClauses(where).length).toBe(1);
   });
@@ -91,6 +96,41 @@ describe('OrderService.buildListWhere — trạng thái', () => {
         some: { shipmentStatus: { in: ['delivering', 'delivered'] } },
       },
     });
+  });
+});
+
+describe('OrderService.buildListWhere — hàng đợi xử lý đơn', () => {
+  const queueScope = {
+    status: 'open',
+    fulfillmentStatus: null,
+    deliveredOn: null,
+    returnStatus: 'no_return',
+    fulfillments: { none: { closedAt: null } },
+  };
+
+  it('chờ xác nhận = đơn mở, chưa xác nhận, chưa có kiện hàng', async () => {
+    const where = await build({ stage: 'awaiting_confirmation' });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: null });
+  });
+
+  it('chờ xử lý = đã xác nhận nhưng chưa có kiện hàng', async () => {
+    const where = await build({ stage: 'awaiting_processing' });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: { not: null } });
+  });
+
+  it('hàng đợi thắng `status` và kết hợp được với đủ/thiếu hàng', async () => {
+    const where = await build({
+      stage: 'awaiting_processing',
+      status: 'cancelled',
+      stock_status: 'thieu_hang',
+    });
+    expect(where).toMatchObject({ ...queueScope, confirmedOn: { not: null } });
+  });
+
+  it('giá trị lạ thì bỏ qua, không thu hẹp danh sách', async () => {
+    const where = await build({ stage: 'khong_ton_tai' });
+    expect(where.confirmedOn).toBeUndefined();
+    expect(where.status).toBeUndefined();
   });
 });
 

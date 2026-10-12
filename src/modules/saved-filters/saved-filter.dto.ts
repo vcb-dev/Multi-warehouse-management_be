@@ -15,6 +15,7 @@ export const SAVED_FILTER_RESOURCES = [
   'inventory',
   'products',
   'shipments',
+  'packages',
 ] as const;
 
 export type SavedFilterResource = (typeof SAVED_FILTER_RESOURCES)[number];

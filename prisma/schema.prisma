@@ -135,6 +135,15 @@ enum OrderReturnStatus {
   returned
 }
 
+/// Trạng thái của PHIẾU trả hàng (Sapo "Trạng thái đơn trả hàng"): Đang xử lý /
+/// Hoàn thành / Đã hủy. Khác `OrderReturnStatus` — cái đó là trạng thái trả hàng
+/// tổng hợp trên ĐƠN.
+enum OrderReturnDocStatus {
+  in_progress
+  completed
+  cancelled
+}
+
 /// Sapo `refund_line_item.restock_type` — vì sao dòng hàng này rời/không rời kho
 enum RestockType {
   /// Huỷ đơn (hàng chưa từng ra khỏi kho)
@@ -352,6 +361,8 @@ model User {
   ordersCreated          Order[]                     @relation("OrderCreatedBy")
   ordersAssigned         Order[]                     @relation("OrderAssignedTo")
   orderReturns           OrderReturn[]               @relation("OrderReturnCreatedBy")
+  orderReturnsReceived   OrderReturn[]               @relation("OrderReturnReceivedBy")
+  orderReturnsRefunded   OrderReturn[]               @relation("OrderReturnRefundedBy")
   orderRefunds           OrderRefund[]               @relation("OrderRefundCreatedBy")
   draftOrders            DraftOrder[]                @relation("DraftOrderCreatedBy")
   vouchersCreated        Voucher[]                   @relation("VoucherCreatedBy")
@@ -1665,6 +1676,10 @@ model Fulfillment {
   shippingFee         Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
   feePayer            ShippingFeePayer @default(shop_tra) @map("fee_payer")
   codAmount           Decimal          @default(0) @map("cod_amount") @db.Decimal(18, 2)
+  /// Đối soát COD với hãng (Sapo "Trạng thái đối soát"): NULL = chưa đối soát.
+  /// Lúc đối soát, tiền thu hộ được ghi nhận là thanh toán của đơn.
+  codReconciledOn     DateTime?        @map("cod_reconciled_on")
+  codReconciledById   BigInt?          @map("cod_reconciled_by")
   weightGrams         Int?             @map("weight_grams")
   lengthCm            Int?             @map("length_cm")
   widthCm             Int?             @map("width_cm")
@@ -1954,21 +1969,68 @@ model DraftOrderItem {
 /// Phiếu trả hàng — tương ứng `return_id` mà Sapo gắn lên refund.
 /// Tiền hoàn và việc nhập lại kho nằm ở `OrderRefund` (giống Sapo).
 model OrderReturn {
-  id          BigInt   @id @default(autoincrement())
-  sapoId      BigInt?  @unique @map("sapo_id")
-  code        String   @unique
-  orderId     BigInt   @map("order_id")
-  reason      String?  @db.Text
-  createdById BigInt   @map("created_by")
-  createdOn   DateTime @default(now()) @map("created_on")
+  id             BigInt               @id @default(autoincrement())
+  sapoId         BigInt?              @unique @map("sapo_id")
+  code           String               @unique
+  orderId        BigInt               @map("order_id")
+  /// Phiếu là một QUY TRÌNH như Sapo: tạo → nhận hàng → hoàn tiền → hoàn thành.
+  status         OrderReturnDocStatus @default(in_progress)
+  /// Lý do chọn từ danh sách (customer_changed_mind, not_as_described...);
+  /// `reason` giữ phần ghi chú tự do và lý do nguyên văn của phiếu từ sàn/Sapo.
+  reasonCode     String?              @map("reason_code")
+  reason         String?              @db.Text
+  /// Số tiền DỰ KIẾN hoàn cho khách, chốt lúc lập phiếu
+  refundAmount   Decimal              @default(0) @map("refund_amount") @db.Decimal(18, 2)
+  /// Số đã thực hoàn (phiếu chi hoặc trừ công nợ)
+  refundedAmount Decimal              @default(0) @map("refunded_amount") @db.Decimal(18, 2)
+  refundedOn     DateTime?            @map("refunded_on")
+  refundedById   BigInt?              @map("refunded_by")
+  /// Nhận hàng trả về. `restocked` chỉ có nghĩa khi đã nhận: true = nhập lại kho.
+  receivedOn     DateTime?            @map("received_on")
+  receivedById   BigInt?              @map("received_by")
+  restocked      Boolean?
+  /// Vận chuyển hàng trả lại (khách tự gửi) — chỉ để tra cứu
+  trackingNumber String?              @map("tracking_number")
+  carrierName    String?              @map("carrier_name")
+  completedOn    DateTime?            @map("completed_on")
+  cancelledOn    DateTime?            @map("cancelled_on")
+  createdById    BigInt               @map("created_by")
+  createdOn      DateTime             @default(now()) @map("created_on")
 
-  order     Order         @relation(fields: [orderId], references: [id])
-  createdBy User          @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
-  refunds   OrderRefund[]
+  order      Order                 @relation(fields: [orderId], references: [id])
+  createdBy  User                  @relation("OrderReturnCreatedBy", fields: [createdById], references: [id])
+  receivedBy User?                 @relation("OrderReturnReceivedBy", fields: [receivedById], references: [id])
+  refundedBy User?                 @relation("OrderReturnRefundedBy", fields: [refundedById], references: [id])
+  refunds    OrderRefund[]
+  lineItems  OrderReturnLineItem[]
 
   @@index([orderId])
   @@index([createdOn])
+  @@index([status])
   @@map("order_returns")
+}
+
+/// Hàng khách yêu cầu trả, ghi lúc lập phiếu. Tách khỏi `order_refund_items`:
+/// dòng refund chỉ sinh ra khi hàng đã thật sự về (bước nhận hàng), còn phiếu
+/// đang chờ nhận vẫn phải biết nó gồm những gì.
+model OrderReturnLineItem {
+  id           BigInt  @id @default(autoincrement())
+  returnId     BigInt  @map("return_id")
+  orderItemId  BigInt? @map("order_item_id")
+  variantId    BigInt  @map("variant_id")
+  locationId   BigInt  @map("location_id")
+  productName  String  @map("product_name")
+  sku          String
+  variantTitle String? @map("variant_title")
+  quantity     Int
+  price        Decimal @db.Decimal(18, 2)
+  subtotal     Decimal @default(0) @db.Decimal(18, 2)
+
+  orderReturn OrderReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@index([variantId])
+  @@map("order_return_lines")
 }
 
 /// Sapo `order.refunds[]` — bản ghi hoàn tiền, dùng chung cho CẢ hai luồng:

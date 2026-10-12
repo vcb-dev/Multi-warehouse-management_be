@@ -18,7 +18,11 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 import { Public } from '../../common/decorators/roles.decorator';
 import { assertWebhookSecret } from '../../common/auth/webhook-secret';
 import { CarrierTicketService } from './carrier-ticket.service';
+import { CodReconciliationService } from './cod-reconciliation.service';
 import {
+  BulkMarkPrintedDto,
+  BulkReconcileCodDto,
+  BulkPackingStatusDto,
   CancelFulfillmentDto,
   CarrierWebhookDto,
   CreateCarrierTicketDto,
@@ -29,6 +33,7 @@ import {
   ReplyCarrierTicketDto,
   UpdatePackingStatusDto,
   UpdateShipmentStatusDto,
+  ListPackagesQueryDto,
   ListShipmentsQueryDto,
   ShipmentOverviewQueryDto,
   VtpWebhookDto,
@@ -42,6 +47,7 @@ export class FulfillmentsController {
   constructor(
     private fulfillments: FulfillmentService,
     private tickets: CarrierTicketService,
+    private codReconciliation: CodReconciliationService,
   ) {}
 
   @Post('packing')
@@ -54,6 +60,39 @@ export class FulfillmentsController {
   @RequirePermission('order:pack')
   pushShipment(@Body() dto: PushShipmentDto, @CurrentUser() user: AuthUser) {
     return this.fulfillments.pushShipment(dto, user);
+  }
+
+  // --- Màn "In & đóng gói" ---
+  // Hai route POST dưới phải khai TRƯỚC `:id/print`, nếu không route động sẽ
+  // bắt `packages/print` với id = "packages".
+
+  @Get('packages')
+  @RequirePermission('order:view')
+  listPackages(
+    @Query() query: ListPackagesQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.fulfillments.listPackages(query, user);
+  }
+
+  @Post('packages/print')
+  @HttpCode(200)
+  @RequirePermission('order:pack')
+  bulkMarkPrinted(
+    @Body() dto: BulkMarkPrintedDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.fulfillments.bulkMarkPrinted(dto, user);
+  }
+
+  @Post('packages/packing-status')
+  @HttpCode(200)
+  @RequirePermission('order:pack')
+  bulkUpdatePackingStatus(
+    @Body() dto: BulkPackingStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.fulfillments.bulkUpdatePackingStatus(dto, user);
   }
 
   @Put(':id/packing-status')
@@ -193,6 +232,17 @@ export class FulfillmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.fulfillments.getShipmentOverview(query, user);
+  }
+
+  /** Đối soát COD — ghi tiền thu hộ vào đơn nên đòi quyền cập nhật đơn. */
+  @Post('shipments/reconcile')
+  @HttpCode(200)
+  @RequirePermission('order:update')
+  reconcileCod(
+    @Body() dto: BulkReconcileCodDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.codReconciliation.reconcileMany(dto, user);
   }
 
   @Get('shipments')
