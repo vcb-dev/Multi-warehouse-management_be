@@ -10,6 +10,7 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { FulfillmentsModule } from '../src/modules/fulfillments/fulfillments.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { FulfillmentService } from '../src/modules/fulfillments/fulfillment.service';
+import { NotificationService } from '../src/modules/notifications/notification.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { adminAuth } from './helpers/auth';
@@ -104,7 +105,11 @@ describeIfDb('Hoàn hàng qua webhook VTP', () => {
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [PrismaModule, VouchersModule, OrdersModule, FulfillmentsModule],
-    }).compile();
+    })
+      // Không để test rải thông báo vào chuông của người dùng thật
+      .overrideProvider(NotificationService)
+      .useValue({ emit: jest.fn().mockResolvedValue(undefined) })
+      .compile();
     orders = module.get(OrderService);
     fulfillments = module.get(FulfillmentService);
     prisma = module.get(PrismaService);

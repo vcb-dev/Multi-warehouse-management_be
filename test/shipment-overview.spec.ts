@@ -8,10 +8,18 @@ import { VouchersModule } from '../src/modules/vouchers/vouchers.module';
 import { FulfillmentsModule } from '../src/modules/fulfillments/fulfillments.module';
 import { OrderService } from '../src/modules/orders/order.service';
 import { FulfillmentService } from '../src/modules/fulfillments/fulfillment.service';
+import { NotificationService } from '../src/modules/notifications/notification.service';
 import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { adminAuth } from './helpers/auth';
-import dayjs from 'dayjs';
+
+/** YYYY-MM-DD của hôm nay lùi `daysAgo` ngày, theo giờ máy chạy test. */
+function ymd(daysAgo = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 const describeIfDb =
   process.env.DATABASE_URL && process.env.RUN_INTEGRATION_TESTS === '1'
@@ -30,12 +38,14 @@ describeIfDb('getShipmentOverview', () => {
   let variantId: bigint;
   let productId: bigint;
   let providerId: bigint;
+  let customerId: bigint;
   let authUser: ReturnType<typeof adminAuth>;
 
   async function createConfirmedOrder(qty = 1) {
     const created = await orders.create(
       {
         location_id: locationId.toString(),
+        customer_id: customerId.toString(),
         items: [
           {
             variant_id: variantId.toString(),
@@ -83,14 +93,26 @@ describeIfDb('getShipmentOverview', () => {
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
       imports: [PrismaModule, VouchersModule, OrdersModule, FulfillmentsModule],
-    }).compile();
+    })
+      // Không để test rải thông báo vào chuông của người dùng thật
+      .overrideProvider(NotificationService)
+      .useValue({ emit: jest.fn().mockResolvedValue(undefined) })
+      .compile();
     orders = module.get(OrderService);
     fulfillments = module.get(FulfillmentService);
     prisma = module.get(PrismaService);
 
     const warehouse = await prisma.location.findFirstOrThrow();
     locationId = warehouse.id;
-    authUser = adminAuth({ locationIds: [locationId] });
+    // Đơn bắt buộc có khách hàng và người tạo có thật (FK) — dùng user sẵn có,
+    // khách thì tạo riêng để xoá được ở afterAll.
+    const actor = await prisma.user.findFirstOrThrow({
+      where: { active: true },
+    });
+    authUser = adminAuth({ userId: actor.id, locationIds: [locationId] });
+    customerId = (
+      await prisma.customer.create({ data: { firstName: `KH ${SKU}` } })
+    ).id;
 
     const product = await prisma.product.create({
       data: { name: `Overview ${SKU}`, alias: SKU.toLowerCase() },
@@ -145,6 +167,8 @@ describeIfDb('getShipmentOverview', () => {
       where: { entityType: 'order', entityId: { in: orderIds } },
     });
     await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
+    await prisma.customerLedgerEntry.deleteMany({ where: { customerId } });
+    await prisma.customer.delete({ where: { id: customerId } });
     await prisma.inventoryMovement.deleteMany({ where: { variantId } });
     await prisma.inventoryLevel.deleteMany({ where: { variantId } });
     await prisma.productVariant.delete({ where: { id: variantId } });
@@ -157,8 +181,8 @@ describeIfDb('getShipmentOverview', () => {
     const orderId = await createConfirmedOrder();
     await pushTestShipment(orderId);
 
-    const from = dayjs().subtract(6, 'day').format('YYYY-MM-DD');
-    const to = dayjs().format('YYYY-MM-DD');
+    const from = ymd(6);
+    const to = ymd();
     const overview = await fulfillments.getShipmentOverview(
       { from, to, location_id: locationId.toString() },
       authUser,
@@ -209,8 +233,8 @@ describeIfDb('getShipmentOverview', () => {
       authUser as never,
     );
 
-    const from = dayjs().subtract(6, 'day').format('YYYY-MM-DD');
-    const to = dayjs().format('YYYY-MM-DD');
+    const from = ymd(6);
+    const to = ymd();
     const overview = await fulfillments.getShipmentOverview(
       { from, to, location_id: locationId.toString() },
       authUser,
@@ -241,8 +265,8 @@ describeIfDb('getShipmentOverview', () => {
     const orderId = await createConfirmedOrder();
     await pushTestShipment(orderId);
 
-    const pastFrom = dayjs().subtract(30, 'day').format('YYYY-MM-DD');
-    const pastTo = dayjs().subtract(20, 'day').format('YYYY-MM-DD');
+    const pastFrom = ymd(30);
+    const pastTo = ymd(20);
 
     const overview = await fulfillments.getShipmentOverview(
       { from: pastFrom, to: pastTo, location_id: locationId.toString() },

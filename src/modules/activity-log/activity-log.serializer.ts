@@ -39,6 +39,7 @@ export const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   'fulfillment.print': 'In phiếu giao hàng',
   'fulfillment.unprint': 'Bỏ đánh dấu đã in phiếu giao hàng',
   'fulfillment.push': 'Đẩy vận chuyển',
+  'fulfillment.cod_reconcile': 'Đối soát COD',
   'fulfillment.picked_up': 'Đơn vị vận chuyển lấy hàng',
   'fulfillment.redeliver': 'Giao lại',
   'fulfillment.delivered': 'Giao hàng thành công',

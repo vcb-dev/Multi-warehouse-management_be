@@ -1676,6 +1676,10 @@ model Fulfillment {
   shippingFee         Decimal          @default(0) @map("shipping_fee") @db.Decimal(18, 2)
   feePayer            ShippingFeePayer @default(shop_tra) @map("fee_payer")
   codAmount           Decimal          @default(0) @map("cod_amount") @db.Decimal(18, 2)
+  /// Đối soát COD với hãng (Sapo "Trạng thái đối soát"): NULL = chưa đối soát.
+  /// Lúc đối soát, tiền thu hộ được ghi nhận là thanh toán của đơn.
+  codReconciledOn     DateTime?        @map("cod_reconciled_on")
+  codReconciledById   BigInt?          @map("cod_reconciled_by")
   weightGrams         Int?             @map("weight_grams")
   lengthCm            Int?             @map("length_cm")
   widthCm             Int?             @map("width_cm")

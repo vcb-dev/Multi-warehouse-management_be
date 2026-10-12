@@ -1,5 +1,6 @@
 import { OrderService } from './order.service';
 import { ListOrdersQueryDto } from './order.dto';
+import { IN_FLIGHT_FULFILLMENT_WHERE } from './order-completion';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 
 /**
@@ -71,9 +72,13 @@ describe('OrderService.buildListWhere — trạng thái', () => {
       status: 'closed',
       fulfillment_status: 'unfulfilled',
     });
+    // Nhánh `fulfilled` loại đơn còn kiện đang trên đường (xem order-completion.ts)
     expect(where.OR).toEqual([
       { status: 'closed' },
-      { fulfillmentStatus: 'fulfilled' },
+      {
+        fulfillmentStatus: 'fulfilled',
+        fulfillments: { none: IN_FLIGHT_FULFILLMENT_WHERE },
+      },
     ]);
     expect(andClauses(where).length).toBe(1);
   });

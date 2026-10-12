@@ -8,7 +8,6 @@ import {
   Post,
   Put,
   Query,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
@@ -19,8 +18,10 @@ import { RequirePermission } from '../../common/decorators/permissions.decorator
 import { Public } from '../../common/decorators/roles.decorator';
 import { assertWebhookSecret } from '../../common/auth/webhook-secret';
 import { CarrierTicketService } from './carrier-ticket.service';
+import { CodReconciliationService } from './cod-reconciliation.service';
 import {
   BulkMarkPrintedDto,
+  BulkReconcileCodDto,
   BulkPackingStatusDto,
   CancelFulfillmentDto,
   CarrierWebhookDto,
@@ -46,6 +47,7 @@ export class FulfillmentsController {
   constructor(
     private fulfillments: FulfillmentService,
     private tickets: CarrierTicketService,
+    private codReconciliation: CodReconciliationService,
   ) {}
 
   @Post('packing')
@@ -230,6 +232,17 @@ export class FulfillmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.fulfillments.getShipmentOverview(query, user);
+  }
+
+  /** Đối soát COD — ghi tiền thu hộ vào đơn nên đòi quyền cập nhật đơn. */
+  @Post('shipments/reconcile')
+  @HttpCode(200)
+  @RequirePermission('order:update')
+  reconcileCod(
+    @Body() dto: BulkReconcileCodDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.codReconciliation.reconcileMany(dto, user);
   }
 
   @Get('shipments')

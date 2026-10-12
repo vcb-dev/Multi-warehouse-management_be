@@ -440,6 +440,8 @@ export class ListShipmentsQueryDto {
   @IsOptional() @IsString() tags?: string;
   /** Đã in phiếu giao hàng hay chưa */
   @IsOptional() @IsString() printed?: string;
+  /** Đã đối soát COD hay chưa */
+  @IsOptional() @IsString() reconciled?: string;
 
   // --- Bốn mốc trong vòng đời vận đơn, mỗi mốc một trục riêng ---
   @IsOptional() @IsString() created_on_min?: string;
@@ -529,6 +531,14 @@ export class BulkPackingStatusDto {
 
   @IsIn([PackingStatus.packing, PackingStatus.packed])
   status!: PackingStatus;
+}
+
+export class BulkReconcileCodDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(BULK_PACKAGE_LIMIT)
+  @Matches(/^\d+$/, { each: true })
+  ids!: string[];
 }
 
 export class ShipmentOverviewQueryDto {

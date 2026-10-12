@@ -42,6 +42,10 @@ import { VoucherService } from '../vouchers/voucher.service';
 import { CustomerDebtService } from '../customers/customer-debt.service';
 import { generateOrderCode } from './order-code';
 import {
+  closeOrderIfDeliveredAndPaid,
+  IN_FLIGHT_FULFILLMENT_WHERE,
+} from './order-completion';
+import {
   PENDING_ORDER_WHERE,
   computeStockReady,
   orderStageWhere,
@@ -203,9 +207,14 @@ export class OrderService {
       // "Đã hoàn thành" thực tế = fulfillment_status='fulfilled' HOẶC
       // status='closed' — khớp guard ở order-return.service.ts, vì đa số
       // đơn đã giao thật (dữ liệu Sapo) vẫn ở status='open'.
+      // `fulfilled` nghĩa là "đã có kiện hàng" (theo Sapo), nên phải loại đơn còn
+      // kiện đang trên đường — nếu không đơn vừa đẩy vận chuyển đã hiện ở tab này.
       where.OR = [
         { status: OrderStatus.closed },
-        { fulfillmentStatus: OrderFulfillmentStatus.fulfilled },
+        {
+          fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+          fulfillments: { none: IN_FLIGHT_FULFILLMENT_WHERE },
+        },
       ];
     } else if (query.status) {
       where.status = query.status as OrderStatus;
@@ -856,6 +865,9 @@ export class OrderService {
         },
       });
 
+      // Thu đủ tiền một đơn đã giao xong ⇒ đơn hoàn thành (vd COD vừa đối soát).
+      if (reachedPaid) await closeOrderIfDeliveredAndPaid(tx, id);
+
       return result;
     });
 
@@ -1440,6 +1452,13 @@ export class OrderService {
     }
 
     if (action === 'complete') {
+      if (order.status === OrderStatus.closed) {
+        throw new BusinessException(
+          'INVALID_TRANSITION',
+          'Đơn hàng đã hoàn thành',
+          409,
+        );
+      }
       if (!isProcessingEquivalent) {
         throw new BusinessException(
           'INVALID_TRANSITION',

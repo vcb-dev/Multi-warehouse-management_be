@@ -4,6 +4,7 @@ import {
   InventoryBucket,
   MovementType,
   NotificationTopic,
+  OrderFinancialStatus,
   OrderFulfillmentStatus,
   OrderStatus,
   PackingStatus,
@@ -81,6 +82,21 @@ import {
 } from './packing-list';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
+
+/**
+ * `orders.fulfillment_status` theo Sapo: `fulfilled` ngay khi đơn CÓ KIỆN HÀNG,
+ * không phải khi giao xong. Đối chiếu ~72k vận đơn Sapo thật (bản sao lưu
+ * 14/09/2026): mọi đơn có vận đơn `pending`/`picked_up`/`delivering` đều đã là
+ * `fulfilled`. Trước đây app chỉ đặt lúc giao thành công, nên đơn đang trên
+ * đường giao vẫn bị đếm là "chưa xuất kho".
+ *
+ * Mỗi đơn chỉ có MỘT phiếu đang mở, nên huỷ phiếu là đơn hết kiện hàng. Hàng
+ * hoàn về (`returned`) thì giữ `fulfilled` — Sapo cũng vậy.
+ */
+const ORDER_HAS_PACKAGE = {
+  fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+} as const;
+const ORDER_HAS_NO_PACKAGE = { fulfillmentStatus: null } as const;
 
 type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
@@ -295,6 +311,11 @@ export class FulfillmentService {
       where.deliveryNotePrintedAt = printed ? { not: null } : null;
     }
 
+    const reconciled = parseBool(query.reconciled);
+    if (reconciled !== undefined) {
+      where.codReconciledOn = reconciled ? { not: null } : null;
+    }
+
     // Nguồn đơn và tag nằm trên đơn hàng gốc, không nằm trên vận đơn.
     const sources = parseList(query.sources);
     if (sources) appendAnd(where, { order: { sourceName: { in: sources } } });
@@ -481,6 +502,10 @@ export class FulfillmentService {
         include: {
           packer: { select: { firstName: true, lastName: true, email: true } },
         },
+      });
+      await tx.order.update({
+        where: { id: order.id },
+        data: ORDER_HAS_PACKAGE,
       });
       await tx.activityLog.create({
         data: {
@@ -747,6 +772,11 @@ export class FulfillmentService {
       }
       const shipmentData = {
         shipmentStatus: ShipmentStatus.pending,
+        // Sapo `delivery_method`: hãng tích hợp API vs đối tác tự liên hệ ("Shipper ngoài")
+        deliveryMethod:
+          dto.shipping_type === ShippingProviderType.tich_hop
+            ? FulfillmentDeliveryMethod.external_service
+            : FulfillmentDeliveryMethod.external_shipper,
         shippingType: dto.shipping_type,
         providerId: provider.id,
         serviceCode: dto.service_code ?? null,
@@ -799,14 +829,19 @@ export class FulfillmentService {
               name: await generateFulfillmentCode(tx, order.id, order.name),
               orderId: order.id,
               createdById: user.userId,
+              // Đẩy thẳng không qua yêu cầu đóng gói vẫn là một kiện "chờ đóng gói"
+              // như Sapo — để NULL thì màn In & đóng gói không chuyển trạng thái được.
+              packedStatus: PackingStatus.unknown,
               ...shipmentData,
             },
           });
 
-      // Đồng bộ cột "Dịch vụ vận chuyển" ở danh sách đơn
+      // Đồng bộ cột "Dịch vụ vận chuyển" ở danh sách đơn; có kiện hàng là đơn
+      // "đã xuất kho" theo Sapo (xem ORDER_HAS_PACKAGE).
       await tx.order.update({
         where: { id: order.id },
         data: {
+          ...ORDER_HAS_PACKAGE,
           shippingMethod: serviceName
             ? `${provider.name} - ${serviceName}`
             : provider.name,
@@ -1218,13 +1253,17 @@ export class FulfillmentService {
           where: { id: f.id },
           data: { shipmentStatus: status, deliveredOn: now, closedAt: now },
         });
+        // Giao xong CHƯA phải hoàn thành: như Sapo, đơn chỉ hoàn thành khi vừa
+        // giao xong vừa thu đủ tiền. Đơn COD chưa đối soát vẫn mở, chờ thu tiền
+        // (`OrderService.pay` sẽ đóng đơn khi khoản cuối về).
+        const paid = f.order.financialStatus === OrderFinancialStatus.paid;
         await tx.order.update({
           where: { id: f.orderId },
           data: {
-            status: OrderStatus.closed,
-            closedOn: now,
-            completedOn: now,
-            fulfillmentStatus: OrderFulfillmentStatus.fulfilled,
+            ...ORDER_HAS_PACKAGE,
+            ...(paid
+              ? { status: OrderStatus.closed, closedOn: now, completedOn: now }
+              : {}),
           },
         });
         await this.logShipment(tx, f, 'fulfillment.delivered', user);
@@ -1330,6 +1369,10 @@ export class FulfillmentService {
             closedAt: now,
             cancelReason: 'Hủy bởi đối tác vận chuyển (webhook)',
           },
+        });
+        await tx.order.update({
+          where: { id: f.orderId },
+          data: ORDER_HAS_NO_PACKAGE,
         });
         await this.logShipment(tx, f, 'fulfillment.cancel', user);
         return;
@@ -1497,6 +1540,10 @@ export class FulfillmentService {
           closedAt: now,
           cancelReason: dto.reason,
         },
+      });
+      await tx.order.update({
+        where: { id: f.orderId },
+        data: ORDER_HAS_NO_PACKAGE,
       });
       await tx.activityLog.create({
         data: {

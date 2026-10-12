@@ -32,6 +32,7 @@ import {
 import { parseEnumList, parseIdList } from '../../common/query/filter-params';
 import { PrismaService } from '../../prisma/prisma.service';
 import { recomputeOrderRefundStatuses } from '../orders/order-refund-status';
+import { IN_FLIGHT_FULFILLMENT_WHERE } from '../orders/order-completion';
 import {
   isAppManagedReturn,
   returnDocumentInclude,
@@ -177,6 +178,18 @@ export class OrderReturnService {
       throw new BusinessException(
         'INVALID_TRANSITION',
         'Chỉ trả hàng trên đơn đã hoàn thành',
+        409,
+      );
+    }
+    // `fulfilled` chỉ nói đơn đã có kiện hàng — kiện còn trên đường thì khách
+    // chưa cầm hàng để mà trả.
+    const inFlight = await this.prisma.fulfillment.count({
+      where: { orderId, ...IN_FLIGHT_FULFILLMENT_WHERE },
+    });
+    if (inFlight) {
+      throw new BusinessException(
+        'INVALID_TRANSITION',
+        'Đơn đang giao hàng — chỉ trả hàng sau khi giao xong',
         409,
       );
     }
