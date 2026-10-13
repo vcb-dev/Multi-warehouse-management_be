@@ -115,6 +115,29 @@ export class PriceListService {
     };
   }
 
+  /**
+   * Mọi mức giá "có niêm yết" của một phiên bản: giá gốc và giá trong các bảng
+   * giá đang bật (theo chi nhánh, theo nhóm khách). Dùng để phân biệt "bán đúng
+   * giá" với "sửa giá khi bán" — người không có quyền `order:override_price`
+   * chỉ được dùng một trong các mức này.
+   */
+  async listedPrices(variantId: bigint): Promise<number[]> {
+    const [variant, items] = await Promise.all([
+      this.prisma.productVariant.findUnique({
+        where: { id: variantId },
+        select: { price: true },
+      }),
+      this.prisma.priceListItem.findMany({
+        where: { variantId, enabled: true },
+        select: { fixedPrice: true },
+      }),
+    ]);
+    return [
+      ...(variant ? [Number(variant.price)] : []),
+      ...items.map((i) => Number(i.fixedPrice)),
+    ];
+  }
+
   async resolveQuery(
     variantId: string,
     locationId?: string,
