@@ -11,9 +11,9 @@ import { UnauthorizedException } from '@nestjs/common';
  * Ném 401 thay vì để app chết lúc khởi động: thiếu secret của MỘT hãng không nên làm
  * sập toàn bộ API, chỉ cần đường webhook của hãng đó ngừng nhận.
  *
- * @param candidates Các vị trí secret có thể xuất hiện. Mỗi hãng đặt một kiểu — GHN
- *   dùng header riêng, ViettelPost thì tài liệu không nói rõ là header `Authorization`
- *   hay field `TOKEN` trong body, nên nhận cả hai và khớp một trong số đó là đủ.
+ * @param candidates Các vị trí secret có thể xuất hiện. Mỗi hãng đặt một kiểu — tài liệu
+ *   ViettelPost không nói rõ là header `Authorization` hay field `TOKEN` trong body, nên
+ *   nhận cả hai và khớp một trong số đó là đủ.
  */
 export function assertWebhookSecret(
   envKey: string,

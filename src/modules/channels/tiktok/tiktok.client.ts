@@ -25,7 +25,7 @@ export type TiktokTokenResult = NonNullable<TiktokTokenEnvelope['data']>;
 
 /**
  * Client HTTP cho TikTok Shop Auth API (Authorization overview, TikTok Shop Partner Center).
- * Dùng `fetch` có sẵn của Node — cùng cách `GhnClient` gọi API ngoài, không thêm dependency.
+ * Dùng `fetch` có sẵn của Node, không thêm dependency.
  */
 export class TiktokClient {
   private readonly logger = new Logger(TiktokClient.name);

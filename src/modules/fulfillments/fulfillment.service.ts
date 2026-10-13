@@ -52,7 +52,6 @@ import {
   CancelFulfillmentDto,
   CarrierWebhookDto,
   CreatePackingDto,
-  GhnWebhookDto,
   ListPackagesQueryDto,
   ListShipmentsQueryDto,
   PushShipmentDto,
@@ -66,7 +65,6 @@ import {
   serializeFulfillment,
 } from './fulfillment.serializer';
 import {
-  GHN_PROVIDER_CODE,
   ShippingProviderService,
   VTP_PROVIDER_CODE,
 } from './shipping-provider.service';
@@ -1437,7 +1435,7 @@ export class FulfillmentService {
     });
 
     // Đặt ở `applyShipmentStatus` (private) chứ không ở `updateShipmentStatus`: webhook
-    // của hãng vận chuyển (webhookGhn/webhookVtp/webhook) cũng đổ về đây, nên gắn một
+    // của hãng vận chuyển (webhookVtp/webhook) cũng đổ về đây, nên gắn một
     // chỗ là phủ được cả trạng thái do hãng tự báo về, không phải rải ra 3 nơi.
     //
     // Chỉ báo 3 mốc đáng quan tâm. picked_up/delivering là diễn biến bình thường của
@@ -1625,116 +1623,10 @@ export class FulfillmentService {
   }
 
   /**
-   * Webhook thật của GHN. GHN không ký request nên xác thực bằng cách đối chiếu `ShopID`
-   * với cấu hình kết nối đã lưu.
-   *
-   * Luôn trả 200 cho mọi tình huống "không có gì để làm" (mã lạ, trạng thái đã đúng, trạng
-   * thái GHN không map được): GHN retry 10 lần mỗi 5 giây khi nhận khác 200, sẽ thành bão
-   * request cho những ca vô hại.
-   */
-  async webhookGhn(dto: GhnWebhookDto) {
-    const provider = await this.prisma.shippingProvider.findUnique({
-      where: { code: GHN_PROVIDER_CODE },
-    });
-    if (!provider) {
-      this.logger.warn('Webhook GHN: chưa có shipping_provider code=ghn');
-      return { received: true };
-    }
-
-    const config = (provider.connectionConfig ?? {}) as CarrierConnectionConfig;
-    if (
-      dto.ShopID != null &&
-      config.shop_id &&
-      String(dto.ShopID) !== String(config.shop_id)
-    ) {
-      this.logger.warn(
-        `Webhook GHN: ShopID ${dto.ShopID} không khớp cấu hình kết nối, bỏ qua`,
-      );
-      return { received: true };
-    }
-
-    const orderCode = dto.OrderCode?.trim();
-    if (!orderCode) return { received: true };
-
-    const f = await this.prisma.fulfillment.findFirst({
-      where: { providerId: provider.id, trackingNumber: orderCode },
-      include: { order: { include: { items: true } } },
-      orderBy: { id: 'desc' },
-    });
-    if (!f) {
-      this.logger.warn(`Webhook GHN: không tìm thấy vận đơn ${orderCode}`);
-      return { received: true };
-    }
-
-    // GHN cân/tính lại kiện hàng — cập nhật số thật để đối soát COD khớp hoá đơn của hãng
-    await this.applyGhnMeasurements(f.id, dto);
-
-    if (dto.Type && dto.Type !== 'Switch_status') return { received: true };
-
-    const externalStatus = dto.Status ?? '';
-    const ghnAdapter = this.providers.ghnAdapter;
-
-    if (ghnAdapter.isCancelStatus(externalStatus)) {
-      if (f.shipmentStatus === ShipmentStatus.pending && !f.closedAt) {
-        try {
-          const user = await this.systemUser();
-          await this.cancel(f.id, { reason: 'GHN cancel' }, user);
-        } catch (e) {
-          // Cùng lý do với vòng `pathTo` bên dưới: nuốt lỗi nghiệp vụ và ghi log để
-          // xử lý tay, đừng để GHN retry 10 lần/5 giây vì một ca hủy không áp được.
-          if (e instanceof BusinessException) {
-            this.logger.warn(
-              `Webhook GHN ${orderCode}: hủy vận đơn bị chặn (${e.message})`,
-            );
-          } else {
-            throw e;
-          }
-        }
-      }
-      return { received: true };
-    }
-
-    const status = ghnAdapter.mapWebhookStatus(externalStatus);
-    if (!status) {
-      this.logger.log(
-        `Webhook GHN ${orderCode}: trạng thái "${externalStatus}" chưa map, bỏ qua`,
-      );
-      return { received: true };
-    }
-    if (status === f.shipmentStatus || !f.shipmentStatus) {
-      return { received: true };
-    }
-
-    await this.walkShipmentPath(f, status, `Webhook GHN ${orderCode}`);
-    return { received: true };
-  }
-
-  /** `Update_weight`/`Update_cod`/`Update_fee` của GHN → cột tương ứng trên fulfillment. */
-  private async applyGhnMeasurements(id: bigint, dto: GhnWebhookDto) {
-    const data: Prisma.FulfillmentUpdateInput = {};
-    if (dto.ConvertedWeight != null && dto.ConvertedWeight > 0) {
-      data.weightGrams = Math.round(dto.ConvertedWeight);
-    }
-    if (dto.CODAmount != null) data.codAmount = dto.CODAmount;
-    if (dto.TotalFee != null) data.shippingFee = dto.TotalFee;
-    if (dto.Reason || dto.ReasonCode || dto.Warehouse) {
-      // Sapo `abnormal` — nơi dành cho ghi chú bất thường của vận đơn
-      data.abnormal = {
-        reason: dto.Reason ?? null,
-        reason_code: dto.ReasonCode ?? null,
-        warehouse: dto.Warehouse ?? null,
-        at: dto.Time ?? new Date().toISOString(),
-      };
-    }
-    if (Object.keys(data).length === 0) return;
-    await this.prisma.fulfillment.update({ where: { id }, data });
-  }
-
-  /**
-   * Webhook thật của ViettelPost. Payload bọc trong `DATA` (khác GHN phẳng), `ORDER_STATUS` là
+   * Webhook thật của ViettelPost. Payload bọc trong `DATA`, `ORDER_STATUS` là
    * số (mục 8 tài liệu). Luôn trả `{ received: true }` cho mọi tình huống "không có gì để làm"
    * — VTP đẩy hành trình tuần tự và chỉ dừng khi nhận HTTP 200, kể cả hành trình trùng/thừa/sai
-   * thứ tự/đơn lạ sẽ gây bão request nếu trả khác 200 (cùng lý do với `webhookGhn`).
+   * thứ tự/đơn lạ sẽ gây bão request nếu trả khác 200.
    */
   async webhookVtp(dto: VtpWebhookDto) {
     const provider = await this.prisma.shippingProvider.findUnique({
@@ -1822,7 +1714,7 @@ export class FulfillmentService {
    * "đang giao" thì vẫn phải qua `returning` rồi mới nhập kho ở `returned`.
    *
    * Không tới được (webhook sai thứ tự) hoặc state machine chặn → chỉ ghi log. Hãng retry
-   * dồn dập khi nhận khác 200 (GHN 10 lần/5s, VTP 5 lần), nên tuyệt đối không ném lỗi nghiệp vụ.
+   * dồn dập khi nhận khác 200 (VTP 5 lần), nên tuyệt đối không ném lỗi nghiệp vụ.
    */
   private async walkShipmentPath(
     f: FulfillmentWithOrder,

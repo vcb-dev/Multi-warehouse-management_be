@@ -57,7 +57,7 @@ const WEBHOOK_STATUS_MAP: Record<string, ShipmentStatus> = {
   '503': ShipmentStatus.cancelled, // Hủy - theo yêu cầu khách hàng
 };
 
-/** Bỏ dấu + hạ chữ thường + bỏ tiền tố hành chính — đủ dùng cho khớp tên 34 Tỉnh/TP, không cần bộ khớp nhiều tầng như GHN (quận/huyện/xã). */
+/** Bỏ dấu + hạ chữ thường + bỏ tiền tố hành chính — đủ dùng cho khớp tên 34 Tỉnh/TP, không cần bộ khớp nhiều tầng (quận/huyện/xã). */
 function normalizeProvinceName(s: string): string {
   return s
     .normalize('NFD')
@@ -81,7 +81,7 @@ function totalQuantity(items: { quantity: number }[]) {
 }
 
 /**
- * `ORDER_PAYMENT` VTP không tương ứng "ai trả phí ship" như `payment_type_id` của GHN — đây là
+ * `ORDER_PAYMENT` VTP không tương ứng "ai trả phí ship" — đây là
  * loại thu hộ (COD): thu hàng, thu cước, cả hai, hay không thu gì.
  */
 function pickOrderPayment(
@@ -98,7 +98,7 @@ function pickOrderPayment(
 export class VtpAdapter implements CarrierAdapter {
   private readonly logger = new Logger(VtpAdapter.name);
 
-  /** Cache token phiên theo "tham số bí mật" — trong bộ nhớ process, không ghi DB (giống cache của GhnLocationResolver). */
+  /** Cache token phiên theo "tham số bí mật" — trong bộ nhớ process, không ghi DB. */
   private readonly sessions = new Map<
     string,
     { creds: VtpCredentials; expiresAt: number }
@@ -214,7 +214,7 @@ export class VtpAdapter implements CarrierAdapter {
 
     return {
       trackingNumber: created.ORDER_NUMBER,
-      // VTP không có trang tra cứu công khai đơn giản theo mã như GHN — để trống, bổ sung sau nếu cần (mục "in vận đơn").
+      // VTP không có trang tra cứu công khai đơn giản theo mã — để trống, bổ sung sau nếu cần (mục "in vận đơn").
       trackingUrl: null,
       carrier: VTP_CARRIER,
       carrierName: VTP_CARRIER_NAME,
@@ -242,7 +242,7 @@ export class VtpAdapter implements CarrierAdapter {
 
   /**
    * Chọn `MA_DV_CHINH` cho tuyến. Không có quy ước tên dịch vụ cố định giữa các hợp đồng VTP
-   * (khác GHN luôn có "Chuẩn"/"Nhanh") nên dùng heuristic theo giá: `serviceCode==='fast'` lấy
+   * (không có sẵn cặp "Chuẩn"/"Nhanh") nên dùng heuristic theo giá: `serviceCode==='fast'` lấy
    * dịch vụ đắt nhất (thường là hỏa tốc), mặc định lấy rẻ nhất. Cần đối chiếu lại với danh sách
    * dịch vụ thật của tài khoản dev khi test (Phase E).
    */

@@ -59,7 +59,7 @@ describe('cho đi', () => {
   });
 
   it('webhook đối tác: POST không cookie, không header, origin lạ', () => {
-    // GHN/TikTok/Shopee gọi từ server của họ. Chặn nhầm nhóm này là đơn hàng ngừng cập
+    // ViettelPost/TikTok/Shopee gọi từ server của họ. Chặn nhầm nhóm này là đơn hàng ngừng cập
     // nhật trạng thái mà không ai thấy lỗi ở đâu — chúng tự xác thực bằng secret riêng.
     expect(
       run({ method: 'POST', headers: { origin: 'https://partner.test' } }),

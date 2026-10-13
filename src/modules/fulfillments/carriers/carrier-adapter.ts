@@ -18,15 +18,6 @@ export type CarrierQuote = {
 /** Cấu hình kết nối lưu ở `shipping_providers.connection_config`. */
 export type CarrierConnectionConfig = {
   token?: string | null;
-  shop_id?: string | null;
-  /** GHN `client_id` — cần khi đăng ký webhook với hãng. */
-  client_id?: string | null;
-  // Địa chỉ lấy hàng đã đăng ký ở phía hãng (tự lấy khi kết nối)
-  from_name?: string | null;
-  from_phone?: string | null;
-  from_address?: string | null;
-  from_district_id?: number | null;
-  from_ward_code?: string | null;
 };
 
 /** Đơn hàng cần đẩy sang hãng — đã gom sẵn ở service, adapter không truy DB. */
@@ -48,7 +39,7 @@ export type CarrierShipmentInput = {
   originProvince: string | null;
   codAmount: number;
   insuranceValue: number;
-  /** Ai trả phí vận chuyển — GHN map sang `payment_type_id`. */
+  /** Ai trả phí vận chuyển. */
   feePayer: ShippingFeePayer;
   weightGrams: number;
   lengthCm: number | null;
@@ -148,7 +139,7 @@ export function shipmentPathTo(
 
 /**
  * Adapter cho từng hãng vận chuyển. `ManualAdapter` là mặc định (báo giá từ
- * services_config, trạng thái cập nhật thủ công); hãng có API thật (GHN) cài thêm
+ * services_config, trạng thái cập nhật thủ công); hãng có API thật (ViettelPost) cài thêm
  * `createShipment`/`cancelShipment`.
  */
 export interface CarrierAdapter {

@@ -155,7 +155,7 @@ export function resolveShopeeHost(): string {
 
 /**
  * Client HTTP Shopee Open Platform v2 — Authorization overview (open.shopee.com).
- * Dùng `fetch` + HMAC-SHA256 có sẵn, cùng pattern `TiktokClient` / `GhnClient`.
+ * Dùng `fetch` + HMAC-SHA256 có sẵn, cùng pattern `TiktokClient`.
  * Các API Shopee Open Platform v2: https://open.shopee.com/documents/v2/index.html
  */
 export class ShopeeClient {
