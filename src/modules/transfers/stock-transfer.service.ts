@@ -23,6 +23,7 @@ import {
   UpdateStockTransferDto,
 } from './stock-transfer.dto';
 import { serializeStockTransfer } from './stock-transfer.serializer';
+import { variantImageSelect } from '../../common/utils/variant-image';
 
 /** Khớp @RequirePermission của các endpoint đọc trong stock-transfer.controller. */
 const READ_PERMISSIONS = ['inventory:transfer', 'inventory:view'];
@@ -30,9 +31,7 @@ const READ_PERMISSIONS = ['inventory:transfer', 'inventory:view'];
 const stnInclude = {
   items: {
     include: {
-      variant: {
-        select: { sku: true, cost: true, product: { select: { name: true } } },
-      },
+      variant: { select: { sku: true, cost: true, ...variantImageSelect } },
     },
   },
   fromLocation: { select: { code: true, name: true } },

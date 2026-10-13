@@ -8,10 +8,17 @@ import {
   PurchaseReturnItem,
 } from '@prisma/client';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import { variantImageUrl } from '../../common/utils/variant-image';
+
+type VariantForLine = {
+  sku: string;
+  imageUrl?: string | null;
+  product?: { name: string; imageUrl?: string | null };
+};
 
 type PoWithItems = PurchaseOrder & {
   items: (PurchaseOrderItem & {
-    variant?: { sku: string; product?: { name: string } };
+    variant?: VariantForLine;
   })[];
   supplier?: { code: string; name: string };
   location?: { code: string | null; name: string };
@@ -19,7 +26,7 @@ type PoWithItems = PurchaseOrder & {
 
 type ReiWithItems = GoodsReceipt & {
   items: (GoodsReceiptItem & {
-    variant?: { sku: string };
+    variant?: VariantForLine;
     purchaseOrder?: { code: string } | null;
   })[];
   supplier?: { code: string; name: string };
@@ -54,6 +61,7 @@ export function serializePurchaseOrder(po: PoWithItems) {
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
       product_name: item.variant?.product?.name,
+      image_url: variantImageUrl(item.variant),
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
       received_quantity: item.receivedQuantity,
@@ -97,6 +105,8 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
+      product_name: item.variant?.product?.name,
+      image_url: variantImageUrl(item.variant),
       purchase_order_id: item.purchaseOrderId?.toString() ?? null,
       purchase_order_code: item.purchaseOrder?.code ?? null,
       quantity: item.quantity,
@@ -126,7 +136,7 @@ export const PAYMENT_STATUS_LABELS: Record<string, string> = {
 
 type PvnWithRelations = PurchaseReturn & {
   items: (PurchaseReturnItem & {
-    variant?: { sku: string };
+    variant?: VariantForLine;
   })[];
   supplier?: { code: string; name: string };
   location?: { code: string | null; name: string };
@@ -160,6 +170,8 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
       id: item.id.toString(),
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
+      product_name: item.variant?.product?.name,
+      image_url: variantImageUrl(item.variant),
       quantity: item.quantity,
       unit_price: item.unitPrice.toString(),
     })),

@@ -1,12 +1,14 @@
 import { Prisma, StockTransfer, StockTransferItem } from '@prisma/client';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import { variantImageUrl } from '../../common/utils/variant-image';
 
 type StnWithRelations = StockTransfer & {
   items: (StockTransferItem & {
     variant?: {
       sku: string;
       cost?: Prisma.Decimal;
-      product?: { name: string };
+      imageUrl?: string | null;
+      product?: { name: string; imageUrl?: string | null };
     };
   })[];
   fromLocation?: { code: string | null; name: string };
@@ -49,6 +51,7 @@ export function serializeStockTransfer(stn: StnWithRelations) {
       variant_id: item.variantId.toString(),
       sku: item.variant?.sku,
       product_name: item.variant?.product?.name,
+      image_url: variantImageUrl(item.variant),
       cost: item.variant?.cost?.toString(),
       quantity: item.quantity,
     })),

@@ -21,11 +21,12 @@ import {
   ListPurchaseReturnsQueryDto,
 } from './purchasing.dto';
 import { serializePurchaseReturn } from './purchasing.serializer';
+import { variantImageSelect } from '../../common/utils/variant-image';
 
 const pvnInclude = {
   items: {
     include: {
-      variant: { select: { sku: true } },
+      variant: { select: { sku: true, ...variantImageSelect } },
     },
   },
   supplier: { select: { code: true, name: true } },
