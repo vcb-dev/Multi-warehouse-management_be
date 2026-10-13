@@ -80,6 +80,7 @@ import {
   requestedLocationIds,
   serializePackingListItem,
 } from './packing-list';
+import { KeyedSerialQueue } from '../../common/utils/keyed-serial-queue';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
 
@@ -107,6 +108,15 @@ type FulfillmentWithOrder = Prisma.FulfillmentGetPayload<{
 @Injectable()
 export class FulfillmentService {
   private readonly logger = new Logger(FulfillmentService.name);
+
+  /** Hành trình VTP đã nhận (đã trả 200) đang chờ xử lý, xếp hàng theo mã vận đơn. */
+  private readonly vtpWebhookQueue = new KeyedSerialQueue((key, err) =>
+    this.logger.error(
+      `Webhook VTP ${key}: xử lý nền thất bại — ${
+        err instanceof Error ? (err.stack ?? err.message) : String(err)
+      }`,
+    ),
+  );
 
   constructor(
     private prisma: PrismaService,
@@ -1736,6 +1746,24 @@ export class FulfillmentService {
    * — VTP đẩy hành trình tuần tự và chỉ dừng khi nhận HTTP 200, kể cả hành trình trùng/thừa/sai
    * thứ tự/đơn lạ sẽ gây bão request nếu trả khác 200 (cùng lý do với `webhookGhn`).
    */
+  /**
+   * Nhận hành trình VTP rồi xử lý ở nền, để controller trả 200 ngay: VTP đòi phản hồi dưới
+   * 1 giây, mà `webhookVtp` phải tra DB vài lượt (đo thật trên production: 0,2–1,2 giây chỉ
+   * riêng phần xử lý) — quá hạn là VTP gửi lại tới 5 lần cho cùng một bản ghi.
+   *
+   * Xếp hàng theo mã vận đơn vì VTP đẩy tuần tự và chờ 200 mới gửi bản kế; trả lời sớm thì
+   * bản kế có thể tới khi bản trước chưa xong, hai lượt cùng đụng tồn kho của một vận đơn.
+   * Đánh đổi: tiến trình chết trước khi xử lý xong là mất hành trình đó (VTP đã nhận 200 nên
+   * không gửi lại) — lấy lại bằng "Đồng bộ hành trình" trên cổng đối tác VTP.
+   */
+  enqueueVtpWebhook(dto: VtpWebhookDto): void {
+    const orderNumber =
+      typeof dto.DATA?.ORDER_NUMBER === 'string'
+        ? dto.DATA.ORDER_NUMBER.trim()
+        : '';
+    void this.vtpWebhookQueue.push(orderNumber, () => this.webhookVtp(dto));
+  }
+
   async webhookVtp(dto: VtpWebhookDto) {
     const provider = await this.prisma.shippingProvider.findUnique({
       where: { code: VTP_PROVIDER_CODE },
