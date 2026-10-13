@@ -190,7 +190,7 @@ describeIfDb('Quickstart 005 KC1–KC6 (integration)', () => {
       headers[k] = v;
     };
 
-    await exporter.export({}, res as unknown as Response);
+    await exporter.export({}, authUser(), res as unknown as Response);
 
     expect(headers['Content-Disposition']).toContain('san-pham');
     expect(Buffer.concat(chunks).length).toBeGreaterThan(100);

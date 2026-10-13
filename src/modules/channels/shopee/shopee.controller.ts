@@ -72,7 +72,7 @@ export class ShopeeController {
 
   /** Kéo đơn từ Shopee Open Platform (sandbox/production theo SHOPEE_ENV). */
   @Post('sync')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   syncShopee(
     @CurrentUser() user: AuthUser,
@@ -83,7 +83,7 @@ export class ShopeeController {
 
   /** Link ủy quyền shop Shopee — mở trong trình duyệt (seller đăng nhập & đồng ý). */
   @Get('authorize-url')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   getShopeeAuthorizeUrl() {
     return { url: this.shopeeAuth.getAuthorizeUrl() };

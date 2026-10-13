@@ -11,7 +11,7 @@ export class VoucherController {
   constructor(private vouchers: VoucherService) {}
 
   @Get()
-  @RequirePermission('report:view', 'purchasing:manage')
+  @RequirePermission('voucher:view')
   list(@Query() query: ListVouchersQueryDto) {
     return this.vouchers.list(query);
   }

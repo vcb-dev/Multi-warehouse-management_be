@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
+import { withoutCostColumns } from '../../common/auth/sensitive-fields';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   EXPORT_ROW_LIMIT,
   ExportField,
@@ -209,17 +211,24 @@ export class ProductExportService {
   ) {}
 
   /** Danh sách trường cho dialog "Tùy chọn trường dữ liệu xuất" */
-  fields() {
-    return { data: describeFields(PRODUCT_FIELDS) };
+  fields(user: AuthUser) {
+    return { data: describeFields(withoutCostColumns(PRODUCT_FIELDS, user)) };
   }
 
-  async export(query: ExportProductsQueryDto, res: Response): Promise<void> {
+  async export(
+    query: ExportProductsQueryDto,
+    user: AuthUser,
+    res: Response,
+  ): Promise<void> {
     const where = await this.buildExportWhere(query);
 
     await streamXlsx(res, {
       filename: exportFilename('san-pham'),
       sheetName: 'San pham',
-      fields: resolveFields(PRODUCT_FIELDS, query.fields),
+      fields: resolveFields(
+        withoutCostColumns(PRODUCT_FIELDS, user),
+        query.fields,
+      ),
       batches: this.productRows(where),
     });
   }

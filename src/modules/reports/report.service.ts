@@ -5,6 +5,14 @@ import { assertLocationAccess, isAdminUser } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  canViewCost,
+  canViewProfit,
+  COST_KEYS,
+  PROFIT_KEYS,
+  redactKeys,
+  withoutCostColumns,
+} from '../../common/auth/sensitive-fields';
 import { getReport, reportCatalog } from './report-registry';
 import {
   DashboardOverviewQueryDto,
@@ -25,6 +33,9 @@ import {
   ReportRow,
 } from './report.types';
 
+/** Nhóm báo cáo gắn với quyền `report:view_profit`. */
+const PROFIT_REPORT_GROUP = 'loi_nhuan';
+
 const DEFAULT_PAGE_SIZE = 20;
 const DEFAULT_RANGE_DAYS = 30;
 const DEFAULT_TOP_LIMIT = 10;
@@ -38,13 +49,18 @@ const EXPORT_LIMIT = 100_000;
 export class ReportService {
   constructor(private prisma: PrismaService) {}
 
-  catalog() {
-    return { data: reportCatalog() };
+  catalog(user: AuthUser) {
+    // Nhóm Lợi nhuận là quyền riêng (Sapo: `total_profit_reports`) — người không
+    // có quyền không nên thấy cả tên báo cáo trong thư viện.
+    const groups = reportCatalog().filter(
+      (g) => g.group !== PROFIT_REPORT_GROUP || canViewProfit(user),
+    );
+    return { data: groups };
   }
 
   async run(id: string, query: RunReportQueryDto, user: AuthUser) {
     const { def, ctx } = await this.prepare(id, query, user);
-    const result = await def.run(ctx);
+    const result = this.hideCost(await def.run(ctx), user);
 
     return {
       report: {
@@ -53,7 +69,7 @@ export class ReportService {
         description: def.description,
         group: def.group,
         filters: def.filters,
-        columns: def.columns,
+        columns: withoutCostColumns(def.columns, user),
         chart: def.chart ?? null,
         note: def.note ?? null,
       },
@@ -137,13 +153,17 @@ export class ReportService {
       runDashboardSales(params),
     ]);
 
+    // Trang Tổng quan trộn cả lợi nhuận và giá trị tồn (tính từ giá vốn) vào
+    // cùng một response — che theo từng quyền thay vì chặn cả trang.
+    let body = { ...result, ...sales };
+    if (!canViewProfit(user)) body = redactKeys(body, PROFIT_KEYS);
+    if (!canViewCost(user)) body = redactKeys(body, COST_KEYS);
     return {
       filters: {
         location_id: query.location_id ?? null,
         channel: query.channel ?? null,
       },
-      ...result,
-      ...sales,
+      ...body,
     };
   }
 
@@ -177,7 +197,12 @@ export class ReportService {
   }
 
   async exportExcel(id: string, query: RunReportQueryDto, user: AuthUser) {
-    const { def, ctx } = await this.prepare(id, query, user);
+    const { def: fullDef, ctx } = await this.prepare(id, query, user);
+    // File xuất chỉ gồm những cột người này được xem trên màn hình
+    const def = {
+      ...fullDef,
+      columns: withoutCostColumns(fullDef.columns, user),
+    };
     const result = await def.run({ ...ctx, all: true });
     if (result.rows.length > EXPORT_LIMIT) {
       throw new BusinessException(
@@ -229,6 +254,10 @@ export class ReportService {
       .map((s) => {
         const def = getReport(s.reportKey);
         if (!def) return null;
+        // Ghim từ lúc còn quyền, nay đã bị thu quyền lợi nhuận
+        if (def.group === PROFIT_REPORT_GROUP && !canViewProfit(user)) {
+          return null;
+        }
         return {
           id: s.id.toString(),
           report_key: s.reportKey,
@@ -244,7 +273,9 @@ export class ReportService {
   }
 
   async pin(id: string, dto: PinReportDto, user: AuthUser) {
-    if (!getReport(id)) throw new NotFoundException('Không tìm thấy báo cáo');
+    const def = getReport(id);
+    if (!def) throw new NotFoundException('Không tìm thấy báo cáo');
+    this.assertCanView(def, user);
     const filters = (dto.filters ?? {}) as Prisma.InputJsonValue;
     await this.prisma.savedReport.upsert({
       where: { userId_reportKey: { userId: user.userId, reportKey: id } },
@@ -261,6 +292,30 @@ export class ReportService {
     return this.listPinned(user);
   }
 
+  /** Báo cáo nhóm Lợi nhuận đòi thêm quyền `report:view_profit`. */
+  private assertCanView(def: ReportDef, user: AuthUser) {
+    if (def.group === PROFIT_REPORT_GROUP && !canViewProfit(user)) {
+      throw new BusinessException(
+        'FORBIDDEN',
+        'Bạn không có quyền xem báo cáo lợi nhuận',
+        403,
+      );
+    }
+  }
+
+  /** Che giá vốn trong dòng dữ liệu và dòng tổng của báo cáo. */
+  private hideCost<T extends { rows: ReportRow[]; summary: ReportRow }>(
+    result: T,
+    user: AuthUser,
+  ): T {
+    if (canViewCost(user)) return result;
+    return {
+      ...result,
+      rows: redactKeys(result.rows, COST_KEYS),
+      summary: redactKeys(result.summary, COST_KEYS),
+    };
+  }
+
   // --- Dựng context ---
 
   private async prepare(
@@ -270,6 +325,7 @@ export class ReportService {
   ): Promise<{ def: ReportDef; ctx: ReportContext }> {
     const def = getReport(id);
     if (!def) throw new NotFoundException('Không tìm thấy báo cáo');
+    this.assertCanView(def, user);
 
     const locationIds = await this.resolveLocations(query.location_id, user);
     const { from, to } = this.resolveRange(query.from, query.to);

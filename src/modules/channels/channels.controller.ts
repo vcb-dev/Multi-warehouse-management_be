@@ -101,7 +101,7 @@ export class ChannelsController {
    * khoảng thời gian mặc định để ngắn (7 ngày); muốn lấy bù cả tháng thì truyền `from`/`to`.
    */
   @Post('tiktok/sync')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   syncTiktok(@Body() dto: TiktokSyncDto, @CurrentUser() user: AuthUser) {
     return this.tiktokOrders.syncOrders({
@@ -117,7 +117,7 @@ export class ChannelsController {
    * bỏ trống thì lấy từ đơn Sapo mới nhất đang có trong DB.
    */
   @Post('sapo/sync')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   syncSapo(@Query('since') since?: string) {
     return this.sapoOrders.syncNewOrders(since);
@@ -153,7 +153,7 @@ export class ChannelsController {
   }
 
   @Post('sync')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   syncConnected(@CurrentUser() user: AuthUser) {
     return this.sync.syncConnectedChannels(user);
@@ -175,14 +175,14 @@ export class ChannelsController {
 
   /** Danh sách shop đã ủy quyền kết nối trực tiếp (TikTok Shop, Shopee...), để hiển thị lên UI. */
   @Get('connections')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   listConnections() {
     return this.sync.listConnections();
   }
 
   @Patch('connections/:id')
-  @RequirePermission('order:create')
+  @RequirePermission('channel:manage')
   @LocationOptional()
   updateConnection(
     @Param('id') id: string,

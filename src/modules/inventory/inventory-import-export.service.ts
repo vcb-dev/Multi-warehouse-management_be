@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { assertLocationPermission } from '../../common/auth/access';
+import { withoutCostColumns } from '../../common/auth/sensitive-fields';
 import {
   EXPORT_ROW_LIMIT,
   ExportField,
@@ -320,8 +321,8 @@ export class InventoryExportService {
   constructor(private queryService: InventoryQueryService) {}
 
   /** Danh sách trường cho dialog "Tùy chọn trường dữ liệu xuất" */
-  fields() {
-    return { data: describeFields(INVENTORY_FIELDS) };
+  fields(user: AuthUser) {
+    return { data: describeFields(withoutCostColumns(INVENTORY_FIELDS, user)) };
   }
 
   async export(
@@ -339,7 +340,10 @@ export class InventoryExportService {
     await streamXlsx(res, {
       filename: exportFilename('ton-kho'),
       sheetName: 'Ton kho',
-      fields: resolveFields(INVENTORY_FIELDS, query.fields),
+      fields: resolveFields(
+        withoutCostColumns(INVENTORY_FIELDS, user),
+        query.fields,
+      ),
       batches: singleBatch(rows),
     });
   }

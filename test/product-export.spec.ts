@@ -11,6 +11,10 @@ import type { Response } from 'express';
 import { ProductExportService } from '../src/modules/products/product-export.service';
 import type { ProductService } from '../src/modules/products/product.service';
 import type { ProductRepository } from '../src/modules/products/product.repository';
+import { adminAuth } from './helpers/auth';
+
+/** Admin thấy mọi cột, kể cả giá vốn — các ca dưới kiểm nội dung file đầy đủ. */
+const user = adminAuth();
 
 const BASE_WHERE = { status: 'active' };
 
@@ -122,7 +126,7 @@ describe('ProductExportService.fields', () => {
     // hay bỏ cột ở đây là làm hỏng vòng xuất-sửa-nhập của người dùng.
     const { service } = makeService([]);
     const defaults = service
-      .fields()
+      .fields(user)
       .data.filter((f) => f.default)
       .map((f) => f.label);
 
@@ -144,7 +148,7 @@ describe('ProductExportService.fields', () => {
 
   it('có thêm cột nâng cao ngoài bộ mặc định để người dùng tự chọn', () => {
     const { service } = makeService([]);
-    const keys = service.fields().data.map((f) => f.key);
+    const keys = service.fields(user).data.map((f) => f.key);
     expect(keys).toEqual(
       expect.arrayContaining(['id', 'variant_id', 'description']),
     );
@@ -164,7 +168,7 @@ describe('ProductExportService.export', () => {
     ]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     const { header, rows } = await readSheet(out.buffer());
     expect(rows).toHaveLength(2);
@@ -185,7 +189,7 @@ describe('ProductExportService.export', () => {
     ]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     const { header, rows } = await readSheet(out.buffer());
     expect(rows).toHaveLength(1);
@@ -201,7 +205,7 @@ describe('ProductExportService.export', () => {
     ]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     const { header, rows } = await readSheet(out.buffer());
     expect(rows.map((r) => cell(header, r, 'Hiển thị*'))).toEqual([
@@ -217,7 +221,7 @@ describe('ProductExportService.export', () => {
     ]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     const { header, rows } = await readSheet(out.buffer());
     expect(cell(header, rows[0], 'Tags')).toBe('hot, sale');
@@ -232,7 +236,7 @@ describe('ProductExportService.export', () => {
     ]);
 
     const out = fakeResponse();
-    await service.export({ fields: 'description' }, out.res);
+    await service.export({ fields: 'description' }, user, out.res);
 
     const { header, rows } = await readSheet(out.buffer());
     expect(cell(header, rows[0], 'Mô tả')).toBe('Chất liệu cotton Co giãn');
@@ -242,7 +246,7 @@ describe('ProductExportService.export', () => {
     const { service, findMany } = makeService([makeProduct()]);
 
     const out = fakeResponse();
-    await service.export({ ids: '5,6' }, out.res);
+    await service.export({ ids: '5,6' }, user, out.res);
 
     expect(findMany.mock.calls[0][0].where).toEqual({
       AND: [BASE_WHERE, { id: { in: [5n, 6n] } }],
@@ -253,7 +257,7 @@ describe('ProductExportService.export', () => {
     const { service, findMany } = makeService([makeProduct()]);
 
     const out = fakeResponse();
-    await service.export({ ids: '  ' }, out.res);
+    await service.export({ ids: '  ' }, user, out.res);
 
     expect(findMany.mock.calls[0][0].where).toEqual(BASE_WHERE);
   });
@@ -262,7 +266,7 @@ describe('ProductExportService.export', () => {
     const { service, findMany } = makeService([makeProduct()]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     expect(findMany.mock.calls[0][0].orderBy).toEqual([
       { modifiedOn: 'desc' },
@@ -274,7 +278,7 @@ describe('ProductExportService.export', () => {
     const { service } = makeService([makeProduct()]);
 
     const out = fakeResponse();
-    await service.export({}, out.res);
+    await service.export({}, user, out.res);
 
     expect(out.headers['Content-Disposition']).toContain('san-pham-');
   });

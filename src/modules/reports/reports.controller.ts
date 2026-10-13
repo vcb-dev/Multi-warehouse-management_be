@@ -33,8 +33,8 @@ export class ReportsController {
   /** Thư viện báo cáo, gom theo nhóm. */
   @Get()
   @RequirePermission('report:view')
-  catalog() {
-    return this.reports.catalog();
+  catalog(@CurrentUser() user: AuthUser) {
+    return this.reports.catalog(user);
   }
 
   // Khai trước `:id` để route động không nuốt mất `/reports/pinned`.

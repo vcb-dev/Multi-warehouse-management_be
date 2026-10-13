@@ -8,7 +8,9 @@ import {
   Post,
   Put,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
+import { CostVisibilityInterceptor } from '../../common/interceptors/cost-visibility.interceptor';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -26,6 +28,7 @@ import { StockTransferService } from './stock-transfer.service';
 
 @ApiTags('stock-transfers')
 @ApiBearerAuth()
+@UseInterceptors(CostVisibilityInterceptor)
 @Controller('stock-transfers')
 export class StockTransferController {
   constructor(
