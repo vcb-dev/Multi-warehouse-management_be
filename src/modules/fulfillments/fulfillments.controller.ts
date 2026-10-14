@@ -200,6 +200,7 @@ export class FulfillmentsController {
    * chấp nhận khớp 1 trong 2 (đối chiếu thật khi có tài khoản dev để test webhook thật).
    * BẮT BUỘC trả HTTP 200 (không phải 201 mặc định của NestJS) — nếu không VTP coi là thất bại
    * và retry tối đa 5 lần liên tục cho cùng một bản ghi hành trình.
+   * Trả lời ngay sau khi xác thực, phần xử lý chạy nền (VTP đòi phản hồi dưới 1 giây).
    */
   @Public()
   @Post('webhook/vtp')
@@ -211,7 +212,8 @@ export class FulfillmentsController {
     const headerToken = authHeader?.replace(/^Bearer\s+/i, '').trim();
     const bodyToken = dto.TOKEN?.trim();
     assertWebhookSecret('VTP_WEBHOOK_SECRET', headerToken, bodyToken);
-    return this.fulfillments.webhookVtp(dto);
+    this.fulfillments.enqueueVtpWebhook(dto);
+    return { received: true };
   }
 
   /** Webhook mô phỏng cho hãng chưa tích hợp API thật (cần đăng nhập). */
