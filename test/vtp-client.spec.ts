@@ -27,7 +27,7 @@ describe('VTP client', () => {
     expect(JSON.parse(init.body as string)).toEqual({ token: 'secret-abc' });
   });
 
-  it('các API khác gửi Token header từ creds (khác GHN không có ShopId)', async () => {
+  it('các API khác gửi Token header từ creds', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({

@@ -157,23 +157,6 @@ export class CancelFulfillmentDto {
 }
 
 export class CarrierWebhookDto {
-  /** GHN payload */
-  @IsOptional()
-  @IsString()
-  OrderCode?: string;
-
-  @IsOptional()
-  @IsString()
-  Status?: string;
-
-  @IsOptional()
-  @IsString()
-  Type?: string;
-
-  @IsOptional()
-  ShopID?: number | string;
-
-  /** Stub / hãng khác — snake_case */
   @IsOptional()
   @IsString()
   tracking_number?: string;
@@ -184,69 +167,8 @@ export class CarrierWebhookDto {
 }
 
 /**
- * Payload webhook trạng thái đơn của GHN — GHN gửi PascalCase nên DTO giữ nguyên tên field
- * của họ (khác `CarrierWebhookDto` là định dạng snake_case tự định nghĩa cho hãng mô phỏng).
- * Mọi field đều optional: GHN gửi tập field khác nhau theo `Type`, và
- * `ValidationPipe({ whitelist: true })` sẽ lược bớt field lạ chứ không báo lỗi.
- */
-export class GhnWebhookDto {
-  @IsOptional()
-  @IsString()
-  OrderCode?: string;
-
-  @IsOptional()
-  @IsString()
-  ClientOrderCode?: string;
-
-  /** Create | Switch_status | Update_weight | Update_cod | Update_fee */
-  @IsOptional()
-  @IsString()
-  Type?: string;
-
-  @IsOptional()
-  @IsString()
-  Status?: string;
-
-  @IsOptional()
-  ShopID?: number | string;
-
-  @IsOptional()
-  @IsNumber()
-  CODAmount?: number;
-
-  @IsOptional()
-  @IsNumber()
-  TotalFee?: number;
-
-  /** Khối lượng quy đổi GHN cân lại (gram) */
-  @IsOptional()
-  @IsNumber()
-  ConvertedWeight?: number;
-
-  @IsOptional()
-  @IsNumber()
-  Weight?: number;
-
-  @IsOptional()
-  @IsString()
-  Reason?: string;
-
-  @IsOptional()
-  @IsString()
-  ReasonCode?: string;
-
-  @IsOptional()
-  @IsString()
-  Warehouse?: string;
-
-  @IsOptional()
-  @IsString()
-  Time?: string;
-}
-
-/**
- * Payload webhook trạng thái đơn của ViettelPost — bọc trong `{ DATA, TOKEN }`, khác payload
- * phẳng của GHN. `ORDER_STATUS` là mã số (mục 8 tài liệu, 101–550), không phải chuỗi như GHN.
+ * Payload webhook trạng thái đơn của ViettelPost — bọc trong `{ DATA, TOKEN }`. `ORDER_STATUS`
+ * là mã số (mục 8 tài liệu, 101–550).
  */
 /**
  * `DATA` cố tình để dạng object mở (không whitelist field con) thay vì class riêng như trước:
@@ -267,65 +189,7 @@ export class VtpWebhookDto {
   TOKEN?: string;
 }
 
-/** Callback ticket của GHN — snake_case (khác webhook đơn hàng, vốn PascalCase). */
-export class GhnTicketCallbackDto {
-  @IsOptional()
-  id?: number | string;
-
-  @IsOptional()
-  @IsString()
-  order_code?: string;
-
-  @IsOptional()
-  @IsString()
-  type?: string;
-
-  @IsOptional()
-  @IsString()
-  status?: string;
-
-  @IsOptional()
-  status_id?: number;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  client_id?: string | number;
-
-  @IsOptional()
-  @IsString()
-  c_name?: string;
-
-  @IsOptional()
-  @IsString()
-  c_email?: string;
-
-  @IsOptional()
-  c_phone?: string | number;
-
-  @IsOptional()
-  attachments?: unknown;
-
-  @IsOptional()
-  conversations?: {
-    body?: string;
-    from_email?: string;
-    created_at?: string;
-    attachments?: unknown;
-  }[];
-
-  @IsOptional()
-  @IsString()
-  created_at?: string;
-
-  @IsOptional()
-  @IsString()
-  updated_at?: string;
-}
-
-/** 4 nhóm ticket GHN cho phép tạo — key ngắn, service map sang chuỗi tiếng Việt của GHN. */
+/** 4 nhóm ticket cho phép tạo — key ngắn, service map sang nhãn tiếng Việt. */
 export const CARRIER_TICKET_CATEGORIES = [
   'tu_van',
   'hoi_giao_lay_tra_hang',
@@ -409,15 +273,10 @@ export class UpdateShippingProviderDto {
 }
 
 export class ConnectProviderDto {
-  /** Token API của hãng (GHN: Token API; ViettelPost: tham số bí mật lấy từ web VTP) */
+  /** Token API của hãng (ViettelPost: tham số bí mật lấy từ web VTP) */
   @IsString()
   @MinLength(1)
   token!: string;
-
-  /** ShopId — chỉ GHN cần (validate riêng ở `verifyGhn`); ViettelPost không dùng field này. */
-  @IsOptional()
-  @IsString()
-  shop_id?: string;
 }
 
 export class ListShipmentsQueryDto {

@@ -7,7 +7,7 @@ const PRODUCTION_BASE_URL = 'https://partner.viettelpost.vn';
 /**
  * VTP_ENV=sandbox|test|dev → partnerdev.viettelpost.vn
  * VTP_ENV=production (mặc định) → partner.viettelpost.vn
- * VTP_BASE_URL / VTP_API_BASE_URL nếu set sẽ ghi đè VTP_ENV — cùng quy ước với GHN_ENV/GHN_BASE_URL.
+ * VTP_BASE_URL / VTP_API_BASE_URL nếu set sẽ ghi đè VTP_ENV.
  */
 export function resolveVtpBaseUrl(): string {
   const explicit =
@@ -34,7 +34,7 @@ export function isVtpSessionToken(value: string): boolean {
   return value.split('.').length === 3 && value.startsWith('eyJ');
 }
 
-/** Token phiên đổi từ "tham số bí mật" — có hạn dùng (`expired`, epoch ms), khác token tĩnh của GHN. */
+/** Token phiên đổi từ "tham số bí mật" — có hạn dùng (`expired`, epoch ms). */
 export type VtpLoginResult = {
   token: string;
   expired: number;
@@ -138,8 +138,7 @@ type VtpEnvelope<T> = {
 export type VtpCredentials = { token: string };
 
 /**
- * Client HTTP cho ViettelPost. Dùng `fetch` trần, cùng phong cách `GhnClient` — không thêm
- * dependency.
+ * Client HTTP cho ViettelPost. Dùng `fetch` trần, không thêm dependency.
  */
 export class VtpClient {
   private readonly logger = new Logger(VtpClient.name);

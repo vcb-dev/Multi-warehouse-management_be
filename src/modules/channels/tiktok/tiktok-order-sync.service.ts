@@ -843,7 +843,7 @@ function mapFulfillment(status?: string): OrderFulfillmentStatus | null {
 
 /**
  * Vận đơn cho đơn sàn. TikTok tự chỉ định hãng và tự sinh mã vận đơn, mình chỉ chép lại —
- * khác hẳn đơn tự đẩy sang GHN/ViettelPost (ở đó mình gọi API tạo vận đơn và có
+ * khác hẳn đơn tự đẩy sang ViettelPost (ở đó mình gọi API tạo vận đơn và có
  * `provider_id`).
  *
  * Theo quy ước sẵn có của dự án cho đơn sàn: `delivery_method = 'ecommerce'`,

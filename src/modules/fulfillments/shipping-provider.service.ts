@@ -13,9 +13,6 @@ import {
   CarrierConnectionConfig,
   CarrierServiceConfig,
 } from './carriers/carrier-adapter';
-import { GhnLocationResolver } from './carriers/ghn-location-resolver';
-import { assertGhnPickupReady, GhnAdapter } from './carriers/ghn.adapter';
-import { GhnClient, isGhnSandbox } from './carriers/ghn.client';
 import { ManualAdapter } from './carriers/manual.adapter';
 import { VtpAdapter } from './carriers/vtp.adapter';
 import {
@@ -33,7 +30,6 @@ import { serializeShippingProvider } from './fulfillment.serializer';
 const DEFAULT_WEIGHT_GRAMS = 500;
 
 /** `shipping_providers.code` của hãng đã tích hợp API thật. */
-export const GHN_PROVIDER_CODE = 'ghn';
 export const VTP_PROVIDER_CODE = 'viettel_post';
 
 /** Danh mục hãng mặc định — migration chỉ tạo bảng, không INSERT. */
@@ -42,26 +38,6 @@ const DEFAULT_CARRIERS: {
   name: string;
   servicesConfig: CarrierServiceConfig[];
 }[] = [
-  {
-    code: 'ghn',
-    name: 'GHN Express',
-    servicesConfig: [
-      {
-        code: 'standard',
-        name: 'Chuẩn',
-        eta: '2-3 ngày',
-        base_fee: 44080,
-        extra_fee_per_500g: 5500,
-      },
-      {
-        code: 'fast',
-        name: 'Nhanh',
-        eta: '1-2 ngày',
-        base_fee: 60500,
-        extra_fee_per_500g: 7000,
-      },
-    ],
-  },
   {
     code: 'spx',
     name: 'SPX Express',
@@ -127,16 +103,11 @@ const DEFAULT_CARRIERS: {
 export class ShippingProviderService implements OnModuleInit {
   private readonly logger = new Logger(ShippingProviderService.name);
   private readonly manualAdapter = new ManualAdapter();
-  private readonly ghnClient = new GhnClient();
   private readonly vtpClient = new VtpClient();
   private readonly adapters: Record<string, CarrierAdapter>;
 
   constructor(private prisma: PrismaService) {
     this.adapters = {
-      [GHN_PROVIDER_CODE]: new GhnAdapter(
-        this.ghnClient,
-        new GhnLocationResolver(this.ghnClient),
-      ),
       [VTP_PROVIDER_CODE]: new VtpAdapter(this.vtpClient),
     };
   }
@@ -171,14 +142,6 @@ export class ShippingProviderService implements OnModuleInit {
     return this.adapters[code] ?? this.manualAdapter;
   }
 
-  get ghn() {
-    return this.ghnClient;
-  }
-
-  get ghnAdapter(): GhnAdapter {
-    return this.adapters[GHN_PROVIDER_CODE] as GhnAdapter;
-  }
-
   async list(type?: ShippingProviderType) {
     const data = await this.prisma.shippingProvider.findMany({
       where: { isActive: true, ...(type ? { type } : {}) },
@@ -209,7 +172,6 @@ export class ShippingProviderService implements OnModuleInit {
             : [],
         })),
       ),
-      ghn_env: isGhnSandbox() ? ('sandbox' as const) : ('production' as const),
     };
   }
 
@@ -277,11 +239,8 @@ export class ShippingProviderService implements OnModuleInit {
   }
 
   /**
-   * Kết nối provider với GHN
-   * provider có thể là GHN, SPX, GHTK, Viettel Post, J&T
-   * @param id id của provider
-   * @param dto { token: string; shop_id: string }
-   * @returns provider đã kết nối
+   * Lưu token kết nối của hãng tích hợp. ViettelPost được gọi thử để xác thực ngay; hãng
+   * chưa có adapter thật (SPX, GHTK, J&T) chỉ lưu token.
    */
   async connect(id: bigint, dto: ConnectProviderDto) {
     // tìm provider theo id
@@ -298,14 +257,8 @@ export class ShippingProviderService implements OnModuleInit {
       );
     }
     // tạo config cho provider
-    const config: CarrierConnectionConfig = {
-      token: dto.token ?? null,
-      shop_id: dto.shop_id ?? null,
-    };
-    // nếu provider là GHN thì verify GHN
-    if (provider.code === GHN_PROVIDER_CODE) {
-      Object.assign(config, await this.verifyGhn(dto.token, dto.shop_id));
-    } else if (provider.code === VTP_PROVIDER_CODE) {
+    const config: CarrierConnectionConfig = { token: dto.token ?? null };
+    if (provider.code === VTP_PROVIDER_CODE) {
       await this.verifyVtp(dto.token);
     }
 
@@ -318,80 +271,7 @@ export class ShippingProviderService implements OnModuleInit {
   }
 
   /**
-   * Xác thực Token/ShopID với GHN và lấy luôn địa chỉ lấy hàng đã đăng ký bên đó
-   * (`from_district_id`/`from_ward_code` bắt buộc khi gọi available-services), nên UI chỉ cần
-   * nhập token + shop_id như trước. `client_id` lấy về để đăng ký webhook với GHN.
-   */
-  private async verifyGhn(
-    token?: string,
-    shopId?: string,
-  ): Promise<Partial<CarrierConnectionConfig>> {
-    if (!token || !shopId) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        'Kết nối GHN cần cả Token và ShopID',
-        422,
-      );
-    }
-    // lấy danh sách các shop của GHN
-    const shops = await this.ghnClient.getShops({ token });
-    // lấy danh sách các tỉnh/thành của shop
-    const provinces = await this.ghnClient.getProvinces({ token });
-    // nếu không có tỉnh/thành thì báo lỗi
-    if (!provinces.length) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `Token GHN không lấy được danh sách Tỉnh/Thành. Kiểm tra Token và GHN_ENV backend (${isGhnSandbox() ? 'sandbox → 5sao.ghn.dev' : 'production → khachhang.ghn.vn'}).`,
-        422,
-      );
-    }
-    const sampleProvince =
-      provinces.find((p) => p.ProvinceID === 201) ?? provinces[0];
-    // lấy danh sách các quận/huyện của tỉnh/thành
-    const sampleDistricts = await this.ghnClient.getDistricts(
-      sampleProvince.ProvinceID,
-      { token },
-    );
-    // nếu không có quận/huyện thì báo lỗi
-    if (!sampleDistricts.length) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `Token GHN không lấy được Quận/Huyện (thử ${sampleProvince.ProvinceName}). ` +
-          `Token và GHN_ENV backend có thể không khớp — sandbox cần GHN_ENV=sandbox và Token từ 5sao.ghn.dev.`,
-        422,
-      );
-    }
-    // tìm shop theo shopId
-    const shop = shops.find((s) => String(s._id) === String(shopId));
-    // nếu không tìm thấy shop thì báo lỗi
-    if (!shop) {
-      throw new BusinessException(
-        'VALIDATION_ERROR',
-        `ShopID ${shopId} không thuộc tài khoản GHN của Token này`,
-        422,
-      );
-    }
-    // lấy district_id và ward_code của shop
-    const fromDistrictId =
-      shop.district_id && shop.district_id > 0 ? shop.district_id : null;
-    const fromWardCode = shop.ward_code?.trim() || null;
-    // tạo config cho provider
-    const pickup: Partial<CarrierConnectionConfig> = {
-      client_id: shop.client_id != null ? String(shop.client_id) : null,
-      from_name: shop.name ?? null,
-      from_phone: shop.phone ?? null,
-      from_address: shop.address ?? null,
-      from_district_id: fromDistrictId,
-      from_ward_code: fromWardCode,
-    };
-    // kiểm tra config có hợp lệ không, phải có shop_id, token, và from_district_id, from_ward_code
-    assertGhnPickupReady({ shop_id: shopId, token, ...pickup });
-    // trả về config
-    return pickup;
-  }
-
-  /**
-   * Xác thực Token ViettelPost — không cần Shop ID (khác GHN). Hỗ trợ 2 dạng: "tham số bí mật"
+   * Xác thực Token ViettelPost. Hỗ trợ 2 dạng: "tham số bí mật"
    * (đổi thử sang token phiên qua LoginVTP) hoặc session JWT có sẵn (tài khoản đối tác có thể
    * được cấp thẳng JWT hạn dùng dài — xác nhận thực tế: tài khoản 8501446 tới 2029; JWT không
    * đổi lại được qua LoginVTP nên xác thực bằng gọi thử API khác cần Token).

@@ -2,7 +2,7 @@
  * Tên đơn vị giao hàng để hiển thị trên UI.
  *
  * Vì sao cần hàm này thay vì đọc thẳng `provider.name`: `provider_id` chỉ có với hãng
- * TÍCH HỢP trong app (GHN, ViettelPost — do mình đẩy đơn sang). Đơn đồng bộ từ Sapo thì
+ * TÍCH HỢP trong app (ViettelPost — do mình đẩy đơn sang). Đơn đồng bộ từ Sapo thì
  * hãng đã do sàn/Sapo chỉ định nên `provider_id` luôn NULL, tên hãng thật nằm ở
  * `carrier_name` ('J&T Express') hoặc `tracking_company` ('Standard shipping').
  *

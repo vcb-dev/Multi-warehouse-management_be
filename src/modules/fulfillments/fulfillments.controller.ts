@@ -27,8 +27,6 @@ import {
   CarrierWebhookDto,
   CreateCarrierTicketDto,
   CreatePackingDto,
-  GhnTicketCallbackDto,
-  GhnWebhookDto,
   PushShipmentDto,
   ReplyCarrierTicketDto,
   UpdatePackingStatusDto,
@@ -131,7 +129,7 @@ export class FulfillmentsController {
     return this.fulfillments.cancel(BigInt(id), dto, user);
   }
 
-  // --- Ticket hỗ trợ với hãng vận chuyển (GHN) ---
+  // --- Ticket hỗ trợ với hãng vận chuyển ---
 
   @Get('tickets')
   @RequirePermission('order:pack')
@@ -168,29 +166,7 @@ export class FulfillmentsController {
   }
 
   // --- Webhook của hãng ---
-  // Phải khai TRƯỚC `webhook/:provider_code`, nếu không route động sẽ bắt luôn `webhook/ghn`.
-
-  /**
-   * Webhook trạng thái đơn của GHN. `@Public` vì GHN không có JWT của hệ thống này —
-   * xác thực bằng đối chiếu `ShopID` trong payload với cấu hình kết nối đã lưu.
-   * Nếu set GHN_WEBHOOK_SECRET thì bắt buộc header X-GHN-Webhook-Secret.
-   */
-  @Public()
-  @Post('webhook/ghn')
-  webhookGhn(
-    @Body() dto: GhnWebhookDto,
-    @Headers('x-ghn-webhook-secret') webhookSecret?: string,
-  ) {
-    assertWebhookSecret('GHN_WEBHOOK_SECRET', webhookSecret);
-    return this.fulfillments.webhookGhn(dto);
-  }
-
-  /** Callback ticket của GHN — xác thực bằng `client_id`. */
-  @Public()
-  @Post('webhook/ghn/ticket')
-  webhookGhnTicket(@Body() dto: GhnTicketCallbackDto) {
-    return this.tickets.handleCallback(dto);
-  }
+  // Phải khai TRƯỚC `webhook/:provider_code`, nếu không route động sẽ bắt luôn `webhook/vtp`.
 
   /**
    * Webhook trạng thái đơn của ViettelPost. Theo tài liệu chính thức
