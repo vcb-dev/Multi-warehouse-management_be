@@ -24,6 +24,7 @@ import {
   ListGoodsReceiptsQueryDto,
 } from './purchasing.dto';
 import { serializeGoodsReceipt } from './purchasing.serializer';
+import { variantImageSelect } from '../../common/utils/variant-image';
 
 // DB ở xa (Supabase qua pooler) + transaction lặp qua nhiều dòng sản phẩm dễ
 // vượt timeout mặc định 5s của Prisma interactive transaction.
@@ -32,7 +33,7 @@ const TX_OPTIONS = { timeout: 15_000, maxWait: 10_000 };
 const reiInclude = {
   items: {
     include: {
-      variant: { select: { sku: true } },
+      variant: { select: { sku: true, ...variantImageSelect } },
       purchaseOrder: { select: { code: true } },
     },
   },
