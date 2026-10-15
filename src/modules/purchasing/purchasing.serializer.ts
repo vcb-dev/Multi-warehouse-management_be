@@ -79,6 +79,7 @@ export function serializeGoodsReceipt(rei: ReiWithItems) {
     supplier_name: rei.supplier?.name,
     location_id: rei.locationId.toString(),
     location_code: rei.location?.code,
+    location_name: rei.location?.name,
     purchase_order_id: rei.purchaseOrderId?.toString() ?? null,
     purchase_order_code: rei.purchaseOrder?.code ?? null,
     status: rei.status,
@@ -157,6 +158,7 @@ export function serializePurchaseReturn(pvn: PvnWithRelations) {
     supplier_name: pvn.supplier?.name,
     location_id: pvn.locationId.toString(),
     location_code: pvn.location?.code,
+    location_name: pvn.location?.name,
     goods_receipt_id: pvn.goodsReceiptId?.toString() ?? null,
     goods_receipt_code: pvn.goodsReceipt?.code ?? null,
     created_by_name:
