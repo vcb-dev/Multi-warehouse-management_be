@@ -83,6 +83,41 @@ type ShopeeApiEnvelope<T = unknown> = {
 const ORDER_DETAIL_FIELDS =
   'order_status,buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,item_list,payment_method,total_amount,shipping_carrier,message_to_seller,package_list,pickup_done_time,cod,update_time,create_time,currency';
 
+export type ShopeeSellerStock = {
+  location_id?: string;
+  stock?: number;
+};
+
+export type ShopeeItemListEntry = {
+  item_id: number;
+  item_status?: string;
+};
+
+export type ShopeeItemBase = {
+  item_id: number;
+  item_sku?: string;
+  has_model?: boolean;
+  item_status?: string;
+  stock_info_v2?: { seller_stock?: ShopeeSellerStock[] };
+};
+
+export type ShopeeModelEntry = {
+  model_id: number;
+  model_sku?: string;
+  model_status?: string;
+  stock_info_v2?: { seller_stock?: ShopeeSellerStock[] };
+};
+
+export type ShopeeStockUpdate = {
+  model_id?: number;
+  seller_stock: Array<{ stock: number; location_id?: string }>;
+};
+
+export type ShopeeUpdateStockResult = {
+  failure_list?: Array<{ model_id?: number; failed_reason?: string }>;
+  success_list?: Array<{ model_id?: number }>;
+};
+
 /** Public API — partner_id + path + timestamp */
 /**
  * Tạo signature cho public API
@@ -313,6 +348,74 @@ export class ShopeeClient {
     });
   }
 
+  /**
+   * Danh sách item shop (phân trang offset, tối đa 100/trang).
+   * https://open.shopee.com/documents/v2/v2.product.get_item_list
+   */
+  getItemList(
+    accessToken: string,
+    shopId: string,
+    params: { offset?: number; pageSize?: number; itemStatus?: string },
+  ): Promise<{
+    item: ShopeeItemListEntry[];
+    has_next_page: boolean;
+    next_offset: number;
+  }> {
+    const path = '/api/v2/product/get_item_list';
+    return this.shopGet(path, accessToken, shopId, {
+      offset: String(params.offset ?? 0),
+      page_size: String(params.pageSize ?? 100),
+      item_status: params.itemStatus ?? 'NORMAL',
+    });
+  }
+
+  /**
+   * SKU + cờ has_model (tối đa 50 item_id).
+   * https://open.shopee.com/documents/v2/v2.product.get_item_base_info
+   */
+  getItemBaseInfo(
+    accessToken: string,
+    shopId: string,
+    itemIds: number[],
+  ): Promise<{ item_list: ShopeeItemBase[] }> {
+    const path = '/api/v2/product/get_item_base_info';
+    return this.shopGet(path, accessToken, shopId, {
+      item_id_list: itemIds.join(','),
+    });
+  }
+
+  /**
+   * Biến thể (model) của 1 item.
+   * https://open.shopee.com/documents/v2/v2.product.get_model_list
+   */
+  getModelList(
+    accessToken: string,
+    shopId: string,
+    itemId: number,
+  ): Promise<{ model: ShopeeModelEntry[] }> {
+    const path = '/api/v2/product/get_model_list';
+    return this.shopGet(path, accessToken, shopId, {
+      item_id: String(itemId),
+    });
+  }
+
+  /**
+   * Ghi seller_stock. Shop không bật kho Shopee thì không gửi location_id.
+   * https://open.shopee.com/documents/v2/v2.product.update_stock
+   */
+  updateStock(
+    accessToken: string,
+    shopId: string,
+    itemId: number,
+    stockList: ShopeeStockUpdate[],
+  ): Promise<ShopeeUpdateStockResult> {
+    const path = '/api/v2/product/update_stock';
+    return this.shopPost(path, accessToken, shopId, {
+      item_id: itemId,
+      stock_list: stockList,
+    });
+  }
+
   private shopGet<T>(
     path: string,
     accessToken: string,
@@ -339,6 +442,32 @@ export class ShopeeClient {
     }
     return this.getJson<ShopeeApiEnvelope<T>>(url.toString()).then((raw) =>
       this.unwrapShopResponse(raw, path),
+    );
+  }
+
+  private shopPost<T>(
+    path: string,
+    accessToken: string,
+    shopId: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = shopeeSignShop(
+      this.partnerId,
+      path,
+      timestamp,
+      accessToken,
+      shopId,
+      this.partnerKey,
+    );
+    const url = new URL(`${this.host}${path}`);
+    url.searchParams.set('partner_id', this.partnerId);
+    url.searchParams.set('timestamp', String(timestamp));
+    url.searchParams.set('sign', sign);
+    url.searchParams.set('access_token', accessToken);
+    url.searchParams.set('shop_id', shopId);
+    return this.postJson<ShopeeApiEnvelope<T>>(url.toString(), body).then(
+      (raw) => this.unwrapShopResponse(raw, path),
     );
   }
 

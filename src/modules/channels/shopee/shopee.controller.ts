@@ -26,6 +26,7 @@ import {
   ShopeePushWebhookService,
   type ShopeePushPayload,
 } from './shopee-push-webhook.service';
+import { ShopeeInventorySyncService } from './shopee-inventory-sync.service';
 import { ShopeeSyncService } from './shopee-sync.service';
 
 @ApiTags('channels')
@@ -35,6 +36,7 @@ export class ShopeeController {
   constructor(
     private shopeeAuth: ShopeeAuthService,
     private shopeeSync: ShopeeSyncService,
+    private shopeeInventory: ShopeeInventorySyncService,
     private shopeePush: ShopeePushWebhookService,
   ) {}
 
@@ -79,6 +81,23 @@ export class ShopeeController {
     @Query('connection_id') connectionId?: string,
   ) {
     return this.shopeeSync.syncShopeeOrders(user.userId, connectionId);
+  }
+
+  /**
+   * Đẩy `available` kho gắn shop lên Shopee. `dry_run=true` chỉ đối chiếu, không ghi sàn.
+   */
+  @Post('sync-inventory')
+  @RequirePermission('order:create', 'inventory:receive')
+  @LocationOptional()
+  syncShopeeInventory(
+    @Query('connection_id') connectionId?: string,
+    @Query('dry_run') dryRun?: string,
+    @Query('sku') sku?: string,
+  ) {
+    return this.shopeeInventory.syncInventory(connectionId, {
+      dryRun: dryRun === 'true' || dryRun === '1',
+      sku,
+    });
   }
 
   /** Link ủy quyền shop Shopee — mở trong trình duyệt (seller đăng nhập & đồng ý). */
