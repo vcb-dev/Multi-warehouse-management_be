@@ -58,6 +58,39 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     scope: PermissionScope.system,
   },
 
+  // Kết nối sàn (Shopee/TikTok), đồng bộ kênh. Sapo: `channels` — shop thật chỉ
+  // 2/213 tài khoản có. Trước đây dùng nhờ `order:create` nên nhân viên bán hàng
+  // nào cũng kết nối/ngắt gian hàng được.
+  {
+    key: 'channel:manage',
+    group: 'Hệ thống',
+    label: 'Kết nối & đồng bộ kênh bán',
+    scope: PermissionScope.system,
+  },
+  // Sổ quỹ (phiếu thu/chi). Sapo: `read_vouchers`. Trước đây dùng nhờ
+  // `report:view` / `purchasing:manage`.
+  {
+    key: 'voucher:view',
+    group: 'Hệ thống',
+    label: 'Xem sổ quỹ',
+    scope: PermissionScope.system,
+  },
+  // Lợi nhuận tách khỏi báo cáo thường. Sapo: `total_profit_reports`.
+  {
+    key: 'report:view_profit',
+    group: 'Hệ thống',
+    label: 'Xem báo cáo lợi nhuận',
+    scope: PermissionScope.system,
+  },
+  // Giá vốn. Sapo: `read_cost_price` (45/213 tài khoản). scope=system vì giá vốn
+  // hiện ra ở cả những chỗ không gắn kho (sản phẩm, báo cáo).
+  {
+    key: 'product:view_cost',
+    group: 'Sản phẩm',
+    label: 'Xem & sửa giá vốn',
+    scope: PermissionScope.system,
+  },
+
   // Đơn hàng (theo kho)
   {
     key: 'order:view',
@@ -75,6 +108,14 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     key: 'order:update',
     group: 'Đơn hàng',
     label: 'Cập nhật đơn hàng',
+    scope: PermissionScope.location,
+  },
+  // Sapo `override_item_price`: 141/213 tài khoản có. Không có thì chỉ bán theo
+  // giá niêm yết (giá gốc hoặc giá trong bảng giá đang bật).
+  {
+    key: 'order:override_price',
+    group: 'Đơn hàng',
+    label: 'Sửa giá bán khi tạo đơn',
     scope: PermissionScope.location,
   },
   {
@@ -180,11 +221,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     permissions: [
       'dashboard:view',
       'report:view',
+      'report:view_profit',
+      'voucher:view',
+      'channel:manage',
+      'product:view_cost',
       'shipping:manage',
       'notification:manage',
       'order:view',
       'order:create',
       'order:update',
+      'order:override_price',
       'order:cancel',
       'order:pack',
       'order_return:view',
@@ -206,11 +252,62 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'order:view',
       'order:create',
       'order:update',
+      'order:override_price',
       'order_return:view',
       'product:view',
       'inventory:view',
       'customer:view',
       'customer:manage',
+    ],
+  },
+  // Ba vai trò dưới đây theo các kiểu vai trò đang dùng thật trên Sapo của shop
+  // (gom 213 tài khoản theo bộ quyền, 13/10/2026).
+  // 48 tài khoản: bán hàng nhưng không có `override_item_price`.
+  sales_fixed_price: {
+    name: 'Nhân viên bán hàng (không sửa giá)',
+    permissions: [
+      'dashboard:view',
+      'order:view',
+      'order:create',
+      'order:update',
+      'order_return:view',
+      'product:view',
+      'inventory:view',
+      'customer:view',
+      'customer:manage',
+    ],
+  },
+  // 5 tài khoản: bán hàng + xử lý đơn, xem báo cáo toàn bộ kể cả lợi nhuận, quản
+  // lý nhân viên — nhưng không cấu hình cửa hàng, không huỷ đơn, không xem giá vốn.
+  team_lead: {
+    name: 'Trưởng nhóm',
+    permissions: [
+      'dashboard:view',
+      'report:view',
+      'report:view_profit',
+      'staff:manage',
+      'order:view',
+      'order:create',
+      'order:update',
+      'order:override_price',
+      'order:pack',
+      'order_return:view',
+      'product:view',
+      'inventory:view',
+      'customer:view',
+      'customer:manage',
+    ],
+  },
+  // 11 tài khoản: chỉ có quyền đọc.
+  viewer: {
+    name: 'Chỉ xem',
+    permissions: [
+      'dashboard:view',
+      'order:view',
+      'order_return:view',
+      'product:view',
+      'inventory:view',
+      'customer:view',
     ],
   },
   warehouse_staff: {
@@ -234,6 +331,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       'inventory:view',
       'inventory:receive',
       'purchasing:manage',
+      // Đặt hàng nhập cần giá vốn để điền giá mua; sổ quỹ để theo dõi công nợ NCC
+      'product:view_cost',
+      'voucher:view',
     ],
   },
 };

@@ -8,7 +8,9 @@ import {
   Post,
   Put,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
+import { CostVisibilityInterceptor } from '../../common/interceptors/cost-visibility.interceptor';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   CurrentUser,
@@ -24,6 +26,7 @@ import { StocktakeService } from './stocktake.service';
 
 @ApiTags('stocktakes')
 @ApiBearerAuth()
+@UseInterceptors(CostVisibilityInterceptor)
 @Controller('stocktakes')
 export class StocktakeController {
   constructor(private stocktakes: StocktakeService) {}

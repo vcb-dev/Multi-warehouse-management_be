@@ -199,6 +199,7 @@ describeIfDb('Xuất file danh sách (integration)', () => {
     const out = fakeResponse();
     await products.export(
       { page_size: 3, ids: await someProductIds(prisma) },
+      user,
       out.res,
     );
 

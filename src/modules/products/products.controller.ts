@@ -10,6 +10,7 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import { CostVisibilityInterceptor } from '../../common/interceptors/cost-visibility.interceptor';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -36,6 +37,7 @@ import { ProductService } from './product.service';
 
 @ApiTags('products')
 @ApiBearerAuth()
+@UseInterceptors(CostVisibilityInterceptor)
 @Controller('products')
 export class ProductsController {
   constructor(
@@ -77,14 +79,18 @@ export class ProductsController {
 
   @Get('export/fields')
   @RequirePermission('product:manage')
-  exportFields() {
-    return this.exporter.fields();
+  exportFields(@CurrentUser() user: AuthUser) {
+    return this.exporter.fields(user);
   }
 
   @Get('export')
   @RequirePermission('product:manage')
-  async export(@Query() query: ExportProductsQueryDto, @Res() res: Response) {
-    await this.exporter.export(query, res);
+  async export(
+    @Query() query: ExportProductsQueryDto,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    await this.exporter.export(query, user, res);
   }
 
   @Post('import')

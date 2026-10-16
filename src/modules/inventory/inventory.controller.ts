@@ -8,6 +8,7 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import { CostVisibilityInterceptor } from '../../common/interceptors/cost-visibility.interceptor';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -30,6 +31,7 @@ import { ReconcileService } from './reconcile.service';
 
 @ApiTags('inventory')
 @ApiBearerAuth()
+@UseInterceptors(CostVisibilityInterceptor)
 @Controller('inventory')
 export class InventoryController {
   constructor(
@@ -53,8 +55,8 @@ export class InventoryController {
 
   @Get('export/fields')
   @RequirePermission('inventory:view')
-  exportFields() {
-    return this.exporter.fields();
+  exportFields(@CurrentUser() user: AuthUser) {
+    return this.exporter.fields(user);
   }
 
   @Get('export')

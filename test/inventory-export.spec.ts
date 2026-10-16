@@ -107,7 +107,7 @@ describe('InventoryExportService.fields', () => {
   it('bộ mặc định giữ nguyên các cột NXT của màn Tồn kho', () => {
     const { service } = makeService([]);
     const defaults = service
-      .fields()
+      .fields(user)
       .data.filter((f) => f.default)
       .map((f) => f.label);
 
@@ -144,7 +144,7 @@ describe('InventoryExportService.fields', () => {
 
   it('có cột kho để phân biệt dòng khi xuất nhiều kho cùng lúc', () => {
     const { service } = makeService([]);
-    const keys = service.fields().data.map((f) => f.key);
+    const keys = service.fields(user).data.map((f) => f.key);
     expect(keys).toEqual(
       expect.arrayContaining(['location_name', 'location_code']),
     );

@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import {
   assertLocationPermission,
+  hasLocationPermission,
   locationScopeFilter,
 } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -890,7 +891,15 @@ export class OrderService {
     };
   }
 
-  async create(dto: CreateOrderDto, user: AuthUser) {
+  /**
+   * @param opts.trustedPrices Giá đến từ nguồn hệ thống tin được (đơn sàn, đơn
+   *   nháp đã chốt) — bỏ kiểm quyền sửa giá. Request của người dùng thì không.
+   */
+  async create(
+    dto: CreateOrderDto,
+    user: AuthUser,
+    opts: { trustedPrices?: boolean } = {},
+  ) {
     if (!dto.items?.length) {
       throw new BusinessException(
         'VALIDATION_ERROR',
@@ -922,7 +931,14 @@ export class OrderService {
       }
     }
 
-    const resolvedItems = await this.resolveItems(dto);
+    const canOverridePrice =
+      opts.trustedPrices === true ||
+      hasLocationPermission(
+        user,
+        'order:override_price',
+        locationId.toString(),
+      );
+    const resolvedItems = await this.resolveItems(dto, canOverridePrice);
     const pricedLines: PricedLine[] = resolvedItems.map((i) => ({
       quantity: i.quantity,
       price: i.price,
@@ -1566,10 +1582,13 @@ export class OrderService {
         ? { shipping_method: params.shippingMethod }
         : {}),
     };
-    return this.create(dto, user);
+    return this.create(dto, user, { trustedPrices: true });
   }
 
-  private async resolveItems(dto: CreateOrderDto): Promise<ResolvedItem[]> {
+  private async resolveItems(
+    dto: CreateOrderDto,
+    canOverridePrice: boolean,
+  ): Promise<ResolvedItem[]> {
     const result: ResolvedItem[] = [];
     for (const item of dto.items) {
       const variantId = BigInt(item.variant_id);
@@ -1592,6 +1611,17 @@ export class OrderService {
           location_id: locationId,
         });
         price = resolved.price;
+      } else if (!canOverridePrice) {
+        // Sapo `override_item_price`: không có quyền thì chỉ bán theo giá niêm
+        // yết. Trước đây API nhận giá bất kỳ từ bất kỳ ai tạo được đơn.
+        const listed = await this.pricing.listedPrices(variantId);
+        if (!listed.some((p) => Math.abs(p - price!) < 0.005)) {
+          throw new BusinessException(
+            'PRICE_OVERRIDE_FORBIDDEN',
+            `Bạn không có quyền sửa giá bán — ${variant.sku} phải bán theo giá niêm yết`,
+            403,
+          );
+        }
       }
 
       const discount = item.discount ?? 0;
