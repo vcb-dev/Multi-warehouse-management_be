@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsNumberString,
   IsOptional,
   IsString,
   Min,
@@ -257,6 +258,11 @@ export class ListPurchaseReturnsQueryDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  /** Các phiếu trả tạo từ một phiếu nhập — màn chi tiết phiếu nhập dùng */
+  @IsOptional()
+  @IsNumberString()
+  goods_receipt_id?: string;
 
   @IsOptional()
   @IsDateString()

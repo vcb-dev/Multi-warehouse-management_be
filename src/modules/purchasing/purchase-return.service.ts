@@ -59,6 +59,9 @@ export class PurchaseReturnService {
     if (query.supplier_id) {
       where.supplierId = BigInt(query.supplier_id);
     }
+    if (query.goods_receipt_id) {
+      where.goodsReceiptId = BigInt(query.goods_receipt_id);
+    }
     if (query.date_from || query.date_to) {
       where.createdAt = {
         ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
