@@ -1,4 +1,5 @@
 import { ReportDef, ReportGroup, REPORT_GROUP_LABEL } from './report.types';
+import { COMPLETED_ORDER_REVENUE_REPORTS } from './reports/completed-order-revenue.report';
 import { CUSTOMER_REPORTS } from './reports/customer.report';
 import { INVENTORY_REPORTS } from './reports/inventory.report';
 import { PROFIT_REPORTS } from './reports/profit.report';
@@ -16,6 +17,7 @@ import { STAFF_PERFORMANCE_REPORTS } from './reports/staff-performance.report';
  */
 const ALL_REPORTS: ReportDef[] = [
   ...SALES_REVENUE_REPORTS,
+  ...COMPLETED_ORDER_REVENUE_REPORTS,
   ...INVENTORY_REPORTS,
   ...PROFIT_REPORTS,
   ...CUSTOMER_REPORTS,
