@@ -88,6 +88,8 @@ async function bootstrap() {
     .setDescription('REST API — Module Quản lý kho & hệ thống')
     .setVersion('0.1.0')
     .addBearerAuth()
+    // Hệ thống ngoài gọi bằng header `x-api-key` (JwtAuthGuard nhận cả hai).
+    .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'x-api-key')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);

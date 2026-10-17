@@ -247,7 +247,7 @@ export class SapoInventorySyncService {
           }
         }
 
-        await this.throttle();
+        await this.sapo.pace();
         if (rows.length < PAGE_LIMIT) break;
       }
     }
@@ -281,16 +281,6 @@ export class SapoInventorySyncService {
       // Công thức nội bộ, KHÔNG lấy `available` của Sapo — xem chú thích đầu file.
       available: onHand - committed - packed - unavailable,
     };
-  }
-
-  /** Giãn nhịp theo `x-sapo-api-call-limit` để không ăn 429 giữa lượt quét dài. */
-  private async throttle() {
-    const header = this.sapo.lastRateLimit;
-    if (!header) return new Promise((r) => setTimeout(r, 250));
-    const [used, total] = header.split('/').map(Number);
-    const ratio = total ? used / total : 0;
-    const delay = ratio > 0.75 ? 1200 : ratio > 0.5 ? 500 : 250;
-    return new Promise((r) => setTimeout(r, delay));
   }
 
   /**

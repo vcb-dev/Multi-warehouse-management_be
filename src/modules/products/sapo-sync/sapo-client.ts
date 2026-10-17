@@ -24,6 +24,8 @@ export interface SapoVariant {
   image_id: number | null;
   position: number;
   type: string | null;
+  /** Ngày tạo phiên bản trên Sapo — mốc tuổi tồn cho hàng không có phiếu nhập. */
+  created_on?: string | null;
 }
 
 export interface SapoImage {
@@ -106,6 +108,19 @@ export class SapoClient {
   }
 
   private rateLimit: string | null = null;
+
+  /**
+   * Nghỉ giữa hai lượt gọi của một lượt quét dài, giãn theo `x-sapo-api-call-limit` để
+   * không ăn 429 giữa chừng: càng gần trần thì nghỉ càng lâu.
+   */
+  pace(): Promise<void> {
+    const header = this.rateLimit;
+    if (!header) return new Promise((r) => setTimeout(r, 250));
+    const [used, total] = header.split('/').map(Number);
+    const ratio = total ? used / total : 0;
+    const delay = ratio > 0.75 ? 1200 : ratio > 0.5 ? 500 : 250;
+    return new Promise((r) => setTimeout(r, delay));
+  }
 
   private async request<T>(path: string, tries = 5): Promise<T> {
     let lastErr: unknown;

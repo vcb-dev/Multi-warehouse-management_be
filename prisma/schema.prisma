@@ -983,6 +983,44 @@ model InventoryMovement {
   @@map("inventory_movements")
 }
 
+/// Ảnh chụp hằng ngày trang sức còn hàng kèm số ngày tồn (FIFO), kéo thẳng từ Sapo —
+/// xem `src/modules/aged-inventory/`. Mỗi dòng = một phiên bản Sapo tại một ngày.
+/// `product_id`/`variant_id` là id local khớp qua `sapo_id`, cố ý không FK: snapshot
+/// không được gãy khi catalog local lệch Sapo.
+model AgedInventorySnapshot {
+  id             BigInt    @id @default(autoincrement())
+  snapshotDate   DateTime  @map("snapshot_date") @db.Date
+  sapoProductId  BigInt    @map("sapo_product_id")
+  sapoVariantId  BigInt    @map("sapo_variant_id")
+  productId      BigInt?   @map("product_id")
+  variantId      BigInt?   @map("variant_id")
+  productName    String    @map("product_name")
+  productType    String?   @map("product_type")
+  productGroup   String    @map("product_group")
+  sku            String?
+  variantTitle   String?   @map("variant_title")
+  size           String?
+  color          String?
+  imageUrl       String?   @map("image_url")
+  onHand         Int       @map("on_hand")
+  /// `[{location_id, sapo_location_id, location_name, on_hand, available}]`
+  locations      Json
+  inStockSince   DateTime  @map("in_stock_since")
+  daysInStock    Int       @map("days_in_stock")
+  /// `receipt` = mốc từ phiếu nhập Sapo; `created` = không có phiếu, lấy ngày tạo phiên bản.
+  ageBasis       String    @map("age_basis")
+  lastReceivedOn DateTime? @map("last_received_on")
+  /// `[{since, qty, source}]` — tồn tách theo lớp nhập, mới → cũ.
+  layers         Json
+  /// Số bán 30 ngày tròn trước `snapshot_date` (đơn Sapo không huỷ, `current_quantity`).
+  sold30d        Int       @default(0) @map("sold_30d")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([snapshotDate, sapoVariantId])
+  @@index([snapshotDate, daysInStock])
+  @@map("aged_inventory_snapshots")
+}
+
 model ActivityLog {
   id         BigInt   @id @default(autoincrement())
   userId     BigInt?  @map("user_id")
