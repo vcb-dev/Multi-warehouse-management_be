@@ -32,6 +32,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { SavedFiltersModule } from './modules/saved-filters/saved-filters.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AgedInventoryModule } from './modules/aged-inventory/aged-inventory.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { CloudinaryModule } from './common/cloudinary/cloudinary.module';
 import { StorageModule } from './common/storage/storage.module';
@@ -66,6 +67,7 @@ import { StorageModule } from './common/storage/storage.module';
     SavedFiltersModule,
     ApiKeysModule,
     NotificationsModule,
+    AgedInventoryModule,
   ],
   controllers: [AppController],
   providers: [
