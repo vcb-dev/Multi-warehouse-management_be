@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -7,6 +8,13 @@ import {
   Max,
   Min,
 } from 'class-validator';
+
+export const AGED_INVENTORY_SORTS = [
+  'on_hand_desc',
+  'days_in_stock_desc',
+  'sold_30d_desc',
+] as const;
+export type AgedInventorySort = (typeof AGED_INVENTORY_SORTS)[number];
 
 export class ListAgedInventoryQueryDto {
   /** Chỉ lấy phiên bản đã tồn ít nhất ngần này ngày (tính tới ngày snapshot). Mặc định 30. */
@@ -51,4 +59,12 @@ export class ListAgedInventoryQueryDto {
   @Min(1)
   @Max(500)
   page_size?: number;
+
+  /**
+   * Thứ tự: `on_hand_desc` (mặc định — tồn nhiều lên trước), `days_in_stock_desc`
+   * (tồn lâu nhất lên trước), `sold_30d_desc` (bán 30 ngày nhiều lên trước).
+   */
+  @IsOptional()
+  @IsIn(AGED_INVENTORY_SORTS)
+  sort?: AgedInventorySort;
 }

@@ -5,10 +5,23 @@ import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { parseList } from '../../common/query/filter-params';
 import { PrismaService } from '../../prisma/prisma.service';
 import { agedQty, normalizeGroup } from './aged-inventory.calc';
-import { ListAgedInventoryQueryDto } from './aged-inventory.dto';
+import {
+  AgedInventorySort,
+  ListAgedInventoryQueryDto,
+} from './aged-inventory.dto';
 
 const DEFAULT_MIN_DAYS = 30;
 const DEFAULT_PAGE_SIZE = 100;
+
+/**
+ * Mặc định tồn nhiều lên trước — người dùng cần xử lý chỗ đọng nhiều hàng nhất. Hoà thì mã
+ * tồn lâu hơn lên trước; `sku`, `id` cuối cùng để phân trang ổn định.
+ */
+const ORDER_BY: Record<AgedInventorySort, Prisma.Sql> = {
+  on_hand_desc: Prisma.sql`s.on_hand DESC, s.days_in_stock DESC`,
+  days_in_stock_desc: Prisma.sql`s.days_in_stock DESC, s.on_hand DESC`,
+  sold_30d_desc: Prisma.sql`s.sold_30d DESC, s.on_hand DESC`,
+};
 
 type SnapshotLocation = {
   location_id: string | null;
@@ -106,7 +119,7 @@ export class AgedInventoryQueryService {
                s.age_basis, s.last_received_on, s.layers, s.sold_30d
         FROM "oms"."aged_inventory_snapshots" s
         WHERE ${where}
-        ORDER BY s.days_in_stock DESC, s.sku ASC NULLS LAST, s.id ASC
+        ORDER BY ${ORDER_BY[query.sort ?? 'on_hand_desc']}, s.sku ASC NULLS LAST, s.id ASC
         LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
     ]);
 
