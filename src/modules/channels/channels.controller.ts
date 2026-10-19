@@ -113,7 +113,7 @@ export class ChannelsController {
   }
 
   /**
-   * Kéo đơn mới từ Sapo ngay, không chờ cron. `since` (ISO) để chạy bù một khoảng cũ;
+   * Kéo đơn mới từ Sapo (không còn cron, chỉ chạy tay). `since` (ISO) để chạy bù một khoảng cũ;
    * bỏ trống thì lấy từ đơn Sapo mới nhất đang có trong DB.
    */
   @Post('sapo/sync')
@@ -135,7 +135,7 @@ export class ChannelsController {
   }
 
   /**
-   * Kéo lại tồn kho từ Sapo ngay, không chờ cron. Quét cả catalog nên chạy vài phút —
+   * Kéo lại tồn kho từ Sapo (không còn cron, chỉ chạy tay). Quét cả catalog nên chạy vài phút —
    * `inventory:receive` chứ không phải `order:create`: đây là thao tác sửa tồn.
    */
   @Post('sapo/inventory-sync')

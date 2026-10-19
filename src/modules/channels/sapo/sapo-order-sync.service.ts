@@ -16,7 +16,8 @@ import { resolveChannelSyncActorId } from '../channel-sync-actor';
 import { isWithinNotifyWindow } from '../sync-notify';
 
 /**
- * Kéo đơn mới từ Sapo vào bảng `orders` theo nhịp cron.
+ * Kéo đơn mới từ Sapo vào bảng `orders`, chạy tay qua `POST channels/sapo/sync` (cron đã gỡ
+ * 19/10/2026).
  *
  * Vì sao có file này: trước đây TikTok và Shopee đã có cron trong
  * `channel-sync.scheduler.ts`, còn đơn Sapo chỉ về DB khi có người chạy tay

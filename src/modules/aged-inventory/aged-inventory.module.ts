@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { SapoClient } from '../products/sapo-sync/sapo-client';
 import { AgedInventoryController } from './aged-inventory.controller';
 import { AgedInventoryQueryService } from './aged-inventory-query.service';
-import { AgedInventoryScheduler } from './aged-inventory.scheduler';
 import { AgedInventorySnapshotService } from './aged-inventory-snapshot.service';
 
 @Module({
@@ -12,7 +11,6 @@ import { AgedInventorySnapshotService } from './aged-inventory-snapshot.service'
     SapoClient,
     AgedInventorySnapshotService,
     AgedInventoryQueryService,
-    AgedInventoryScheduler,
   ],
 })
 export class AgedInventoryModule {}
