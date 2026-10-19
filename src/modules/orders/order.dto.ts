@@ -60,6 +60,40 @@ export class UpdateOrderLineDiscountDto {
   discount!: number;
 }
 
+/**
+ * Một dòng hàng của đơn sau khi sửa: có `id` là dòng đang có, không có `id`
+ * là dòng thêm mới (khi đó bắt buộc `variant_id`).
+ */
+export class UpdateOrderLineItemDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  variant_id?: string;
+
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+
+  /** Bỏ trống: dòng cũ giữ giá đã bán, dòng mới lấy giá niêm yết của kho */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  price?: number;
+
+  /** Tổng số tiền giảm của cả dòng (không phải mỗi đơn vị). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discount?: number;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
 /** Gợi ý giá trị cho ô nhập tự do của đơn (hiện chỉ có tag) */
 export class OrderFacetQueryDto {
   /** Lọc theo chuỗi con, bỏ dấu tiếng Việt — để ô chọn gõ tìm được */
@@ -514,6 +548,17 @@ export class UpdateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateOrderLineDiscountDto)
   items?: UpdateOrderLineDiscountDto[];
+
+  /**
+   * Danh sách dòng hàng ĐẦY ĐỦ sau khi sửa (thêm / bớt / đổi SL, giá, giảm
+   * giá) — dòng cũ không có mặt là bị xoá. Không gửi thì dòng hàng giữ nguyên.
+   * Không gửi kèm `items`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateOrderLineItemDto)
+  line_items?: UpdateOrderLineItemDto[];
 }
 
 export class OrderTransitionDto {

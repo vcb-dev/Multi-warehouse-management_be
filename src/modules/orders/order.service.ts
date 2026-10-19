@@ -37,6 +37,7 @@ import {
 } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
+import { variantTitle } from '../inventory/inventory.serializer';
 import { NotificationService } from '../notifications/notification.service';
 import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
@@ -75,6 +76,7 @@ import {
   OrderFacetQueryDto,
   UpdateOrderDto,
   UpdateOrderItemDto,
+  UpdateOrderLineItemDto,
 } from './order.dto';
 import {
   OrderRepository,
@@ -133,6 +135,34 @@ type ResolvedItem = {
   /// Giá vốn chốt tại thời điểm bán — cho báo cáo lợi nhuận không trôi khi giá vốn đổi
   costPrice: Prisma.Decimal;
 };
+
+/** Một dòng hàng của đơn sau khi sửa — `itemId` null là dòng thêm mới. */
+type EditedLine = {
+  itemId: bigint | null;
+  variantId: bigint;
+  productName: string;
+  variantTitle: string | null;
+  sku: string;
+  note: string | null;
+  quantity: number;
+  price: number;
+  discount: number;
+  costPrice: Prisma.Decimal | null;
+};
+
+function lineSnapshot(l: {
+  sku: string;
+  quantity: number;
+  price: number;
+  discount: number;
+}) {
+  return {
+    sku: l.sku,
+    quantity: l.quantity,
+    price: l.price,
+    discount: l.discount,
+  };
+}
 
 @Injectable()
 export class OrderService {
@@ -531,6 +561,17 @@ export class OrderService {
         ? dto.total_shipping_price
         : Number(order.totalShippingPrice);
 
+    if (dto.line_items && dto.items) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Chỉ gửi một trong hai: line_items hoặc items',
+        422,
+      );
+    }
+    const editedLines = dto.line_items
+      ? await this.resolveEditedLines(order, dto.line_items, user)
+      : null;
+
     const itemDiscounts = new Map<string, number>();
     for (const update of dto.items ?? []) {
       const item = order.items.find(
@@ -554,11 +595,18 @@ export class OrderService {
       itemDiscounts.set(update.id, update.discount);
     }
 
-    const pricedLines: PricedLine[] = order.items.map((i) => ({
-      quantity: i.quantity,
-      price: Number(i.price),
-      discount: itemDiscounts.get(i.id.toString()) ?? Number(i.totalDiscount),
-    }));
+    const pricedLines: PricedLine[] = editedLines
+      ? editedLines.map((l) => ({
+          quantity: l.quantity,
+          price: l.price,
+          discount: l.discount,
+        }))
+      : order.items.map((i) => ({
+          quantity: i.quantity,
+          price: Number(i.price),
+          discount:
+            itemDiscounts.get(i.id.toString()) ?? Number(i.totalDiscount),
+        }));
     // Thuế suất suy từ số liệu ĐÃ LƯU — giảm giá dòng vừa đổi làm tiền hàng mới
     // lệch khỏi mức thuế cũ, chia chéo sẽ ra tỷ lệ sai.
     const taxRate =
@@ -653,6 +701,10 @@ export class OrderService {
         });
       }
 
+      if (editedLines) {
+        await this.applyEditedLines(order, editedLines, user, tx);
+      }
+
       const record = await tx.order.update({
         where: { id },
         data,
@@ -667,20 +719,39 @@ export class OrderService {
           entityId: id,
           // Đổi người nhận là chuyện hay bị hỏi lại ("ai sửa địa chỉ?") —
           // giữ cả bản trước và sau.
-          metadata: recipientChanged
-            ? {
-                code: order.name,
-                recipient: {
-                  before: recipientSnapshot(order),
-                  after: recipientSnapshot({ ...order, ...shippingPatch }),
-                },
-              }
-            : { code: order.name },
+          metadata: {
+            code: order.name,
+            ...(recipientChanged
+              ? {
+                  recipient: {
+                    before: recipientSnapshot(order),
+                    after: recipientSnapshot({ ...order, ...shippingPatch }),
+                  },
+                }
+              : {}),
+            // Thêm/bớt hàng đổi cả tiền lẫn tồn giữ chỗ — giữ bản trước/sau để
+            // còn trả lời được "ai bỏ món này khỏi đơn?".
+            ...(editedLines
+              ? {
+                  line_items: {
+                    before: order.items.map((i) =>
+                      lineSnapshot({
+                        sku: i.sku,
+                        quantity: i.quantity,
+                        price: Number(i.price),
+                        discount: Number(i.totalDiscount),
+                      }),
+                    ),
+                    after: editedLines.map(lineSnapshot),
+                  },
+                }
+              : {}),
+          },
         },
       });
 
       return record;
-    });
+    }, TX_OPTIONS);
 
     return { data: serializeOrderDetail(updated) };
   }
@@ -1612,16 +1683,7 @@ export class OrderService {
         });
         price = resolved.price;
       } else if (!canOverridePrice) {
-        // Sapo `override_item_price`: không có quyền thì chỉ bán theo giá niêm
-        // yết. Trước đây API nhận giá bất kỳ từ bất kỳ ai tạo được đơn.
-        const listed = await this.pricing.listedPrices(variantId);
-        if (!listed.some((p) => Math.abs(p - price!) < 0.005)) {
-          throw new BusinessException(
-            'PRICE_OVERRIDE_FORBIDDEN',
-            `Bạn không có quyền sửa giá bán — ${variant.sku} phải bán theo giá niêm yết`,
-            403,
-          );
-        }
+        await this.assertListedPrice(variantId, variant.sku, price);
       }
 
       const discount = item.discount ?? 0;
@@ -1646,6 +1708,227 @@ export class OrderService {
       });
     }
     return result;
+  }
+
+  /**
+   * Sapo `override_item_price`: không có quyền thì chỉ bán theo giá niêm yết.
+   * Trước đây API nhận giá bất kỳ từ bất kỳ ai tạo được đơn.
+   */
+  private async assertListedPrice(
+    variantId: bigint,
+    sku: string,
+    price: number,
+  ) {
+    const listed = await this.pricing.listedPrices(variantId);
+    if (!listed.some((p) => Math.abs(p - price) < 0.005)) {
+      throw new BusinessException(
+        'PRICE_OVERRIDE_FORBIDDEN',
+        `Bạn không có quyền sửa giá bán — ${sku} phải bán theo giá niêm yết`,
+        403,
+      );
+    }
+  }
+
+  /**
+   * Kiểm và dựng danh sách dòng hàng mới của đơn đang sửa. Dòng cũ giữ giá
+   * đã bán nếu không gửi giá; chỉ khi giá THỰC SỰ đổi mới đòi quyền sửa giá,
+   * để đơn bán theo bảng giá cũ vẫn sửa được số lượng.
+   */
+  private async resolveEditedLines(
+    order: OrderWithRelations,
+    lines: UpdateOrderLineItemDto[],
+    user: AuthUser,
+  ): Promise<EditedLine[]> {
+    if (!lines.length) {
+      throw new BusinessException(
+        'VALIDATION_ERROR',
+        'Đơn phải có ít nhất một dòng',
+        422,
+      );
+    }
+    const canOverridePrice = hasLocationPermission(
+      user,
+      'order:override_price',
+      order.locationId.toString(),
+    );
+    const seen = new Set<string>();
+    const result: EditedLine[] = [];
+
+    for (const line of lines) {
+      let edited: EditedLine;
+      if (line.id) {
+        const item = order.items.find((c) => c.id.toString() === line.id);
+        if (!item || seen.has(line.id)) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            'Dòng sản phẩm không thuộc đơn hàng này',
+            422,
+          );
+        }
+        seen.add(line.id);
+        const oldPrice = Number(item.price);
+        const price = line.price ?? oldPrice;
+        if (!canOverridePrice && Math.abs(price - oldPrice) >= 0.005) {
+          await this.assertListedPrice(item.variantId, item.sku, price);
+        }
+        edited = {
+          itemId: item.id,
+          variantId: item.variantId,
+          productName: item.name,
+          variantTitle: item.variantTitle,
+          sku: item.sku,
+          note: line.note !== undefined ? line.note.trim() || null : item.note,
+          quantity: line.quantity,
+          price,
+          discount: line.discount ?? Number(item.totalDiscount),
+          costPrice: item.costPrice,
+        };
+      } else {
+        if (!line.variant_id) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            'Dòng thêm mới phải có variant_id',
+            422,
+          );
+        }
+        const variantId = BigInt(line.variant_id);
+        const variant = await this.repo.client.productVariant.findUnique({
+          where: { id: variantId },
+          include: { product: true },
+        });
+        if (!variant) {
+          throw new BusinessException(
+            'VALIDATION_ERROR',
+            `Không tìm thấy phiên bản ${line.variant_id}`,
+            422,
+          );
+        }
+        let price = line.price;
+        if (price === undefined) {
+          const resolved = await this.pricing.resolvePrice(variantId, {
+            location_id: order.locationId,
+          });
+          price = resolved.price;
+        } else if (!canOverridePrice) {
+          await this.assertListedPrice(variantId, variant.sku, price);
+        }
+        edited = {
+          itemId: null,
+          variantId,
+          productName: variant.product.name,
+          variantTitle: variantTitle(variant.title),
+          sku: variant.sku,
+          note: line.note?.trim() || null,
+          quantity: line.quantity,
+          price,
+          discount: line.discount ?? 0,
+          costPrice: variant.cost,
+        };
+      }
+
+      if (edited.discount > edited.quantity * edited.price) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          `Giảm giá của ${edited.sku} không được vượt quá tiền hàng`,
+          422,
+        );
+      }
+      result.push(edited);
+    }
+    return result;
+  }
+
+  /**
+   * Ghi dòng hàng mới của đơn + giữ/nhả tồn `committed` theo chênh lệch số
+   * lượng từng phiên bản (tạo đơn đã giữ chỗ, huỷ đơn nhả theo dòng hiện có —
+   * lệch ở đây là tồn giữ chỗ trôi vĩnh viễn).
+   */
+  private async applyEditedLines(
+    order: OrderWithRelations,
+    lines: EditedLine[],
+    user: AuthUser,
+    tx: Prisma.TransactionClient,
+  ) {
+    const keptIds = new Set(
+      lines.filter((l) => l.itemId !== null).map((l) => l.itemId!),
+    );
+    const removedIds = order.items
+      .filter((i) => !keptIds.has(i.id))
+      .map((i) => i.id);
+    if (removedIds.length) {
+      await tx.orderItem.deleteMany({ where: { id: { in: removedIds } } });
+    }
+
+    for (const l of lines) {
+      const data = {
+        note: l.note,
+        quantity: l.quantity,
+        price: l.price,
+        totalDiscount: l.discount,
+        discountedTotal: calcLineTotal(l),
+        originalTotal: l.quantity * l.price,
+      };
+      if (l.itemId !== null) {
+        await tx.orderItem.update({ where: { id: l.itemId }, data });
+      } else {
+        await tx.orderItem.create({
+          data: {
+            ...data,
+            orderId: order.id,
+            variantId: l.variantId,
+            name: l.productName,
+            variantTitle: l.variantTitle,
+            sku: l.sku,
+            costPrice: l.costPrice,
+          },
+        });
+      }
+    }
+
+    const deltas = new Map<bigint, number>();
+    for (const i of order.items) {
+      deltas.set(i.variantId, (deltas.get(i.variantId) ?? 0) - i.quantity);
+    }
+    for (const l of lines) {
+      deltas.set(l.variantId, (deltas.get(l.variantId) ?? 0) + l.quantity);
+    }
+    const changes = sortForLocking(
+      [...deltas]
+        .filter(([, change]) => change !== 0)
+        .map(([variantId, change]) => ({ variantId, change })),
+    );
+    for (const { variantId, change } of changes) {
+      let amount = change;
+      if (change < 0) {
+        // Đơn cũ (đồng bộ Sapo, hoặc trước đợt xoá tồn 14/09) có thể chưa
+        // từng giữ chỗ — nhả quá số đang giữ thì bị chặn, mà bỏ hàng khỏi đơn
+        // không được phép thất bại vì chuyện đó.
+        const level = await tx.inventoryLevel.findUnique({
+          where: {
+            variantId_locationId: { variantId, locationId: order.locationId },
+          },
+          select: { committed: true },
+        });
+        amount = -Math.min(-change, Math.max(0, level?.committed ?? 0));
+        if (amount === 0) continue;
+      }
+      await this.inventory.applyMovement(
+        {
+          variantId,
+          locationId: order.locationId,
+          bucket: InventoryBucket.committed,
+          change: amount,
+          type:
+            amount > 0
+              ? MovementType.order_reserve
+              : MovementType.order_release,
+          referenceType: 'order',
+          referenceId: order.id,
+          createdById: user.userId,
+        },
+        tx,
+      );
+    }
   }
 
   private shippingAddressComplete(sa?: ShippingAddressDto | null) {
