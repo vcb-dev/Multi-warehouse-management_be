@@ -13,7 +13,8 @@ import { AgedInventorySnapshotService } from './aged-inventory-snapshot.service'
 import { ListAgedInventoryQueryDto } from './aged-inventory.dto';
 
 /**
- * Trang sức tồn lâu — đọc từ snapshot do cron 0h dựng (xem `AgedInventoryScheduler`).
+ * Trang sức tồn lâu — đọc từ snapshot dựng bằng `POST aged-inventory/refresh` (cron 0h đã gỡ
+ * 19/10/2026, không còn lượt tự chạy).
  * Hệ thống ngoài gọi bằng header `x-api-key`; quyền của key là quyền của user mà key
  * đứng tên, nên user đó cần `inventory:view`.
  */
@@ -36,7 +37,7 @@ export class AgedInventoryController {
     return this.query.list(query, user);
   }
 
-  /** Dựng lại snapshot hôm nay ngay, không chờ cron — chạy nền ~10 phút. */
+  /** Dựng lại snapshot hôm nay — cách duy nhất để có snapshot mới, chạy nền ~10 phút. */
   @Post('refresh')
   @RequirePermission('role:manage')
   @LocationOptional()

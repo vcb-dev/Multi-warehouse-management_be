@@ -186,7 +186,7 @@ export function daysSince(since: Date, asOf: string): number {
 
 /**
  * Khung `[min, max)` của `days` ngày lịch VN tròn TRƯỚC ngày `asOf` (không gồm hôm nay):
- * cron 0h ngày 18 đếm đơn từ 0h ngày 18 tháng trước tới 0h ngày 18. Chạy tay giữa ngày
+ * snapshot ngày 18 đếm đơn từ 0h ngày 18 tháng trước tới 0h ngày 18. Chạy giữa ngày
  * ra cùng con số, không lẫn nửa ngày hôm nay.
  */
 export function salesWindow(

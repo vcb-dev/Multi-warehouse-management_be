@@ -68,7 +68,8 @@ type ExistingProduct = {
 };
 
 /**
- * Đồng bộ sản phẩm từ Sapo, chạy định kỳ qua `SapoProductSyncScheduler`.
+ * Đồng bộ sản phẩm từ Sapo. Cron `SapoProductSyncScheduler` đã gỡ 19/10/2026 nên hiện chưa
+ * có đường nào gọi `syncAll()` — giữ lại để nối vào endpoint/script khi cần chạy tay.
  *
  * BỐI CẢNH (20/08/2026): dự án chưa từng có đường sync sản phẩm tự động — mọi
  * việc trước đây làm bằng script chạy tay (`backend/scripts/*.js`). Một đợt
@@ -84,7 +85,7 @@ type ExistingProduct = {
  *    nguyên giá trị cũ (không có gì để mất), chỉ log cảnh báo để soát tay.
  *    Với dòng mới tạo thì dùng mã tạm CÓ ĐÁNH DẤU RÕ (`SKU-PENDING-<id>`) —
  *    cố tình khác hẳn tên đợt bug cũ để không lẫn, và tăng bộ đếm
- *    `skuConflicts`/`aliasConflicts` để `SapoProductSyncScheduler` log ra ngoài.
+ *    `skuConflicts`/`aliasConflicts` để bên gọi log ra ngoài.
  * 3. KHÔNG BAO GIỜ xoá sản phẩm/phiên bản tự động — nếu Sapo không còn trả về
  *    một sản phẩm, dữ liệu cục bộ vẫn giữ nguyên (xoá cần soát tay, xem
  *    `scripts/merge-duplicate-products*.js` cho quy trình gộp/xoá an toàn).

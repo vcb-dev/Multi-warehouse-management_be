@@ -106,7 +106,7 @@ const round = (v: unknown) => Math.round(Number(v ?? 0));
 @Injectable()
 export class AgedInventorySnapshotService {
   private readonly logger = new Logger(AgedInventorySnapshotService.name);
-  /** Dùng chung cho cron và nút chạy tay — một lượt dài ~10 phút, không cho chồng nhau. */
+  /** Một lượt dài ~10 phút, không cho hai lần bấm chạy tay chồng nhau. */
   private running = false;
 
   constructor(
