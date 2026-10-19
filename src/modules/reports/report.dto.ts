@@ -23,6 +23,11 @@ export class RunReportQueryDto {
   @IsString()
   location_id?: string;
 
+  /** Nhiều kho ngăn bằng dấu phẩy (`1,4`); thay cho `location_id` đơn lẻ */
+  @IsOptional()
+  @IsString()
+  location_ids?: string;
+
   /** `orders.source_name` — kênh bán */
   @IsOptional()
   @IsString()

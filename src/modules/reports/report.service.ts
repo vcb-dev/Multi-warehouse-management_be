@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { assertLocationAccess, isAdminUser } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
+import { firstDefined, parseList } from '../../common/query/filter-params';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   canViewCost,
@@ -327,7 +328,11 @@ export class ReportService {
     if (!def) throw new NotFoundException('Không tìm thấy báo cáo');
     this.assertCanView(def, user);
 
-    const locationIds = await this.resolveLocations(query.location_id, user);
+    // `location_id` là tên cũ (lưu trong báo cáo đã ghim); `location_ids` nhận nhiều kho.
+    const locationIds = await this.resolveLocations(
+      firstDefined(query.location_ids, query.location_id),
+      user,
+    );
     const { from, to } = this.resolveRange(query.from, query.to);
 
     return {
@@ -354,15 +359,26 @@ export class ReportService {
    *
    * SQL báo cáo dùng `IN (...)` nên phải trả danh sách id thật, không dùng được
    * quy ước `undefined = không lọc` như `locationScopeFilter`.
+   *
+   * Nhận một kho hoặc nhiều kho ngăn bằng dấu phẩy (`4` / `1,4`).
    */
   private async resolveLocations(
-    locationId: string | undefined,
+    locationParam: string | undefined,
     user: AuthUser,
   ): Promise<bigint[]> {
-    if (locationId) {
-      const id = BigInt(locationId);
-      assertLocationAccess(user, id);
-      return [id];
+    const requested = parseList(locationParam);
+    if (requested) {
+      if (requested.some((v) => !/^\d+$/.test(v))) {
+        throw new BusinessException(
+          'VALIDATION_ERROR',
+          'Mã kho không hợp lệ',
+          422,
+        );
+      }
+      const ids = [...new Set(requested)].map((v) => BigInt(v));
+      // Kiểm từng kho: chọn nhiều kho không được lách ra ngoài phạm vi được gán.
+      for (const id of ids) assertLocationAccess(user, id);
+      return ids;
     }
     if (isAdminUser(user)) {
       const all = await this.prisma.location.findMany({ select: { id: true } });
