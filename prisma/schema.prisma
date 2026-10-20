@@ -559,6 +559,11 @@ model Location {
   offlineStore           Boolean   @default(false) @map("offline_store")
   ownerType              String?   @map("owner_type")
   inventoryProcessStatus String?   @map("inventory_process_status")
+  /// Tên người gửi in trên phiếu giao + gửi sang hãng vận chuyển (Sapo in thẳng tên
+  /// chi nhánh). Riêng của app, đồng bộ kho Sapo không ghi đè. Trống ⇒ dùng `name`.
+  senderName             String?   @map("sender_name")
+  /// SĐT người gửi để khách/hãng gọi lại. Trống ⇒ dùng `phone`.
+  senderPhone            String?   @map("sender_phone")
   createdOn              DateTime  @default(now()) @map("created_on")
   modifiedOn             DateTime  @updatedAt @map("modified_on")
 

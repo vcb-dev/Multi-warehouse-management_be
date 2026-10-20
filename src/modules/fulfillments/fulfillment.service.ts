@@ -79,6 +79,7 @@ import {
   serializePackingListItem,
 } from './packing-list';
 import { KeyedSerialQueue } from '../../common/utils/keyed-serial-queue';
+import { locationSender } from './location-sender';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
 
@@ -726,9 +727,12 @@ export class FulfillmentService {
       where: { id: locationId },
     });
     if (branch) {
+      // Người gửi theo cấu hình riêng của kho (tên shop + SĐT gọi lại) — chụp vào
+      // origin_* để phiếu giao in đúng, và gửi luôn sang hãng.
+      const sender = locationSender(branch);
       location = {
-        name: branch.name,
-        phone: branch.phone,
+        name: sender.name,
+        phone: sender.phone,
         address: branch.address1,
         ward: branch.ward,
         district: branch.district,
