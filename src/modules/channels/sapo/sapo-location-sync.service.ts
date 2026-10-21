@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../prisma/prisma.service';
 import { BusinessException } from '../../../common/exceptions/business.exception';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { SapoClient } from '../../products/sapo-sync/sapo-client';
 
 /**
@@ -189,6 +189,8 @@ export class SapoLocationSyncService {
       const before = await this.prisma.location.findUniqueOrThrow({
         where: { id: current.id },
       });
+      // ponytail: Sapo hay để phone rỗng; không đè SĐT đã nhập trong OMS.
+      if (!data.phone && before.phone) data.phone = before.phone;
       const changed = (Object.keys(data) as (keyof LocationScalars)[]).some(
         (k) => `${before[k] ?? ''}` !== `${data[k] ?? ''}`,
       );
