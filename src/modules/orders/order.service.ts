@@ -37,7 +37,10 @@ import {
 } from '../../common/exceptions/business.exception';
 import { InventoryService } from '../inventory/inventory.service';
 import { sortForLocking } from '../inventory/inventory.types';
-import { variantTitle } from '../inventory/inventory.serializer';
+import {
+  optionValueLabels,
+  variantTitle,
+} from '../inventory/inventory.serializer';
 import { NotificationService } from '../notifications/notification.service';
 import { PriceListService } from '../pricing/price-list.service';
 import { VoucherService } from '../vouchers/voucher.service';
@@ -1668,7 +1671,10 @@ export class OrderService {
       const locationId = BigInt(item.location_id);
       const variant = await this.repo.client.productVariant.findUnique({
         where: { id: variantId },
-        include: { product: true },
+        include: {
+          product: true,
+          optionValues: { include: { option: true } },
+        },
       });
       if (!variant) {
         throw new BusinessException(
@@ -1700,7 +1706,10 @@ export class OrderService {
         variantId,
         locationId,
         productName: variant.product.name,
-        variantTitle: variantTitle(variant.title),
+        variantTitle: variantTitle(
+          variant.title,
+          optionValueLabels(variant.optionValues),
+        ),
         sku: variant.sku,
         note: item.note?.trim() || null,
         quantity: item.quantity,
@@ -1797,7 +1806,10 @@ export class OrderService {
         const variantId = BigInt(line.variant_id);
         const variant = await this.repo.client.productVariant.findUnique({
           where: { id: variantId },
-          include: { product: true },
+          include: {
+            product: true,
+            optionValues: { include: { option: true } },
+          },
         });
         if (!variant) {
           throw new BusinessException(
@@ -1819,7 +1831,10 @@ export class OrderService {
           itemId: null,
           variantId,
           productName: variant.product.name,
-          variantTitle: variantTitle(variant.title),
+          variantTitle: variantTitle(
+            variant.title,
+            optionValueLabels(variant.optionValues),
+          ),
           sku: variant.sku,
           note: line.note?.trim() || null,
           quantity: line.quantity,

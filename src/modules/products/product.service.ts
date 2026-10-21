@@ -355,6 +355,7 @@ export class ProductService {
             data: {
               productId: p.id,
               sku: vr.sku,
+              title: vr.optionValues.filter(Boolean).join(' / ') || null,
               price: vr.price,
               cost: vr.cost ?? 0,
               compareAtPrice: vr.compareAtPrice,
@@ -990,6 +991,7 @@ export class ProductService {
         await tx.productVariant.update({
           where: { id: match.id },
           data: {
+            title: d.optionValues.filter(Boolean).join(' / ') || null,
             price: d.price,
             cost: d.cost ?? match.cost,
             compareAtPrice: d.compareAtPrice,
@@ -1024,6 +1026,7 @@ export class ProductService {
           data: {
             productId,
             sku: desiredSku,
+            title: d.optionValues.filter(Boolean).join(' / ') || null,
             price: d.price,
             cost: d.cost ?? 0,
             compareAtPrice: d.compareAtPrice,
