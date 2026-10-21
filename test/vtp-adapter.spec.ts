@@ -133,6 +133,9 @@ describe('VTP-3 tạo vận đơn', () => {
 
     expect(client.loginVtp).toHaveBeenCalledWith('secret-token');
     expect(result.trackingNumber).toBe('VTP123');
+    expect(result.trackingUrl).toBe(
+      'https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=VTP123',
+    );
     expect(result.shippingFee).toBe(16500);
     const createPayload = (
       client.createOrderNlp.mock.calls[0] as unknown[]

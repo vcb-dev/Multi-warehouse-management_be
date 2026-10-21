@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { hasPermission } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UpdateLocationSenderDto } from './config.dto';
 import {
   CreateLocationDto,
   ListLocationsQueryDto,
@@ -26,7 +27,7 @@ export class ConfigService {
       orderBy: [{ defaultLocation: 'desc' }, { name: 'asc' }],
     });
 
-    return { data: data.map(this.toResponse) };
+    return { data: data.map(serializeLocation) };
   }
 
   async createLocation(dto: CreateLocationDto) {
@@ -49,7 +50,7 @@ export class ConfigService {
         },
       });
     });
-    return this.toResponse(created);
+    return serializeLocation(created);
   }
 
   async updateLocation(id: bigint, dto: UpdateLocationDto) {
@@ -88,7 +89,7 @@ export class ConfigService {
         },
       });
     });
-    return this.toResponse(updated);
+    return serializeLocation(updated);
   }
 
   /** Soft-delete. Không xóa hàng — FK đơn/tồn sẽ chặn. */
@@ -97,6 +98,26 @@ export class ConfigService {
       status: 'inactive',
       default_location: false,
     });
+  }
+
+  async updateLocationSender(id: bigint, dto: UpdateLocationSenderDto) {
+    const exists = await this.prisma.location.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Không tìm thấy kho');
+
+    // undefined = giữ nguyên, '' = xoá (lùi về name/phone của kho)
+    const clean = (v: string | undefined) =>
+      v === undefined ? undefined : v.trim() || null;
+    const updated = await this.prisma.location.update({
+      where: { id },
+      data: {
+        senderName: clean(dto.sender_name),
+        senderPhone: clean(dto.sender_phone),
+      },
+    });
+    return { data: serializeLocation(updated) };
   }
 
   private async assertCodeFree(code?: string | null, exceptId?: bigint) {
@@ -110,6 +131,7 @@ export class ConfigService {
       });
     }
   }
+
   /* Xóa default location khác nếu có */
   private async clearDefault(tx: Prisma.TransactionClient, exceptId?: bigint) {
     await tx.location.updateMany({
@@ -120,52 +142,56 @@ export class ConfigService {
       data: { defaultLocation: false },
     });
   }
+}
 
-  private toResponse(l: {
-    id: bigint;
-    sapoId: bigint | null;
-    code: string | null;
-    name: string;
-    status: string;
-    defaultLocation: boolean;
-    phone: string | null;
-    email: string | null;
-    address1: string | null;
-    address2: string | null;
-    city: string | null;
-    province: string | null;
-    provinceCode: string | null;
-    district: string | null;
-    districtCode: string | null;
-    ward: string | null;
-    wardCode: string | null;
-    country: string | null;
-    countryCode: string | null;
-    zip: string | null;
-    inventoryManagement: boolean;
-  }) {
-    return {
-      id: l.id.toString(),
-      sapo_id: l.sapoId?.toString() ?? null,
-      code: l.code,
-      name: l.name,
-      status: l.status,
-      default_location: l.defaultLocation,
-      phone: l.phone,
-      email: l.email,
-      address1: l.address1,
-      address2: l.address2,
-      city: l.city,
-      province: l.province,
-      province_code: l.provinceCode,
-      district: l.district,
-      district_code: l.districtCode,
-      ward: l.ward,
-      ward_code: l.wardCode,
-      country: l.country,
-      country_code: l.countryCode,
-      zip: l.zip,
-      inventory_management: l.inventoryManagement,
-    };
-  }
+function serializeLocation(l: {
+  id: bigint;
+  sapoId: bigint | null;
+  code: string | null;
+  name: string;
+  status: string;
+  defaultLocation: boolean;
+  phone: string | null;
+  email: string | null;
+  address1: string | null;
+  address2: string | null;
+  city: string | null;
+  province: string | null;
+  provinceCode: string | null;
+  district: string | null;
+  districtCode: string | null;
+  ward: string | null;
+  wardCode: string | null;
+  country: string | null;
+  countryCode: string | null;
+  zip: string | null;
+  inventoryManagement: boolean;
+  senderName?: string | null;
+  senderPhone?: string | null;
+}) {
+  return {
+    id: l.id.toString(),
+    sapo_id: l.sapoId?.toString() ?? null,
+    code: l.code,
+    name: l.name,
+    status: l.status,
+    default_location: l.defaultLocation,
+    phone: l.phone,
+    email: l.email,
+    address1: l.address1,
+    address2: l.address2,
+    city: l.city,
+    province: l.province,
+    province_code: l.provinceCode,
+    district: l.district,
+    district_code: l.districtCode,
+    ward: l.ward,
+    ward_code: l.wardCode,
+    country: l.country,
+    country_code: l.countryCode,
+    zip: l.zip,
+    inventory_management: l.inventoryManagement,
+    sender_name: l.senderName ?? null,
+    sender_phone: l.senderPhone ?? null,
+  };
 }

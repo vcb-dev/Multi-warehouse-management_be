@@ -1,5 +1,5 @@
-import { BusinessException } from '../../common/exceptions/business.exception';
-import { ConfigService } from './config.service';
+import { BusinessException } from '../src/common/exceptions/business.exception';
+import { ConfigService } from '../src/modules/config/config.service';
 
 function prismaStub() {
   const location = {
@@ -12,8 +12,8 @@ function prismaStub() {
   };
   return {
     location,
-    $transaction: jest.fn(async (fn: (tx: typeof location) => unknown) =>
-      fn(location),
+    $transaction: jest.fn(async (fn: (tx: { location: typeof location }) => unknown) =>
+      fn({ location }),
     ),
   };
 }

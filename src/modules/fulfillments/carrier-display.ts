@@ -26,3 +26,32 @@ export function carrierDisplayName(f: {
     null
   );
 }
+
+/** Trang tra cứu hành trình ViettelPost — đúng mẫu Sapo ghi vào `tracking_url` (11k vận đơn VTP trong bản backup 14/09/2026). */
+export function vtpTrackingUrl(trackingNumber: string): string {
+  return `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(trackingNumber)}`;
+}
+
+/**
+ * Link xem hành trình vận đơn trên trang của hãng.
+ *
+ * Ưu tiên `tracking_url` đã lưu (Sapo/sàn trả về). Vận đơn ViettelPost do app tạo trước
+ * khi adapter ghi link thì `tracking_url` trống — dựng lại từ mã vận đơn.
+ */
+export function carrierTrackingUrl(f: {
+  trackingUrl?: string | null;
+  trackingNumber?: string | null;
+  provider?: { code: string } | null;
+  carrier?: string | null;
+  carrierName?: string | null;
+}): string | null {
+  const stored = f.trackingUrl?.trim();
+  if (stored) return stored;
+  const trackingNumber = f.trackingNumber?.trim();
+  if (!trackingNumber) return null;
+  const isVtp =
+    f.provider?.code === 'viettel_post' ||
+    f.carrier === 'VIETTEL_POST' ||
+    /viettel\s*post/i.test(f.carrierName ?? '');
+  return isVtp ? vtpTrackingUrl(trackingNumber) : null;
+}

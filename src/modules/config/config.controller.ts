@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -18,6 +19,7 @@ import {
   RequirePermission,
 } from '../../common/decorators/permissions.decorator';
 import { ConfigService } from './config.service';
+import { UpdateLocationSenderDto } from './config.dto';
 import {
   CreateLocationDto,
   ListLocationsQueryDto,
@@ -58,5 +60,18 @@ export class ConfigController {
   @LocationOptional()
   deactivateLocation(@Param('id') id: string) {
     return this.config.deactivateLocation(BigInt(id));
+  }
+
+  /**
+   * Thông tin người gửi của kho (in trên phiếu giao, gửi sang hãng khi tạo vận
+   * đơn) — cùng nhóm "Cấu hình vận chuyển".
+   */
+  @Put('locations/:id')
+  @RequirePermission('shipping:manage')
+  updateLocationSender(
+    @Param('id') id: string,
+    @Body() dto: UpdateLocationSenderDto,
+  ) {
+    return this.config.updateLocationSender(BigInt(id), dto);
   }
 }

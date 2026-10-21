@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { userDisplayName } from '../../common/utils/user-display-name';
-import { carrierDisplayName } from './carrier-display';
+import { carrierDisplayName, carrierTrackingUrl } from './carrier-display';
 
 const fulfillmentInclude = {
   packer: {
@@ -55,7 +55,8 @@ export function serializeFulfillment(f: FulfillmentWithRelations) {
       tracking_urls: f.trackingUrls,
     },
     tracking_number: f.trackingNumber,
-    tracking_url: f.trackingUrl,
+    // Có fallback dựng link VTP khi chưa lưu — `tracking_info.tracking_url` giữ nguyên giá trị gốc.
+    tracking_url: carrierTrackingUrl(f),
     shipping_label_slip_url: f.shippingLabelSlipUrl,
     shipping_label_slip_error: f.shippingLabelSlipError,
     notify_customer: f.notifyCustomer,
