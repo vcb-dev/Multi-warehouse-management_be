@@ -6,10 +6,25 @@ import {
   Location,
 } from '@prisma/client';
 
+type OptionValueRef = { value: string; option?: { position?: number } | null };
+
 type LevelWithRelations = InventoryLevel & {
-  variant: ProductVariant & { product: Product };
+  variant: ProductVariant & {
+    product: Product;
+    optionValues?: OptionValueRef[];
+  };
   location: Location;
 };
+
+/** Giá trị thuộc tính theo thứ tự option trên sản phẩm. */
+export function optionValueLabels(
+  optionValues?: readonly OptionValueRef[] | null,
+): string[] {
+  if (!optionValues?.length) return [];
+  return [...optionValues]
+    .sort((a, b) => (a.option?.position ?? 0) - (b.option?.position ?? 0))
+    .map((ov) => ov.value);
+}
 
 /**
  * Tên phân loại của phiên bản ("Size 35 / Màu Đen") — thứ duy nhất phân biệt
@@ -18,11 +33,21 @@ type LevelWithRelations = InventoryLevel & {
  * Sapo đặt `Default Title` cho sản phẩm không có thuộc tính nào (11.474 phiên
  * bản đang có), đưa xuống giao diện thì mọi dòng đều đeo một nhãn vô nghĩa —
  * trả null để bên hiển thị khỏi phải biết quy ước này.
+ *
+ * SP tạo trong OMS thường để `title` trống, chỉ có `option_values` — ghép
+ * chúng khi title không dùng được.
  */
-export function variantTitle(title: string | null): string | null {
+export function variantTitle(
+  title: string | null | undefined,
+  optionValues?: readonly string[] | null,
+): string | null {
   const value = title?.trim();
-  if (!value || value.toLowerCase() === 'default title') return null;
-  return value;
+  if (value && value.toLowerCase() !== 'default title') return value;
+  const fromOpts = (optionValues ?? [])
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(' / ');
+  return fromOpts || null;
 }
 
 export function serializeLevel(level: LevelWithRelations) {
@@ -32,7 +57,10 @@ export function serializeLevel(level: LevelWithRelations) {
     product_id: level.variant.productId.toString(),
     sku: level.variant.sku,
     product_name: level.variant.product.name,
-    variant_title: variantTitle(level.variant.title),
+    variant_title: variantTitle(
+      level.variant.title,
+      optionValueLabels(level.variant.optionValues),
+    ),
     // Ảnh riêng của phiên bản mới nói lên phân loại; chỉ 16% phiên bản của
     // sản phẩm nhiều phân loại có ảnh riêng nên vẫn phải lùi về ảnh sản phẩm.
     image_url: level.variant.imageUrl ?? level.variant.product.imageUrl ?? null,

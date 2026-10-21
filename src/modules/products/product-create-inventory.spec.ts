@@ -133,12 +133,14 @@ describe('ProductService.create — phiên bản và tồn ban đầu', () => {
       } as never,
       adminAuth(),
     );
-    const skus = (
-      tx.productVariant.create.mock.calls as unknown as [
-        { data: { sku: string } },
-      ][]
-    ).map(([arg]) => arg.data.sku);
-    expect(skus).toEqual(['DO-S', 'XANH-M']);
+    const created = tx.productVariant.create.mock.calls as unknown as [
+      { data: { sku: string; title: string | null } },
+    ][];
+    expect(created.map(([arg]) => arg.data.sku)).toEqual(['DO-S', 'XANH-M']);
+    expect(created.map(([arg]) => arg.data.title)).toEqual([
+      'Đỏ / S',
+      'Xanh / M',
+    ]);
   });
 
   it('không gửi phiên bản nào thì vẫn sinh đủ tổ hợp (và đòi SKU)', async () => {

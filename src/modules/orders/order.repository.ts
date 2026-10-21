@@ -6,7 +6,15 @@ const orderInclude = {
   items: {
     include: {
       variant: {
-        select: { productId: true, imageUrl: true, unit: true, title: true },
+        select: {
+          productId: true,
+          imageUrl: true,
+          unit: true,
+          title: true,
+          optionValues: {
+            select: { value: true, option: { select: { position: true } } },
+          },
+        },
       },
     },
   },

@@ -10,7 +10,10 @@ import { PrismaModule } from '../src/prisma/prisma.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InventoryModule } from '../src/modules/inventory/inventory.module';
 import { InventoryQueryService } from '../src/modules/inventory/inventory-query.service';
-import { variantTitle } from '../src/modules/inventory/inventory.serializer';
+import {
+  optionValueLabels,
+  variantTitle,
+} from '../src/modules/inventory/inventory.serializer';
 import { adminAuth } from './helpers/auth';
 
 const describeIfDb =
@@ -30,6 +33,23 @@ describe('variantTitle', () => {
     expect(variantTitle('   ')).toBeNull();
     expect(variantTitle('Default Title')).toBeNull();
     expect(variantTitle('default title')).toBeNull();
+  });
+
+  it('title trống / Default Title thì ghép thuộc tính', () => {
+    expect(variantTitle(null, ['Gold'])).toBe('Gold');
+    expect(variantTitle('Default Title', ['Size 35', 'Màu Đen'])).toBe(
+      'Size 35 / Màu Đen',
+    );
+    expect(variantTitle('Gold', ['ignored'])).toBe('Gold');
+  });
+
+  it('optionValueLabels xếp theo position của option', () => {
+    expect(
+      optionValueLabels([
+        { value: 'Đen', option: { position: 1 } },
+        { value: '35', option: { position: 0 } },
+      ]),
+    ).toEqual(['35', 'Đen']);
   });
 });
 

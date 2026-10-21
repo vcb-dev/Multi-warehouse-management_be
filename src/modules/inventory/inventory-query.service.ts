@@ -18,6 +18,7 @@ import {
 } from '../../common/query/filter-params';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import {
+  optionValueLabels,
   serializeLevel,
   serializeMovement,
   variantTitle,
@@ -241,7 +242,12 @@ export class InventoryQueryService {
       this.prisma.inventoryLevel.findMany({
         where,
         include: {
-          variant: { include: { product: true } },
+          variant: {
+            include: {
+              product: true,
+              optionValues: { include: { option: true } },
+            },
+          },
           location: true,
         },
         skip: (page - 1) * pageSize,
@@ -292,6 +298,7 @@ export class InventoryQueryService {
 
     const include = {
       product: true,
+      optionValues: { include: { option: true } },
       inventoryLevels: { where: { locationId } },
     } satisfies Prisma.ProductVariantInclude;
 
@@ -325,7 +332,10 @@ export class InventoryQueryService {
         product_id: v.productId.toString(),
         sku: v.sku,
         product_name: v.product.name,
-        variant_title: variantTitle(v.title),
+        variant_title: variantTitle(
+          v.title,
+          optionValueLabels(v.optionValues),
+        ),
         image_url: v.imageUrl ?? v.product.imageUrl ?? null,
         unit: v.unit ?? null,
         location_code: location.code,
