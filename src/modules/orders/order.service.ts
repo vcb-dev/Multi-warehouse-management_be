@@ -126,6 +126,7 @@ type ResolvedItem = {
   variantId: bigint;
   locationId: bigint;
   productName: string;
+  variantTitle: string | null;
   sku: string;
   note: string | null;
   quantity: number;
@@ -1126,6 +1127,7 @@ export class OrderService {
               create: resolvedItems.map((i) => ({
                 variantId: i.variantId,
                 name: i.productName,
+                variantTitle: i.variantTitle,
                 sku: i.sku,
                 note: i.note,
                 quantity: i.quantity,
@@ -1698,6 +1700,7 @@ export class OrderService {
         variantId,
         locationId,
         productName: variant.product.name,
+        variantTitle: variantTitle(variant.title),
         sku: variant.sku,
         note: item.note?.trim() || null,
         quantity: item.quantity,

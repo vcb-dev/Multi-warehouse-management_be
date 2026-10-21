@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { carrierDisplayName } from '../fulfillments/carrier-display';
 import { serializeFulfillment } from '../fulfillments/fulfillment.serializer';
 import { userDisplayName } from '../../common/utils/user-display-name';
+import { variantTitle } from '../inventory/inventory.serializer';
 import { OrderWithRelations } from './order.repository';
 
 function dec(v: Prisma.Decimal): number {
@@ -259,7 +260,8 @@ export function serializeOrderDetail(o: OrderWithRelations) {
         i.productId?.toString() ?? i.variant?.productId.toString() ?? null,
       inventory_item_id: i.inventoryItemId?.toString() ?? null,
       name: i.name,
-      variant_title: i.variantTitle,
+      // Đơn tạo trong app trước khi lưu variant_title thì để trống — lấy tên phiên bản hiện tại.
+      variant_title: i.variantTitle ?? variantTitle(i.variant?.title ?? null),
       note: i.note,
       sku: i.sku,
       image_url: i.variant?.imageUrl ?? null,
