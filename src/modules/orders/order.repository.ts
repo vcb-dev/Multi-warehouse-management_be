@@ -5,7 +5,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 const orderInclude = {
   items: {
     include: {
-      variant: { select: { productId: true, imageUrl: true, unit: true } },
+      variant: {
+        select: { productId: true, imageUrl: true, unit: true, title: true },
+      },
     },
   },
   customer: true,
