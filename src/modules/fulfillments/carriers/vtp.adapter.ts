@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ShipmentStatus, ShippingFeePayer } from '@prisma/client';
 import { BusinessException } from '../../../common/exceptions/business.exception';
+import { vtpTrackingUrl } from '../carrier-display';
 import {
   CarrierAdapter,
   CarrierConnectionConfig,
@@ -214,8 +215,7 @@ export class VtpAdapter implements CarrierAdapter {
 
     return {
       trackingNumber: created.ORDER_NUMBER,
-      // VTP không có trang tra cứu công khai đơn giản theo mã — để trống, bổ sung sau nếu cần (mục "in vận đơn").
-      trackingUrl: null,
+      trackingUrl: vtpTrackingUrl(created.ORDER_NUMBER),
       carrier: VTP_CARRIER,
       carrierName: VTP_CARRIER_NAME,
       shippingFee: Number(created.MONEY_TOTAL ?? 0),

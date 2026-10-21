@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { carrierDisplayName } from './carrier-display';
+import { carrierDisplayName, carrierTrackingUrl } from './carrier-display';
 
 export const shipmentListInclude = {
   provider: { select: { id: true, code: true, name: true } },
@@ -22,6 +22,7 @@ export function serializeShipmentListItem(f: ShipmentListRow) {
     shipment_created_on: f.shipmentCreatedOn?.toISOString() ?? null,
     name: f.name, // mã giao hàng nội bộ (FUN…)
     tracking_number: f.trackingNumber,
+    tracking_url: carrierTrackingUrl(f),
     order_id: f.orderId.toString(),
     order_name: f.order.name,
     shipment_status: f.shipmentStatus,
