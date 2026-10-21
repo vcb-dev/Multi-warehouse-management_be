@@ -75,6 +75,19 @@ describe('ConfigService locations', () => {
     expect(actual.status).toBe('inactive');
   });
 
+  it('updateLocation xóa code khi nhận null', async () => {
+    const prisma = prismaStub();
+    prisma.location.findUnique.mockResolvedValue(row);
+    prisma.location.findFirst.mockResolvedValue(null);
+    prisma.location.update.mockResolvedValue({ ...row, code: null });
+    const svc = new ConfigService(prisma as never);
+    const actual = await svc.updateLocation(1n, { code: null });
+    expect(actual.code).toBeNull();
+    expect(prisma.location.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ code: null }) }),
+    );
+  });
+
   it('updateLocation 404 khi không có kho', async () => {
     const prisma = prismaStub();
     prisma.location.findUnique.mockResolvedValue(null);

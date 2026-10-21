@@ -70,15 +70,15 @@ export class ConfigService {
           ...(dto.phone !== undefined ? { phone: dto.phone ?? null } : {}),
           ...(dto.email !== undefined ? { email: dto.email ?? null } : {}),
           ...(dto.address1 !== undefined
-            ? { address1: dto.address1.trim() || null }
+            ? { address1: dto.address1?.trim() || null }
             : {}),
           ...(dto.province !== undefined
-            ? { province: dto.province.trim() || null }
+            ? { province: dto.province?.trim() || null }
             : {}),
           ...(dto.district !== undefined
-            ? { district: dto.district.trim() || null }
+            ? { district: dto.district?.trim() || null }
             : {}),
-          ...(dto.ward !== undefined ? { ward: dto.ward.trim() || null } : {}),
+          ...(dto.ward !== undefined ? { ward: dto.ward?.trim() || null } : {}),
           ...(dto.default_location !== undefined
             ? { defaultLocation: dto.default_location }
             : {}),

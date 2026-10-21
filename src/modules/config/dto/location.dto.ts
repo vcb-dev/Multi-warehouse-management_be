@@ -16,11 +16,18 @@ function toBoolean(value: unknown): boolean | undefined {
   if (value === false || value === 'false' || value === '0') return false;
   return undefined;
 }
-// Chuyển string trống thành undefined
+// Create: bỏ field trống. Update: trống → null để xóa giá trị cũ.
 function emptyToUndef(value: unknown): unknown {
   if (typeof value !== 'string') return value;
   const t = value.trim();
   return t === '' ? undefined : t;
+}
+
+function emptyToNull(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
 }
 
 /** VN: 0xxxxxxxxx hoặc +84xxxxxxxxx, cho phép khoảng trắng */
@@ -93,41 +100,45 @@ export class UpdateLocationDto {
   name?: string;
 
   @IsOptional()
-  @Transform(({ value }) => emptyToUndef(value))
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @MaxLength(64)
-  code?: string;
+  code?: string | null;
 
   @IsOptional()
-  @Transform(({ value }) => emptyToUndef(value))
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @Matches(VN_PHONE, { message: 'Số điện thoại không hợp lệ' })
-  phone?: string;
+  phone?: string | null;
 
   @IsOptional()
-  @Transform(({ value }) => emptyToUndef(value))
+  @Transform(({ value }) => emptyToNull(value))
   @IsEmail({}, { message: 'Email không hợp lệ' })
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @MaxLength(255)
-  address1?: string;
+  address1?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @MaxLength(128)
-  province?: string;
+  province?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @MaxLength(128)
-  district?: string;
+  district?: string | null;
 
   @IsOptional()
+  @Transform(({ value }) => emptyToNull(value))
   @IsString()
   @MaxLength(128)
-  ward?: string;
+  ward?: string | null;
 
   @IsOptional()
   @IsBoolean()
