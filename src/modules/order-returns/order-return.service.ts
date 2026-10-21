@@ -150,13 +150,22 @@ export class OrderReturnService {
     };
   }
 
-  async findDocument(id: bigint, user: AuthUser) {
+  /**
+   * `permission`: endpoint chi tiết đòi `view_detail`; các bước xử lý gọi lại hàm này để
+   * trả phiếu sau khi ghi thì truyền đúng quyền vừa kiểm, để người chỉ có quyền xử lý
+   * vẫn nhận được kết quả.
+   */
+  async findDocument(
+    id: bigint,
+    user: AuthUser,
+    permission = 'order_return:view_detail',
+  ) {
     const ret = await this.prisma.orderReturn.findUnique({
       where: { id },
       include: returnDocumentInclude,
     });
     if (!ret) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
-    assertLocationPermission(user, 'order_return:view', ret.order.locationId);
+    assertLocationPermission(user, permission, ret.order.locationId);
     return serializeReturnDocument(ret);
   }
 
@@ -167,7 +176,7 @@ export class OrderReturnService {
       include: { items: true },
     });
     if (!order) throw new NotFoundException('Không tìm thấy đơn');
-    assertLocationPermission(user, 'order_return:manage', order.locationId);
+    assertLocationPermission(user, 'order_return:create', order.locationId);
     // "Đã hoàn thành" thực tế = đã giao hàng (fulfillment_status='fulfilled'),
     // KHÔNG phải status='closed' — dữ liệu Sapo thật cho thấy phần lớn đơn đã
     // giao vẫn ở status='open' (Sapo hiếm khi đóng đơn về mặt hành chính).
@@ -199,7 +208,7 @@ export class OrderReturnService {
     for (const item of dto.items) {
       assertLocationPermission(
         user,
-        'order_return:manage',
+        'order_return:create',
         BigInt(item.location_id),
       );
     }
@@ -313,7 +322,7 @@ export class OrderReturnService {
       await this.applyReceive(tx, id, dto.restock ?? true, user);
       await this.settle(tx, id);
     });
-    return this.findDocument(id, user);
+    return this.findDocument(id, user, 'order_return:process');
   }
 
   /** Bước "Hoàn tiền": chi tiền (phiếu chi) hoặc trừ vào công nợ khách. */
@@ -335,12 +344,12 @@ export class OrderReturnService {
       return result;
     });
     this.notifyRefund(refunded, ret.order, deductFromDebt);
-    return this.findDocument(id, user);
+    return this.findDocument(id, user, 'order_return:process');
   }
 
   /** Huỷ phiếu — chỉ khi chưa có gì xảy ra thật (chưa nhận hàng, chưa hoàn tiền). */
   async cancel(id: bigint, user: AuthUser) {
-    const ret = await this.loadManaged(id, user);
+    const ret = await this.loadManaged(id, user, 'order_return:cancel');
     if (ret.receivedOn || Number(ret.refundedAmount) > 0) {
       throw new BusinessException(
         'INVALID_TRANSITION',
@@ -367,7 +376,7 @@ export class OrderReturnService {
       });
       await recomputeOrderRefundStatuses(tx, ret.orderId);
     });
-    return this.findDocument(id, user);
+    return this.findDocument(id, user, 'order_return:cancel');
   }
 
   /**
@@ -402,7 +411,7 @@ export class OrderReturnService {
       });
       await recomputeOrderRefundStatuses(tx, ret.orderId);
     });
-    return this.findDocument(id, user);
+    return this.findDocument(id, user, 'order_return:process');
   }
 
   /**
@@ -410,7 +419,11 @@ export class OrderReturnService {
    * đang xử lý mới thao tác được: phiếu chép từ sàn/Sapo (`TTR-…`, `RT-SAPO-…`)
    * do bên đó điều khiển, sửa ở đây sẽ lệch với nguồn ở lần đồng bộ kế tiếp.
    */
-  private async loadManaged(id: bigint, user: AuthUser) {
+  private async loadManaged(
+    id: bigint,
+    user: AuthUser,
+    permission = 'order_return:process',
+  ) {
     const ret = await this.prisma.orderReturn.findUnique({
       where: { id },
       include: {
@@ -420,7 +433,7 @@ export class OrderReturnService {
       },
     });
     if (!ret) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
-    assertLocationPermission(user, 'order_return:manage', ret.order.locationId);
+    assertLocationPermission(user, permission, ret.order.locationId);
     if (!isAppManagedReturn(ret.code)) {
       throw new BusinessException(
         'INVALID_TRANSITION',

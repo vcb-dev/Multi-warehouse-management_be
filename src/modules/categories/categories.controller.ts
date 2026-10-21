@@ -14,20 +14,20 @@ export class CategoriesController {
   constructor(private categories: CategoryService) {}
 
   @Get()
-  @RequirePermission('product:view', 'product:manage')
+  @RequirePermission('product:view', 'category:manage')
   list() {
     return this.categories.listTree();
   }
 
   @Post()
-  @RequirePermission('product:manage')
+  @RequirePermission('category:manage')
   @LocationOptional()
   create(@Body() dto: CreateCategoryDto) {
     return this.categories.create(dto);
   }
 
   @Post(':id/products')
-  @RequirePermission('product:manage')
+  @RequirePermission('category:manage')
   @LocationOptional()
   assignProducts(
     @Param('id') id: string,

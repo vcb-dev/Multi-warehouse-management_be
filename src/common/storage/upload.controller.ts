@@ -19,7 +19,7 @@ export class UploadController {
   constructor(private storage: StorageService) {}
 
   @Post('image')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:create', 'product:update')
   @LocationOptional()
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(

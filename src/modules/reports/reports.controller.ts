@@ -56,7 +56,7 @@ export class ReportsController {
 
   /** Màn "Tổng quan" (trang chủ) — không nằm trong khung ReportDef chung. */
   @Get('dashboard')
-  @RequirePermission('report:view')
+  @RequirePermission('dashboard:view', 'report:view')
   dashboard(
     @Query() query: DashboardOverviewQueryDto,
     @CurrentUser() user: AuthUser,
@@ -75,7 +75,7 @@ export class ReportsController {
   }
 
   @Get(':id/export')
-  @RequirePermission('report:view')
+  @RequirePermission('report:export')
   async export(
     @Param('id') id: string,
     @Query() query: RunReportQueryDto,

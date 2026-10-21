@@ -128,7 +128,7 @@ export class ChannelsController {
    * bên Sapo — không có kho thì đơn của nó bị gán tạm vào kho mặc định.
    */
   @Post('sapo/location-sync')
-  @RequirePermission('inventory:receive')
+  @RequirePermission('system:maintenance')
   @LocationOptional()
   syncSapoLocations() {
     return this.sapoLocations.syncLocations();
@@ -136,10 +136,10 @@ export class ChannelsController {
 
   /**
    * Kéo lại tồn kho từ Sapo (không còn cron, chỉ chạy tay). Quét cả catalog nên chạy vài phút —
-   * `inventory:receive` chứ không phải `order:create`: đây là thao tác sửa tồn.
+   * `system:maintenance`: ghi đè tồn mọi kho bằng số Sapo nên chỉ người bảo trì dữ liệu chạy.
    */
   @Post('sapo/inventory-sync')
-  @RequirePermission('inventory:receive')
+  @RequirePermission('system:maintenance')
   @LocationOptional()
   syncSapoInventory() {
     return this.sapoInventory.syncInventoryLevels();

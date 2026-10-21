@@ -53,7 +53,7 @@ export class ProductsController {
   }
 
   @Post()
-  @RequirePermission('product:manage')
+  @RequirePermission('product:create')
   @LocationOptional()
   create(@Body() dto: CreateProductDto, @CurrentUser() user: AuthUser) {
     return this.products.create(dto, user);
@@ -78,13 +78,13 @@ export class ProductsController {
   }
 
   @Get('export/fields')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:export')
   exportFields(@CurrentUser() user: AuthUser) {
     return this.exporter.fields(user);
   }
 
   @Get('export')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:export')
   async export(
     @Query() query: ExportProductsQueryDto,
     @CurrentUser() user: AuthUser,
@@ -94,7 +94,7 @@ export class ProductsController {
   }
 
   @Post('import')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:import')
   @LocationOptional()
   @UseInterceptors(FileInterceptor('file'))
   async import(
@@ -112,7 +112,7 @@ export class ProductsController {
   }
 
   @Get(':id/inventory')
-  @RequirePermission('product:view', 'inventory:view')
+  @RequirePermission('product:view_detail', 'inventory:view')
   inventory(
     @Param('id') id: string,
     @Query() query: ProductInventoryQueryDto,
@@ -122,13 +122,13 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @RequirePermission('product:view')
+  @RequirePermission('product:view_detail')
   findOne(@Param('id') id: string) {
     return this.products.findOne(BigInt(id));
   }
 
   @Put(':id')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:update')
   @LocationOptional()
   update(
     @Param('id') id: string,
@@ -139,7 +139,7 @@ export class ProductsController {
   }
 
   @Get(':id/variants/:variantId/price-history')
-  @RequirePermission('product:view')
+  @RequirePermission('product:view_detail')
   getVariantPriceHistory(
     @Param('id') id: string,
     @Param('variantId') variantId: string,

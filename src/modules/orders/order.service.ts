@@ -482,7 +482,7 @@ export class OrderService {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (user) {
-      assertLocationPermission(user, 'order:view', order.locationId);
+      assertLocationPermission(user, 'order:view_detail', order.locationId);
     }
 
     const detail = serializeOrderDetail(order);
@@ -831,7 +831,7 @@ export class OrderService {
   async pay(id: bigint, dto: PayOrderDto, user: AuthUser) {
     const order = await this.repo.findById(id);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    assertLocationPermission(user, 'order:update', order.locationId);
+    assertLocationPermission(user, 'order:payment', order.locationId);
 
     if (order.status === OrderStatus.cancelled) {
       throw new BusinessException(

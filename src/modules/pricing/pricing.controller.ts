@@ -17,7 +17,7 @@ export class PricingController {
   constructor(private pricing: PriceListService) {}
 
   @Get()
-  @RequirePermission('product:manage')
+  @RequirePermission('price_list:view')
   list() {
     return this.pricing.list();
   }
@@ -26,14 +26,14 @@ export class PricingController {
   // thường ở đúng kho đó — LocationOptional chỉ mở đường cho bảng giá TOÀN
   // CỤC (không có location_id) chứ không bỏ qua kiểm tra khi có kho cụ thể.
   @Post()
-  @RequirePermission('product:manage')
+  @RequirePermission('price_list:manage')
   @LocationOptional()
   create(@Body() dto: CreatePriceListDto) {
     return this.pricing.create(dto);
   }
 
   @Get('resolve')
-  @RequirePermission('product:view', 'product:manage')
+  @RequirePermission('product:view', 'price_list:view')
   resolve(
     @Query('variant_id') variantId: string,
     @Query('location_id') locationId?: string,
@@ -43,13 +43,13 @@ export class PricingController {
   }
 
   @Get(':id')
-  @RequirePermission('product:manage')
+  @RequirePermission('price_list:view')
   findOne(@Param('id') id: string) {
     return this.pricing.findOne(BigInt(id));
   }
 
   @Put(':id/items')
-  @RequirePermission('product:manage')
+  @RequirePermission('price_list:manage')
   @LocationOptional()
   upsertItems(
     @Param('id') id: string,

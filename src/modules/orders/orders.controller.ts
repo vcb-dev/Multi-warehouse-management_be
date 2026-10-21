@@ -55,19 +55,19 @@ export class OrdersController {
   // Các route tên cố định phải đứng trước @Get(':id'), nếu không Nest sẽ khớp
   // tên thành id và trả 404.
   @Get('tags')
-  @RequirePermission('order:view')
+  @RequirePermission('order:view_detail')
   tags(@Query() query: OrderFacetQueryDto) {
     return this.orders.listTags(query);
   }
 
   @Get('export/fields')
-  @RequirePermission('order:view')
+  @RequirePermission('order:export')
   exportFields(@Query() query: ExportOrdersQueryDto) {
     return this.exporter.fields(query.mode ?? 'order');
   }
 
   @Get('export')
-  @RequirePermission('order:view')
+  @RequirePermission('order:export')
   async export(
     @Query() query: ExportOrdersQueryDto,
     @CurrentUser() user: AuthUser,
@@ -77,7 +77,7 @@ export class OrdersController {
   }
 
   @Get(':id')
-  @RequirePermission('order:view')
+  @RequirePermission('order:view_detail')
   findOne(
     @Param('id', ParseBigIntPipe) id: bigint,
     @CurrentUser() user: AuthUser,
@@ -86,7 +86,7 @@ export class OrdersController {
   }
 
   @Get(':id/history')
-  @RequirePermission('order:view')
+  @RequirePermission('order:view_detail')
   async history(
     @Param('id', ParseBigIntPipe) id: bigint,
     @CurrentUser() user: AuthUser,
@@ -132,7 +132,7 @@ export class OrdersController {
   }
 
   @Post(':id/payments')
-  @RequirePermission('order:update')
+  @RequirePermission('order:payment')
   pay(
     @Param('id', ParseBigIntPipe) id: bigint,
     @Body() dto: PayOrderDto,

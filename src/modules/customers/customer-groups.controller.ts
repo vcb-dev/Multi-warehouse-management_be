@@ -40,7 +40,7 @@ export class CustomerGroupsController {
 
   /** Đếm thử số khách khớp điều kiện, chưa lưu gì */
   @Post('preview')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   preview(@Body() dto: PreviewCustomerGroupDto) {
     return this.groups.preview(dto);
   }
@@ -52,26 +52,26 @@ export class CustomerGroupsController {
   }
 
   @Post()
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   create(@Body() dto: CreateCustomerGroupDto) {
     return this.groups.create(dto);
   }
 
   @Put(':id')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   update(@Param('id') id: string, @Body() dto: UpdateCustomerGroupDto) {
     return this.groups.update(BigInt(id), dto);
   }
 
   @Delete(':id')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   remove(@Param('id') id: string) {
     return this.groups.remove(BigInt(id));
   }
 
   /** Chạy lại điều kiện của nhóm tự động để cập nhật thành viên */
   @Post(':id/recalculate')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   recalculate(@Param('id') id: string) {
     return this.groups.recalculate(BigInt(id));
   }
@@ -89,13 +89,13 @@ export class CustomerGroupsController {
 
   /** Thêm khách vào nhóm (giữ nguyên thành viên cũ) */
   @Post(':id/customers')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   addMembers(@Param('id') id: string, @Body() dto: SetGroupMembersDto) {
     return this.groups.addMembers(BigInt(id), dto.customer_ids);
   }
 
   @Delete(':id/customers/:customerId')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer_group:manage')
   removeMember(
     @Param('id') id: string,
     @Param('customerId') customerId: string,

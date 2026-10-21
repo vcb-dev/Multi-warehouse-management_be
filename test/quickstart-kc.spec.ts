@@ -353,15 +353,23 @@ describeIfDb('Quickstart KC1–KC6 (integration)', () => {
       roles: ['warehouse_staff'],
       locationIds: [warehouseK2],
       warehousePermissions: {
-        [warehouseK2.toString()]: ['inventory:transfer', 'inventory:view'],
+        [warehouseK2.toString()]: ['stock_transfer:manage', 'inventory:view'],
       },
     };
 
     expect(() =>
-      assertLocationPermission(scopedUser, 'inventory:transfer', warehouseK1),
+      assertLocationPermission(
+        scopedUser,
+        'stock_transfer:manage',
+        warehouseK1,
+      ),
     ).toThrow(BusinessException);
     expect(() =>
-      assertLocationPermission(scopedUser, 'inventory:transfer', warehouseK2),
+      assertLocationPermission(
+        scopedUser,
+        'stock_transfer:manage',
+        warehouseK2,
+      ),
     ).not.toThrow();
 
     const onHandBeforeCancel = (

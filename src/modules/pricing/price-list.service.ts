@@ -200,10 +200,10 @@ export class PriceListService {
 
     // Kho nằm trên BẢN GHI chứ không có trong request (id ở path, body chỉ có items),
     // nên PermissionGuard không kiểm được — `@LocationOptional` ở route này chỉ mở
-    // đường cho bảng giá toàn cục. Không chốt ở đây thì người có `product:manage` tại
+    // đường cho bảng giá toàn cục. Không chốt ở đây thì người có `price_list:manage` tại
     // kho A sửa được giá của bảng giá thuộc kho B.
     if (priceList.locationId) {
-      assertLocationPermission(user, 'product:manage', priceList.locationId);
+      assertLocationPermission(user, 'price_list:manage', priceList.locationId);
     }
 
     await this.prisma.$transaction(async (tx) => {

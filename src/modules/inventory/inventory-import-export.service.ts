@@ -357,7 +357,7 @@ export class InventoryImportService {
   ) {}
 
   async importExcel(buffer: Buffer, locationId: bigint, user: AuthUser) {
-    assertLocationPermission(user, 'inventory:receive', locationId);
+    assertLocationPermission(user, 'inventory:import', locationId);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
