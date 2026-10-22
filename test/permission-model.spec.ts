@@ -285,8 +285,10 @@ describe('Mô hình phân quyền đích', () => {
     });
 
     it('không có quyền ở kho nào → mảng rỗng, tức không thấy gì', () => {
-      expect(locationsWithPermission(viewer, 'purchasing:manage')).toEqual([]);
-      expect(locationScopeFilter(viewer, 'purchasing:manage')).toEqual({
+      expect(locationsWithPermission(viewer, 'purchase_order:manage')).toEqual(
+        [],
+      );
+      expect(locationScopeFilter(viewer, 'purchase_order:manage')).toEqual({
         in: [],
       });
     });
@@ -310,23 +312,23 @@ describe('Mô hình phân quyền đích', () => {
     });
   });
 
-  describe('Quy tắc 6 — product:manage giữ scope=location vì PriceList dùng chung (Phase 6)', () => {
+  describe('Quy tắc 6 — price_list:manage giữ scope=location vì PriceList dùng chung (Phase 6)', () => {
     // PriceList (bảng giá) có location_id TUỲ CHỌN — bảng giá theo kho dùng
-    // chung permission product:manage. Guard tự đọc `location_id` từ body
+    // chung permission price_list:manage. Guard tự đọc `location_id` từ body
     // (CreatePriceListDto) nên cơ chế này hoạt động mà PriceListService không
-    // cần biết gì về AuthUser — chỉ đứng vững nếu product:manage còn là
+    // cần biết gì về AuthUser — chỉ đứng vững nếu price_list:manage còn là
     // scope=location. Đây là quy tắc đã suýt bị gỡ nhầm ở Phase 6.
     const manager: AuthUser = {
       userId: 1n,
       email: 'm@test',
       roles: [],
       locationIds: [1n],
-      warehousePermissions: { '1': ['product:manage'] },
+      warehousePermissions: { '1': ['price_list:manage'] },
     };
 
     it('tạo bảng giá cho kho mình quản lý thì được', () => {
       expect(
-        guardWith(['product:manage']).canActivate(
+        guardWith(['price_list:manage']).canActivate(
           ctx(manager, {
             method: 'POST',
             body: { code: 'BG1', location_id: '1' },
@@ -335,9 +337,9 @@ describe('Mô hình phân quyền đích', () => {
       ).toBe(true);
     });
 
-    it('tạo bảng giá cho kho KHÁC (mình không có product:manage) bị chặn', () => {
+    it('tạo bảng giá cho kho KHÁC (mình không có price_list:manage) bị chặn', () => {
       expect(() =>
-        guardWith(['product:manage']).canActivate(
+        guardWith(['price_list:manage']).canActivate(
           ctx(manager, {
             method: 'POST',
             body: { code: 'BG2', location_id: '2' },
@@ -348,7 +350,7 @@ describe('Mô hình phân quyền đích', () => {
 
     it('tạo bảng giá TOÀN CỤC (không location_id) vẫn được nhờ @LocationOptional', () => {
       expect(
-        guardWith(['product:manage'], true).canActivate(
+        guardWith(['price_list:manage'], true).canActivate(
           ctx(manager, { method: 'POST', body: { code: 'BG3' } }),
         ),
       ).toBe(true);

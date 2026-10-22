@@ -39,7 +39,7 @@ export class AgedInventoryController {
 
   /** Dựng lại snapshot hôm nay — cách duy nhất để có snapshot mới, chạy nền ~10 phút. */
   @Post('refresh')
-  @RequirePermission('role:manage')
+  @RequirePermission('system:maintenance')
   @LocationOptional()
   refresh() {
     return this.snapshots.startInBackground();

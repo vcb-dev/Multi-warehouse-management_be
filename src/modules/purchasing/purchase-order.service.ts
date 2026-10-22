@@ -42,8 +42,9 @@ type PoForTransition = Prisma.PurchaseOrderGetPayload<{
 }>;
 
 /** Khớp @RequirePermission trong purchasing.controller. */
-const PO_READ = ['purchasing:manage', 'inventory:view'];
-const PO_WRITE = ['purchasing:manage'];
+const PO_READ = 'purchase_order:view';
+const PO_DETAIL = 'purchase_order:view_detail';
+const PO_WRITE = 'purchase_order:manage';
 
 @Injectable()
 export class PurchaseOrderService {
@@ -89,7 +90,7 @@ export class PurchaseOrderService {
       include: poInclude,
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
-    assertLocationPermission(user, PO_READ, po.locationId);
+    assertLocationPermission(user, PO_DETAIL, po.locationId);
     return { data: serializePurchaseOrder(po) };
   }
 
@@ -100,7 +101,7 @@ export class PurchaseOrderService {
       select: { locationId: true },
     });
     if (!po) throw new NotFoundException('Không tìm thấy PO');
-    assertLocationPermission(user, PO_READ, po.locationId);
+    assertLocationPermission(user, PO_DETAIL, po.locationId);
   }
 
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {

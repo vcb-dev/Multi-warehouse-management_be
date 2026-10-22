@@ -37,13 +37,13 @@ export class SupplierController {
   constructor(private suppliers: SupplierService) {}
 
   @Get()
-  @RequirePermission('purchasing:manage', 'inventory:view')
+  @RequirePermission('supplier:view')
   list(@Query() query: ListSuppliersQueryDto) {
     return this.suppliers.list(query);
   }
 
   @Post()
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:manage')
   @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSupplierDto) {
@@ -51,39 +51,39 @@ export class SupplierController {
   }
 
   @Get('debts')
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:payment')
   listDebts() {
     return this.suppliers.listDebts();
   }
 
   @Get(':id')
-  @RequirePermission('purchasing:manage', 'inventory:view')
+  @RequirePermission('supplier:view_detail')
   findOne(@Param('id') id: string) {
     return this.suppliers.findOne(BigInt(id));
   }
 
   @Put(':id')
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:manage')
   @LocationOptional()
   update(@Param('id') id: string, @Body() dto: UpdateSupplierDto) {
     return this.suppliers.update(BigInt(id), dto);
   }
 
   @Delete(':id')
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:delete')
   @LocationOptional()
   remove(@Param('id') id: string) {
     return this.suppliers.softDelete(BigInt(id));
   }
 
   @Get(':id/summary')
-  @RequirePermission('purchasing:manage', 'inventory:view')
+  @RequirePermission('supplier:view_detail')
   getSummary(@Param('id') id: string, @Query() query: SupplierSummaryQueryDto) {
     return this.suppliers.getSummary(BigInt(id), query);
   }
 
   @Get(':id/ledger')
-  @RequirePermission('purchasing:manage', 'inventory:view')
+  @RequirePermission('supplier:view_detail')
   getLedger(
     @Param('id') id: string,
     @Query() query: ListSupplierLedgerQueryDto,
@@ -92,7 +92,7 @@ export class SupplierController {
   }
 
   @Post(':id/debt-adjustments')
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:payment')
   @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   createDebtAdjustment(
@@ -104,7 +104,7 @@ export class SupplierController {
   }
 
   @Post(':id/payments')
-  @RequirePermission('purchasing:manage')
+  @RequirePermission('supplier:payment')
   @LocationOptional()
   @HttpCode(HttpStatus.CREATED)
   createPayment(

@@ -25,8 +25,9 @@ import {
 import { serializeStockTransfer } from './stock-transfer.serializer';
 import { variantImageSelect } from '../../common/utils/variant-image';
 
-/** Khớp @RequirePermission của các endpoint đọc trong stock-transfer.controller. */
-const READ_PERMISSIONS = ['inventory:transfer', 'inventory:view'];
+/** Khớp @RequirePermission của endpoint danh sách / chi tiết trong stock-transfer.controller. */
+const READ_PERMISSION = 'stock_transfer:view';
+const DETAIL_PERMISSION = 'stock_transfer:view_detail';
 
 const stnInclude = {
   items: {
@@ -60,7 +61,7 @@ export class StockTransferService {
     }
 
     // Phiếu chuyển liên quan hai kho — thấy được nếu có quyền ở kho đi HOẶC kho đến.
-    const readable = locationScopeFilter(user, READ_PERMISSIONS);
+    const readable = locationScopeFilter(user, READ_PERMISSION);
     if (readable) {
       where.OR = [{ fromLocationId: readable }, { toLocationId: readable }];
     }
@@ -99,11 +100,17 @@ export class StockTransferService {
     user: AuthUser,
     stn: { fromLocationId: bigint; toLocationId: bigint },
   ) {
-    const readable = READ_PERMISSIONS.some(
-      (perm) =>
-        hasLocationPermission(user, perm, stn.fromLocationId.toString()) ||
-        hasLocationPermission(user, perm, stn.toLocationId.toString()),
-    );
+    const readable =
+      hasLocationPermission(
+        user,
+        DETAIL_PERMISSION,
+        stn.fromLocationId.toString(),
+      ) ||
+      hasLocationPermission(
+        user,
+        DETAIL_PERMISSION,
+        stn.toLocationId.toString(),
+      );
     if (!readable) {
       throw new BusinessException(
         'FORBIDDEN_SCOPE',
@@ -143,7 +150,7 @@ export class StockTransferService {
       );
     }
 
-    assertLocationPermission(user, 'inventory:transfer', fromId);
+    assertLocationPermission(user, 'stock_transfer:manage', fromId);
 
     await this.validateWarehouses(fromId, toId);
 
@@ -209,7 +216,7 @@ export class StockTransferService {
       );
     }
 
-    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
+    assertLocationPermission(user, 'stock_transfer:manage', stn.fromLocationId);
 
     const fromId = dto.from_location_id
       ? BigInt(dto.from_location_id)
@@ -226,7 +233,7 @@ export class StockTransferService {
       );
     }
     if (dto.from_location_id) {
-      assertLocationPermission(user, 'inventory:transfer', fromId);
+      assertLocationPermission(user, 'stock_transfer:manage', fromId);
     }
     await this.validateWarehouses(fromId, toId);
 
@@ -281,7 +288,7 @@ export class StockTransferService {
     });
     if (!stn) throw new NotFoundException('Không tìm thấy phiếu chuyển');
 
-    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
+    assertLocationPermission(user, 'stock_transfer:manage', stn.fromLocationId);
 
     switch (action) {
       case 'submit':
@@ -436,7 +443,7 @@ export class StockTransferService {
       );
     }
 
-    assertLocationPermission(user, 'inventory:transfer', stn.toLocationId);
+    assertLocationPermission(user, 'stock_transfer:receive', stn.toLocationId);
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of sortForLocking(stn.items)) {
@@ -508,7 +515,7 @@ export class StockTransferService {
       throw new BusinessException('INVALID_TRANSITION', 'Phiếu đã hủy', 409);
     }
 
-    assertLocationPermission(user, 'inventory:transfer', stn.fromLocationId);
+    assertLocationPermission(user, 'stock_transfer:manage', stn.fromLocationId);
 
     // Phiếu nháp chưa từng đụng tồn kho — hủy = xóa hẳn, giống quy ước hủy
     // PO/REI ở trạng thái nháp (không giữ lại bản ghi "đã hủy" vô nghĩa).

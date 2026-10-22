@@ -42,7 +42,7 @@ export class InventoryController {
   ) {}
 
   @Get('reconcile')
-  @RequirePermission('role:manage')
+  @RequirePermission('system:maintenance')
   runReconcile() {
     return this.reconcile.runFullReconcile();
   }
@@ -54,13 +54,13 @@ export class InventoryController {
   }
 
   @Get('export/fields')
-  @RequirePermission('inventory:view')
+  @RequirePermission('inventory:export')
   exportFields(@CurrentUser() user: AuthUser) {
     return this.exporter.fields(user);
   }
 
   @Get('export')
-  @RequirePermission('inventory:view')
+  @RequirePermission('inventory:export')
   async export(
     @Query() query: ExportInventoryQueryDto,
     @CurrentUser() user: AuthUser,
@@ -70,7 +70,7 @@ export class InventoryController {
   }
 
   @Post('import')
-  @RequirePermission('inventory:receive')
+  @RequirePermission('inventory:import')
   @UseInterceptors(FileInterceptor('file'))
   async import(
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,

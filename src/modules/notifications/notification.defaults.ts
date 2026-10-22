@@ -30,16 +30,22 @@ export const NOTIFICATION_SETTING_DEFAULTS: {
   { topic: 'fulfillments_create', recipientPermissions: ['order:pack'] },
   { topic: 'fulfillments_update', recipientPermissions: ['order:pack'] },
   // Phiếu hoàn/trả là việc của CSKH chứ không phải của mọi người xem được đơn.
-  { topic: 'refunds_create', recipientPermissions: ['order_return:manage'] },
+  { topic: 'refunds_create', recipientPermissions: ['order_return:process'] },
   { topic: 'customers_create', recipientPermissions: ['customer:view'] },
   // Cảnh báo tồn kho — hai việc thuộc hai bộ phận khác nhau nên người nhận khác nhau:
   // "cần nhập hàng" là việc của mua hàng, "âm kho" là việc của nhân viên kho.
-  { topic: 'inventory_low_stock', recipientPermissions: ['purchasing:manage'] },
+  {
+    topic: 'inventory_low_stock',
+    recipientPermissions: ['purchase_order:manage'],
+  },
   { topic: 'inventory_negative', recipientPermissions: ['inventory:view'] },
   // Đơn thiếu hàng: cách xử lý là nhập thêm hoặc điều chuyển từ kho khác — cùng một quyết
-  // định với "cần nhập hàng" nên cùng người nhận. KHÔNG thêm `inventory:transfer` vào đây:
+  // định với "cần nhập hàng" nên cùng người nhận. KHÔNG thêm `stock_transfer:manage` vào đây:
   // ghép VÀ sẽ chỉ còn ai có cả hai quyền, tức là ít người hơn chứ không nhiều hơn.
-  { topic: 'orders_out_of_stock', recipientPermissions: ['purchasing:manage'] },
+  {
+    topic: 'orders_out_of_stock',
+    recipientPermissions: ['purchase_order:manage'],
+  },
   // Kênh bán chết là việc của người quản trị kết nối, không phải của nghiệp vụ.
   { topic: 'channel_sync_failed', recipientPermissions: ['api_key:manage'] },
 ];
