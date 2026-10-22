@@ -105,18 +105,22 @@ describe('Vai trò mặc định theo kiểu vai trò trên Sapo', () => {
     }
   });
 
-  it('hai vai trò bán hàng chỉ khác nhau ở quyền sửa giá', () => {
+  it('hai vai trò bán hàng chỉ khác nhau ở quyền sửa giá / giảm giá', () => {
     const withPrice = new Set(perms('sales'));
     const fixed = new Set(perms('sales_fixed_price'));
     expect(fixed.has('order:override_price')).toBe(false);
-    expect([...withPrice].filter((k) => !fixed.has(k))).toEqual([
+    expect([...withPrice].filter((k) => !fixed.has(k)).sort()).toEqual([
+      'order:apply_discount',
       'order:override_price',
     ]);
     expect([...fixed].filter((k) => !withPrice.has(k))).toEqual([]);
   });
 
+  // Xuất Excel chỉ đọc dữ liệu — trước khi tách quyền, ai xem được là xuất được.
   it('Chỉ xem không có quyền ghi nào', () => {
-    expect(perms('viewer').every((k) => k.endsWith(':view'))).toBe(true);
+    expect(
+      perms('viewer').every((k) => /:(view|view_detail|export)$/.test(k)),
+    ).toBe(true);
   });
 
   it('Trưởng nhóm quản lý nhân viên và xem lợi nhuận, không huỷ đơn, không xem giá vốn', () => {

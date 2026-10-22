@@ -24,19 +24,19 @@ export class ShippingProvidersController {
   constructor(private providers: ShippingProviderService) {}
 
   @Get()
-  @RequirePermission('order:pack', 'shipping:manage')
+  @RequirePermission('shipment:create', 'shipping:manage')
   list(@Query() query: ListProvidersQueryDto) {
     return this.providers.list(query.type);
   }
 
   @Get('quotes')
-  @RequirePermission('order:pack')
+  @RequirePermission('shipment:create')
   quotes(@Query() query: ProviderQuotesQueryDto) {
     return this.providers.quotes(query.weight_grams);
   }
 
   @Post()
-  @RequirePermission('order:pack', 'shipping:manage')
+  @RequirePermission('shipment:create', 'shipping:manage')
   @LocationOptional()
   createPartner(
     @Body() dto: CreateShippingPartnerDto,

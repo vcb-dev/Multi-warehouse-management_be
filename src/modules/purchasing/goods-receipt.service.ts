@@ -44,10 +44,10 @@ const reiInclude = {
 } satisfies Prisma.GoodsReceiptInclude;
 
 /** Khớp @RequirePermission trong purchasing.controller. */
-const REI_READ = ['purchasing:manage', 'inventory:view', 'inventory:receive'];
-const REI_WRITE = ['inventory:receive', 'purchasing:manage'];
-/** Thanh toán phiếu nhập chặt hơn: chỉ purchasing:manage (khớp controller). */
-const REI_PAY = ['purchasing:manage'];
+const REI_READ = 'goods_receipt:view';
+const REI_DETAIL = 'goods_receipt:view_detail';
+const REI_WRITE = 'goods_receipt:manage';
+const REI_PAY = 'goods_receipt:pay';
 
 @Injectable()
 export class GoodsReceiptService {
@@ -110,7 +110,7 @@ export class GoodsReceiptService {
       include: reiInclude,
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
-    assertLocationPermission(user, REI_READ, rei.locationId);
+    assertLocationPermission(user, REI_DETAIL, rei.locationId);
     return { data: serializeGoodsReceipt(rei) };
   }
 
@@ -121,7 +121,7 @@ export class GoodsReceiptService {
       select: { locationId: true },
     });
     if (!rei) throw new NotFoundException('Không tìm thấy phiếu nhập');
-    assertLocationPermission(user, REI_READ, rei.locationId);
+    assertLocationPermission(user, REI_DETAIL, rei.locationId);
   }
 
   async create(dto: CreateGoodsReceiptDto, user: AuthUser) {

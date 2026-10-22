@@ -29,7 +29,7 @@ export class CloudinaryController {
   constructor(private readonly cloudinary: CloudinaryService) {}
 
   @Post('image')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:create', 'product:update')
   @LocationOptional()
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(
@@ -47,7 +47,7 @@ export class CloudinaryController {
   }
 
   @Delete('image')
-  @RequirePermission('product:manage')
+  @RequirePermission('product:create', 'product:update')
   @LocationOptional()
   @HttpCode(200)
   async deleteImage(@Body() dto: DeleteCloudinaryImageDto) {

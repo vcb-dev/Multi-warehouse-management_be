@@ -3,7 +3,7 @@
  *
  * `PUT /price-lists/:id/items` mang id ở path còn kho nằm trên BẢN GHI, nên
  * `PermissionGuard` không có gì để kiểm — `@LocationOptional` ở route này chỉ nhằm mở
- * đường cho bảng giá toàn cục. Thiếu chốt ở tầng service thì người có `product:manage`
+ * đường cho bảng giá toàn cục. Thiếu chốt ở tầng service thì người có `price_list:manage`
  * tại kho A sửa được giá của bảng giá thuộc kho B.
  */
 import { PriceListService } from '../src/modules/pricing/price-list.service';
@@ -19,7 +19,7 @@ const userTaiKhoA: AuthUser = {
   email: 'nv@test',
   roles: ['sales'],
   locationIds: [1n],
-  warehousePermissions: { [KHO_A]: ['product:manage'] },
+  warehousePermissions: { [KHO_A]: ['price_list:manage'] },
 };
 
 const admin: AuthUser = {
@@ -77,7 +77,7 @@ describe('upsertItems — bảng giá gắn với một kho', () => {
     expect(tx.priceListItem.upsert).toHaveBeenCalledTimes(1);
   });
 
-  it('có quyền ở kho A nhưng KHÔNG phải product:manage -> vẫn chặn', async () => {
+  it('có quyền ở kho A nhưng KHÔNG phải price_list:manage -> vẫn chặn', async () => {
     const chiXem: AuthUser = {
       ...userTaiKhoA,
       warehousePermissions: { [KHO_A]: ['product:view'] },

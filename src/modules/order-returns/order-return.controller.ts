@@ -38,7 +38,7 @@ export class OrderReturnController {
   }
 
   @Post()
-  @RequirePermission('order_return:manage')
+  @RequirePermission('order_return:create')
   create(@Body() dto: CreateOrderReturnDto, @CurrentUser() user: AuthUser) {
     return this.returns.create(dto, user);
   }
@@ -55,14 +55,14 @@ export class OrderReturnController {
   }
 
   @Get('documents/:id')
-  @RequirePermission('order_return:view')
+  @RequirePermission('order_return:view_detail')
   findDocument(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.returns.findDocument(BigInt(id), user);
   }
 
   @Post(':id/receive')
   @HttpCode(200)
-  @RequirePermission('order_return:manage')
+  @RequirePermission('order_return:process')
   receive(
     @Param('id') id: string,
     @Body() dto: ReceiveOrderReturnDto,
@@ -73,7 +73,7 @@ export class OrderReturnController {
 
   @Post(':id/refund')
   @HttpCode(200)
-  @RequirePermission('order_return:manage')
+  @RequirePermission('order_return:process')
   refund(
     @Param('id') id: string,
     @Body() dto: RefundOrderReturnDto,
@@ -84,14 +84,14 @@ export class OrderReturnController {
 
   @Post(':id/cancel')
   @HttpCode(200)
-  @RequirePermission('order_return:manage')
+  @RequirePermission('order_return:cancel')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.returns.cancel(BigInt(id), user);
   }
 
   @Post(':id/complete')
   @HttpCode(200)
-  @RequirePermission('order_return:manage')
+  @RequirePermission('order_return:process')
   complete(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.returns.complete(BigInt(id), user);
   }

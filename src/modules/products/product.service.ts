@@ -825,7 +825,7 @@ export class ProductService {
           );
         }
         // Nhập tồn ban đầu tương đương nhập hàng vào kho đó
-        assertLocationPermission(user, 'inventory:receive', inv.location_id);
+        assertLocationPermission(user, 'inventory:import', inv.location_id);
         stockEntries += 1;
       }
     }

@@ -16,7 +16,9 @@ export class ConfigService {
   constructor(private prisma: PrismaService) {}
 
   async listLocations(user: AuthUser, query: ListLocationsQueryDto = {}) {
-    const canSeeAll = hasPermission(user, 'staff:manage');
+    const canSeeAll =
+      hasPermission(user, 'location:manage') ||
+      hasPermission(user, 'staff:manage');
     const includeInactive = !!query.include_inactive && canSeeAll;
 
     const data = await this.prisma.location.findMany({

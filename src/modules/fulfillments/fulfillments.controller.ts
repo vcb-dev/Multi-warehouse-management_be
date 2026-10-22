@@ -55,7 +55,7 @@ export class FulfillmentsController {
   }
 
   @Post('shipment')
-  @RequirePermission('order:pack')
+  @RequirePermission('shipment:create')
   pushShipment(@Body() dto: PushShipmentDto, @CurrentUser() user: AuthUser) {
     return this.fulfillments.pushShipment(dto, user);
   }
@@ -110,7 +110,7 @@ export class FulfillmentsController {
   }
 
   @Post(':id/shipment-status')
-  @RequirePermission('order:pack')
+  @RequirePermission('shipment:create')
   updateShipmentStatus(
     @Param('id') id: string,
     @Body() dto: UpdateShipmentStatusDto,
@@ -120,7 +120,7 @@ export class FulfillmentsController {
   }
 
   @Post(':id/cancel')
-  @RequirePermission('order:pack')
+  @RequirePermission('shipment:cancel')
   cancel(
     @Param('id') id: string,
     @Body() dto: CancelFulfillmentDto,
@@ -132,7 +132,7 @@ export class FulfillmentsController {
   // --- Ticket hỗ trợ với hãng vận chuyển ---
 
   @Get('tickets')
-  @RequirePermission('order:pack')
+  @RequirePermission('carrier_ticket:manage')
   listTickets(
     @CurrentUser() user: AuthUser,
     @Query('fulfillment_id') fulfillmentId?: string,
@@ -141,7 +141,7 @@ export class FulfillmentsController {
   }
 
   @Post('tickets')
-  @RequirePermission('order:pack')
+  @RequirePermission('carrier_ticket:manage')
   createTicket(
     @Body() dto: CreateCarrierTicketDto,
     @CurrentUser() user: AuthUser,
@@ -150,7 +150,7 @@ export class FulfillmentsController {
   }
 
   @Post('tickets/:id/reply')
-  @RequirePermission('order:pack')
+  @RequirePermission('carrier_ticket:manage')
   replyTicket(
     @Param('id') id: string,
     @Body() dto: ReplyCarrierTicketDto,
@@ -160,7 +160,7 @@ export class FulfillmentsController {
   }
 
   @Post('tickets/sync')
-  @RequirePermission('order:pack')
+  @RequirePermission('carrier_ticket:manage')
   syncTickets() {
     return this.tickets.syncFromCarrier();
   }
@@ -204,7 +204,7 @@ export class FulfillmentsController {
   }
 
   @Get('shipments/overview')
-  @RequirePermission('order:view')
+  @RequirePermission('shipment:view')
   getShipmentOverview(
     @Query() query: ShipmentOverviewQueryDto,
     @CurrentUser() user: AuthUser,
@@ -215,7 +215,7 @@ export class FulfillmentsController {
   /** Đối soát COD — ghi tiền thu hộ vào đơn nên đòi quyền cập nhật đơn. */
   @Post('shipments/reconcile')
   @HttpCode(200)
-  @RequirePermission('order:update')
+  @RequirePermission('shipment:reconcile')
   reconcileCod(
     @Body() dto: BulkReconcileCodDto,
     @CurrentUser() user: AuthUser,
@@ -224,7 +224,7 @@ export class FulfillmentsController {
   }
 
   @Get('shipments')
-  @RequirePermission('order:view')
+  @RequirePermission('shipment:view')
   listShipments(
     @Query() query: ListShipmentsQueryDto,
     @CurrentUser() user: AuthUser,

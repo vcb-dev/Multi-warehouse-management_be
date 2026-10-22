@@ -230,7 +230,7 @@ describe('ProductService.create — phiên bản và tồn ban đầu', () => {
     const { service } = makeService();
     const user = staffAuth({
       warehousePermissions: {
-        '1': ['inventory:receive'],
+        '1': ['inventory:import'],
         '2': ['inventory:view'],
       },
     });

@@ -36,10 +36,10 @@ const pvnInclude = {
 } satisfies Prisma.PurchaseReturnInclude;
 
 /** Khớp @RequirePermission trong purchasing.controller. */
-const PVN_READ = ['purchasing:manage', 'inventory:view'];
-const PVN_WRITE = ['purchasing:manage', 'inventory:receive'];
-/** Xác nhận hoàn tiền chặt hơn: chỉ purchasing:manage (khớp controller). */
-const PVN_REFUND = ['purchasing:manage'];
+const PVN_READ = 'purchase_return:view';
+const PVN_DETAIL = 'purchase_return:view_detail';
+const PVN_WRITE = 'purchase_return:manage';
+const PVN_REFUND = 'purchase_return:refund';
 
 @Injectable()
 export class PurchaseReturnService {
@@ -194,7 +194,7 @@ export class PurchaseReturnService {
       include: pvnInclude,
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
-    assertLocationPermission(user, PVN_READ, pvn.locationId);
+    assertLocationPermission(user, PVN_DETAIL, pvn.locationId);
     return { data: serializePurchaseReturn(pvn) };
   }
 
@@ -205,7 +205,7 @@ export class PurchaseReturnService {
       select: { locationId: true },
     });
     if (!pvn) throw new NotFoundException('Không tìm thấy phiếu trả hàng');
-    assertLocationPermission(user, PVN_READ, pvn.locationId);
+    assertLocationPermission(user, PVN_DETAIL, pvn.locationId);
   }
 
   async confirmRefund(id: bigint, user: AuthUser) {

@@ -22,7 +22,8 @@ import {
 import { serializeStocktake } from './stocktake.serializer';
 
 /** Khớp @RequirePermission của các endpoint đọc trong stocktake.controller. */
-const READ_PERMISSIONS = ['inventory:stocktake', 'inventory:view'];
+const READ_PERMISSION = 'stocktake:view';
+const DETAIL_PERMISSION = 'stocktake:view_detail';
 
 /**
  * Cân bằng khoá tồn từng dòng nên phiếu nhiều dòng chạy lâu hơn hẳn một giao dịch thường —
@@ -63,10 +64,10 @@ export class StocktakeService {
     // thì kiểm quyền tại đúng kho đó rồi lọc theo nó.
     if (query.location_id) {
       const locationId = BigInt(query.location_id);
-      assertLocationPermission(user, READ_PERMISSIONS, locationId);
+      assertLocationPermission(user, READ_PERMISSION, locationId);
       where.locationId = locationId;
     } else {
-      where.locationId = locationScopeFilter(user, READ_PERMISSIONS);
+      where.locationId = locationScopeFilter(user, READ_PERMISSION);
     }
 
     const [rows, total] = await Promise.all([
@@ -94,13 +95,13 @@ export class StocktakeService {
       include: stocktakeInclude,
     });
     if (!st) throw new NotFoundException('Không tìm thấy phiếu kiểm hàng');
-    assertLocationPermission(user, READ_PERMISSIONS, st.locationId);
+    assertLocationPermission(user, DETAIL_PERMISSION, st.locationId);
     return { data: serializeStocktake(st) };
   }
 
   async create(dto: CreateStocktakeDto, user: AuthUser) {
     const locationId = BigInt(dto.location_id);
-    assertLocationPermission(user, 'inventory:stocktake', locationId);
+    assertLocationPermission(user, 'stocktake:manage', locationId);
     await this.prisma.location.findUniqueOrThrow({ where: { id: locationId } });
 
     const items = this.normalizeItems(dto.items);
@@ -157,7 +158,7 @@ export class StocktakeService {
       select: { id: true, locationId: true, status: true, code: true },
     });
     if (!st) throw new NotFoundException('Không tìm thấy phiếu kiểm hàng');
-    assertLocationPermission(user, 'inventory:stocktake', st.locationId);
+    assertLocationPermission(user, 'stocktake:manage', st.locationId);
     this.assertEditable(st.status);
 
     const items = dto.items ? this.normalizeItems(dto.items) : null;
@@ -223,7 +224,7 @@ export class StocktakeService {
       include: { items: { include: { variant: { select: { sku: true } } } } },
     });
     if (!st) throw new NotFoundException('Không tìm thấy phiếu kiểm hàng');
-    assertLocationPermission(user, 'inventory:stocktake', st.locationId);
+    assertLocationPermission(user, 'stocktake:balance', st.locationId);
     this.assertEditable(st.status);
 
     const counted = st.items.filter((i) => i.countedQuantity != null);
@@ -335,7 +336,7 @@ export class StocktakeService {
       select: { id: true, locationId: true, status: true },
     });
     if (!st) throw new NotFoundException('Không tìm thấy phiếu kiểm hàng');
-    assertLocationPermission(user, 'inventory:stocktake', st.locationId);
+    assertLocationPermission(user, 'stocktake:manage', st.locationId);
     this.assertEditable(st.status);
 
     const updated = await this.prisma.stocktake.update({

@@ -13,6 +13,8 @@ import { AuthCacheService } from './auth-cache.service';
 export const PROTECTED_PERMISSION_KEYS = new Set([
   'role:manage',
   'staff:manage',
+  // Ghi đè tồn bằng số Sapo, đối soát tồn — trước đây gác bằng chính `role:manage`.
+  'system:maintenance',
 ]);
 
 @Injectable()

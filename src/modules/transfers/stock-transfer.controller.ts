@@ -37,7 +37,7 @@ export class StockTransferController {
   ) {}
 
   @Get()
-  @RequirePermission('inventory:transfer', 'inventory:view')
+  @RequirePermission('stock_transfer:view')
   list(
     @Query() query: ListStockTransfersQueryDto,
     @CurrentUser() user: AuthUser,
@@ -46,20 +46,20 @@ export class StockTransferController {
   }
 
   @Post()
-  @RequirePermission('inventory:transfer')
+  @RequirePermission('stock_transfer:manage')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateStockTransferDto, @CurrentUser() user: AuthUser) {
     return this.transfers.create(dto, user);
   }
 
   @Get(':id')
-  @RequirePermission('inventory:transfer', 'inventory:view')
+  @RequirePermission('stock_transfer:view_detail')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.transfers.findOne(BigInt(id), user);
   }
 
   @Put(':id')
-  @RequirePermission('inventory:transfer')
+  @RequirePermission('stock_transfer:manage')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateStockTransferDto,
@@ -69,7 +69,7 @@ export class StockTransferController {
   }
 
   @Post(':id/transition')
-  @RequirePermission('inventory:transfer')
+  @RequirePermission('stock_transfer:manage')
   transition(
     @Param('id') id: string,
     @Body() dto: StnTransitionDto,
@@ -79,19 +79,19 @@ export class StockTransferController {
   }
 
   @Post(':id/receive')
-  @RequirePermission('inventory:transfer')
+  @RequirePermission('stock_transfer:receive')
   receive(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.transfers.receive(BigInt(id), user);
   }
 
   @Post(':id/cancel')
-  @RequirePermission('inventory:transfer')
+  @RequirePermission('stock_transfer:manage')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.transfers.cancel(BigInt(id), user);
   }
 
   @Get(':id/history')
-  @RequirePermission('inventory:transfer', 'inventory:view')
+  @RequirePermission('stock_transfer:view_detail')
   async getHistory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     await this.transfers.assertTransferReadable(BigInt(id), user);
     return this.activityLog.getHistory('stock_transfer', BigInt(id));

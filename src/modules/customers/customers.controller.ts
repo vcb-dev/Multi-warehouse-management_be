@@ -95,37 +95,37 @@ export class CustomersController {
    * trước `:id` để Nest không hiểu `duplicates` là một id.
    */
   @Get('duplicates')
-  @RequirePermission('customer:view', 'customer:manage')
+  @RequirePermission('customer:view', 'customer:create', 'customer:update')
   duplicates(@Query() query: CustomerDuplicateQueryDto) {
     return this.customers.findDuplicates(query);
   }
 
   @Get(':id')
-  @RequirePermission('customer:view', 'order:create')
+  @RequirePermission('customer:view_detail', 'order:create')
   findOne(@Param('id') id: string) {
     return this.customers.findOne(BigInt(id));
   }
 
   @Post()
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer:create')
   create(@Body() dto: CreateCustomerDto) {
     return this.customers.create(dto);
   }
 
   @Put(':id')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer:update')
   update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
     return this.customers.update(BigInt(id), dto);
   }
 
   @Delete(':id')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer:delete')
   remove(@Param('id') id: string) {
     return this.customers.remove(BigInt(id));
   }
 
   @Get(':id/ledger')
-  @RequirePermission('customer:view')
+  @RequirePermission('customer:view_detail')
   getLedger(
     @Param('id') id: string,
     @Query() query: ListCustomerLedgerQueryDto,
@@ -134,7 +134,7 @@ export class CustomersController {
   }
 
   @Post(':id/debt-adjustments')
-  @RequirePermission('customer:manage')
+  @RequirePermission('customer:debt_adjust')
   createDebtAdjustment(
     @Param('id') id: string,
     @Body() dto: CreateCustomerDebtAdjustmentDto,

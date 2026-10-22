@@ -42,21 +42,21 @@ export class ConfigController {
   }
 
   @Post('locations')
-  @RequirePermission('staff:manage')
+  @RequirePermission('location:manage')
   @LocationOptional()
   createLocation(@Body() dto: CreateLocationDto) {
     return this.config.createLocation(dto);
   }
 
   @Patch('locations/:id')
-  @RequirePermission('staff:manage')
+  @RequirePermission('location:manage')
   @LocationOptional()
   updateLocation(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
     return this.config.updateLocation(BigInt(id), dto);
   }
 
   @Delete('locations/:id')
-  @RequirePermission('staff:manage')
+  @RequirePermission('location:manage')
   @LocationOptional()
   deactivateLocation(@Param('id') id: string) {
     return this.config.deactivateLocation(BigInt(id));
@@ -67,7 +67,7 @@ export class ConfigController {
    * đơn) — cùng nhóm "Cấu hình vận chuyển".
    */
   @Put('locations/:id')
-  @RequirePermission('shipping:manage')
+  @RequirePermission('location:manage', 'shipping:manage')
   updateLocationSender(
     @Param('id') id: string,
     @Body() dto: UpdateLocationSenderDto,

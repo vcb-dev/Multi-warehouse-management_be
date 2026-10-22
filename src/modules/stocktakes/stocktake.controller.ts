@@ -32,27 +32,27 @@ export class StocktakeController {
   constructor(private stocktakes: StocktakeService) {}
 
   @Get()
-  @RequirePermission('inventory:stocktake', 'inventory:view')
+  @RequirePermission('stocktake:view')
   list(@Query() query: ListStocktakesQueryDto, @CurrentUser() user: AuthUser) {
     return this.stocktakes.list(query, user);
   }
 
   @Post()
-  @RequirePermission('inventory:stocktake')
+  @RequirePermission('stocktake:manage')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateStocktakeDto, @CurrentUser() user: AuthUser) {
     return this.stocktakes.create(dto, user);
   }
 
   @Get(':id')
-  @RequirePermission('inventory:stocktake', 'inventory:view')
+  @RequirePermission('stocktake:view_detail')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.stocktakes.findOne(BigInt(id), user);
   }
 
   /** Lưu số đếm / ghi chú. Chỉ dùng được khi phiếu còn `checking`. */
   @Put(':id')
-  @RequirePermission('inventory:stocktake')
+  @RequirePermission('stocktake:manage')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateStocktakeDto,
@@ -63,13 +63,13 @@ export class StocktakeController {
 
   /** Chốt phiếu: kéo tồn về đúng số đếm, sinh movement `adjust` gắn phiếu. */
   @Post(':id/balance')
-  @RequirePermission('inventory:stocktake')
+  @RequirePermission('stocktake:balance')
   balance(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.stocktakes.balance(BigInt(id), user);
   }
 
   @Post(':id/cancel')
-  @RequirePermission('inventory:stocktake')
+  @RequirePermission('stocktake:manage')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.stocktakes.cancel(BigInt(id), user);
   }
