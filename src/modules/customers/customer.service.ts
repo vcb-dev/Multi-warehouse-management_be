@@ -1,12 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { NotificationTopic, Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { userDisplayName } from '../../common/utils/user-display-name';
-import { NotificationService } from '../notifications/notification.service';
-import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
-import { findRepeatCustomerIds } from '../../common/search/repeat-customer-search';
+import { NotificationTopic, OrderStatus, Prisma } from '@prisma/client';
 import { BusinessException } from '../../common/exceptions/business.exception';
-import { CustomerGroupService } from './customer-group.service';
+import { findRepeatCustomerIds } from '../../common/search/repeat-customer-search';
+import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
+import { userDisplayName } from '../../common/utils/user-display-name';
+import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   canMatchAddress,
   canMatchName,
@@ -17,6 +16,7 @@ import {
   placeKey,
   type DuplicateReason,
 } from './customer-duplicates';
+import { CustomerGroupService } from './customer-group.service';
 import {
   CreateCustomerDto,
   CustomerAddressDto,
@@ -24,6 +24,7 @@ import {
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './customer.dto';
+import { netCustomerSpent } from './helper/net-customer-spent';
 
 type CustomerWithRelations = Prisma.CustomerGetPayload<{
   include: { addresses: true; groups: { include: { group: true } } };
@@ -36,6 +37,13 @@ type MatchedAddressRow = {
   ward: string | null;
   district: string | null;
   province: string | null;
+};
+
+type PurchaseStats = {
+  orders_count: number;
+  total_spent: number;
+  last_order_id: string | null;
+  last_order_name: string | null;
 };
 
 /** Giao các mảng id — dùng khi nhiều filter (q, repeat_only) cùng thu hẹp theo id */
@@ -110,7 +118,7 @@ export class CustomerService {
     }));
   }
 
-  serialize(c: CustomerWithRelations) {
+  serialize(c: CustomerWithRelations, live?: PurchaseStats) {
     return {
       id: c.id.toString(),
       sapo_id: c.sapoId?.toString() ?? null,
@@ -125,14 +133,14 @@ export class CustomerService {
       gender: c.gender,
       dob: c.dob?.toISOString() ?? null,
       accepts_marketing: c.acceptsMarketing,
-      orders_count: c.ordersCount,
-      total_spent: Number(c.totalSpent),
-      last_order_id: c.lastOrderId?.toString() ?? null,
-      last_order_name: c.lastOrderName,
       note: c.note,
       tags: c.tags,
       created_on: c.createdOn.toISOString(),
       modified_on: c.modifiedOn.toISOString(),
+      orders_count: live?.orders_count ?? c.ordersCount,
+      total_spent: live?.total_spent ?? Number(c.totalSpent),
+      last_order_id: live?.last_order_id ?? c.lastOrderId?.toString() ?? null,
+      last_order_name: live?.last_order_name ?? c.lastOrderName,
       addresses: c.addresses.map(serializeAddress),
       default_address: (() => {
         const d = c.addresses.find((a) => a.isDefault);
@@ -315,15 +323,44 @@ export class CustomerService {
   }
 
   async findOne(id: bigint) {
-    const c = await this.prisma.customer.findUnique({
-      where: { id },
-      include: {
-        addresses: { orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] },
-        groups: { include: { group: true } },
-      },
-    });
+    const activeOrders = {
+      customerId: id,
+      status: { not: OrderStatus.cancelled },
+    } satisfies Prisma.OrderWhereInput;
+    // Lấy thông tin khách hàng, số đơn, đơn cuối cùng, và đơn có tiền thực chi.
+    const [c, ordersCount, last, moneyOrders] = await Promise.all([
+      this.prisma.customer.findUnique({
+        where: { id },
+        include: {
+          addresses: { orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] },
+          groups: { include: { group: true } },
+        },
+      }),
+      this.prisma.order.count({ where: activeOrders }),
+      this.prisma.order.findFirst({
+        where: activeOrders,
+        orderBy: { createdOn: 'desc' },
+        select: { id: true, name: true },
+      }),
+      this.prisma.order.findMany({
+        where: { customerId: id },
+        select: {
+          totalReceived: true,
+          totalRefunded: true,
+          refunds: { select: { totalRefunded: true } },
+        },
+      }),
+    ]);
     if (!c) throw new NotFoundException('Không tìm thấy khách hàng');
-    return { data: this.serialize(c) };
+
+    return {
+      data: this.serialize(c, {
+        orders_count: ordersCount,
+        total_spent: netCustomerSpent(moneyOrders),
+        last_order_id: last?.id.toString() ?? null,
+        last_order_name: last?.name ?? null,
+      }),
+    };
   }
 
   /**
