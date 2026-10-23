@@ -10,30 +10,30 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { assertWebhookSecret } from '../../common/auth/webhook-secret';
 import {
-  CurrentUser,
   AuthUser,
+  CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/roles.decorator';
-import { assertWebhookSecret } from '../../common/auth/webhook-secret';
 import { CarrierTicketService } from './carrier-ticket.service';
 import { CodReconciliationService } from './cod-reconciliation.service';
 import {
   BulkMarkPrintedDto,
-  BulkReconcileCodDto,
   BulkPackingStatusDto,
+  BulkReconcileCodDto,
   CancelFulfillmentDto,
   CarrierWebhookDto,
   CreateCarrierTicketDto,
   CreatePackingDto,
-  PushShipmentDto,
-  ReplyCarrierTicketDto,
-  UpdatePackingStatusDto,
-  UpdateShipmentStatusDto,
   ListPackagesQueryDto,
   ListShipmentsQueryDto,
+  PushShipmentDto,
+  ReplyCarrierTicketDto,
   ShipmentOverviewQueryDto,
+  UpdatePackingStatusDto,
+  UpdateShipmentStatusDto,
   VtpWebhookDto,
 } from './fulfillment.dto';
 import { FulfillmentService } from './fulfillment.service';
@@ -230,5 +230,11 @@ export class FulfillmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.fulfillments.listShipments(query, user);
+  }
+
+  @Get(':id')
+  @RequirePermission('shipment:view')
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.fulfillments.findOne(BigInt(id), user);
   }
 }

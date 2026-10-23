@@ -20,7 +20,6 @@ import {
 } from '../../common/auth/access';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { BusinessException } from '../../common/exceptions/business.exception';
-import { userDisplayName } from '../../common/utils/user-display-name';
 import {
   appendAnd,
   firstDefined,
@@ -30,15 +29,17 @@ import {
   parseIdList,
   parseList,
 } from '../../common/query/filter-params';
+import { KeyedSerialQueue } from '../../common/utils/keyed-serial-queue';
+import { userDisplayName } from '../../common/utils/user-display-name';
+import { PrismaService } from '../../prisma/prisma.service';
+import { resolveChannelSyncActor } from '../channels/channel-sync-actor';
 import { InventoryService } from '../inventory/inventory.service';
+import { sortForLocking } from '../inventory/inventory.types';
+import { NotificationService } from '../notifications/notification.service';
 import {
   recomputeOrderRefundStatuses,
   returnedQuantities,
 } from '../orders/order-refund-status';
-import { sortForLocking } from '../inventory/inventory.types';
-import { resolveChannelSyncActor } from '../channels/channel-sync-actor';
-import { NotificationService } from '../notifications/notification.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
 import {
   CarrierConnectionConfig,
@@ -64,22 +65,21 @@ import {
   fulfillmentInclude,
   serializeFulfillment,
 } from './fulfillment.serializer';
-import {
-  ShippingProviderService,
-  VTP_PROVIDER_CODE,
-} from './shipping-provider.service';
-import {
-  serializeShipmentListItem,
-  shipmentListInclude,
-} from './shipment-list.serializer';
+import { locationSender } from './location-sender';
 import {
   buildPackingListWhere,
   packingListInclude,
   requestedLocationIds,
   serializePackingListItem,
 } from './packing-list';
-import { KeyedSerialQueue } from '../../common/utils/keyed-serial-queue';
-import { locationSender } from './location-sender';
+import {
+  serializeShipmentListItem,
+  shipmentListInclude,
+} from './shipment-list.serializer';
+import {
+  ShippingProviderService,
+  VTP_PROVIDER_CODE,
+} from './shipping-provider.service';
 
 const DEFAULT_WEIGHT_GRAMS = 500;
 
@@ -393,6 +393,33 @@ export class FulfillmentService {
       total,
       page,
       page_size: pageSize,
+    };
+  }
+  /** Lấy vận đơn theo ID. */
+  async findOne(id: bigint, user: AuthUser) {
+    const f = await this.prisma.fulfillment.findUnique({
+      where: { id },
+      include: {
+        ...fulfillmentInclude,
+        order: { select: { id: true, name: true, locationId: true } },
+      },
+    });
+    if (!f || !f.shipmentStatus) {
+      throw new NotFoundException('Không tìm thấy vận đơn');
+    }
+    assertLocationPermission(
+      user,
+      'shipment:view',
+      f.locationId ?? f.order.locationId,
+    );
+    return {
+      data: {
+        ...serializeFulfillment(f),
+        order_name: f.order.name,
+        location_name: f.location?.name ?? null,
+        reconciliation_status: f.codReconciledOn ? 'reconciled' : 'pending',
+        cod_reconciled_on: f.codReconciledOn?.toISOString() ?? null,
+      },
     };
   }
 
