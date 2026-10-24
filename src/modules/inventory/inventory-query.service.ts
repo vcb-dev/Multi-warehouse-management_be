@@ -1,12 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   assertLocationPermission,
   locationScopeFilter,
 } from '../../common/auth/access';
-import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
 import {
   appendAnd,
   parseDateRange,
@@ -16,6 +14,13 @@ import {
   parseSort,
   textContainsAny,
 } from '../../common/query/filter-params';
+import { findVariantIdsByQuery } from '../../common/search/unaccent-search';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  InventoryNxtService,
+  NxtRowInput,
+  rootProductCode,
+} from './inventory-nxt.service';
 import { ListInventoryQueryDto, ListMovementsQueryDto } from './inventory.dto';
 import {
   optionValueLabels,
@@ -23,11 +28,6 @@ import {
   serializeMovement,
   variantTitle,
 } from './inventory.serializer';
-import {
-  InventoryNxtService,
-  NxtRowInput,
-  rootProductCode,
-} from './inventory-nxt.service';
 
 const LOW_STOCK_THRESHOLD = Number(process.env.LOW_STOCK_THRESHOLD ?? 5);
 
@@ -166,6 +166,11 @@ function variantOrderBy(
 function orderByIds<T extends { id: bigint }>(rows: T[], ids: bigint[]): T[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
+}
+
+/** Khoảng giá bán, dùng chung cho cả hai nhánh danh sách. */
+function priceRange(query: ListInventoryQueryDto) {
+  return parseIntRange(query.price_min, query.price_max);
 }
 
 @Injectable()
@@ -332,10 +337,7 @@ export class InventoryQueryService {
         product_id: v.productId.toString(),
         sku: v.sku,
         product_name: v.product.name,
-        variant_title: variantTitle(
-          v.title,
-          optionValueLabels(v.optionValues),
-        ),
+        variant_title: variantTitle(v.title, optionValueLabels(v.optionValues)),
         image_url: v.imageUrl ?? v.product.imageUrl ?? null,
         unit: v.unit ?? null,
         location_code: location.code,
@@ -470,6 +472,9 @@ export class InventoryQueryService {
     const product = productClause(query);
     if (product) appendAnd(where, { product });
 
+    const price = priceRange(query);
+    if (price) appendAnd(where, { price });
+
     return where;
   }
 
@@ -563,6 +568,9 @@ export class InventoryQueryService {
 
     const product = productClause(query);
     if (product) appendAnd(where, { variant: { product } });
+
+    const price = priceRange(query);
+    if (price) appendAnd(where, { variant: { price } });
 
     return where;
   }

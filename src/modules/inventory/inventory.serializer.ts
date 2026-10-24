@@ -1,9 +1,9 @@
 import {
   InventoryLevel,
   InventoryMovement,
+  Location,
   Product,
   ProductVariant,
-  Location,
 } from '@prisma/client';
 
 type OptionValueRef = { value: string; option?: { position?: number } | null };
@@ -73,7 +73,8 @@ export function serializeLevel(level: LevelWithRelations) {
     unavailable: level.unavailable,
     incoming: level.incoming,
     available: level.available,
-    price: level.price.toString(),
+    price: level.variant.price.toString(),
+    // cost: level.variant.cost.toString(),  // nếu muốn giá vốn cũng khớp
     cost: level.cost.toString(),
     updated_at: level.updatedAt.toISOString(),
   };
