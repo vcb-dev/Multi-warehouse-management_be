@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { NotificationTopic, OrderStatus, Prisma } from '@prisma/client';
+import { NotificationTopic, Prisma } from '@prisma/client';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { findRepeatCustomerIds } from '../../common/search/repeat-customer-search';
 import { findCustomerIdsByQuery } from '../../common/search/unaccent-search';
@@ -24,7 +24,13 @@ import {
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './customer.dto';
-import { netCustomerSpent } from './helper/net-customer-spent';
+import {
+  emptyPurchaseStats,
+  purchaseOrderSelect,
+  purchaseStatsByCustomerId,
+  purchaseStatsFromOrders,
+  type PurchaseStats,
+} from './helper/purchase-stats';
 
 type CustomerWithRelations = Prisma.CustomerGetPayload<{
   include: { addresses: true; groups: { include: { group: true } } };
@@ -37,13 +43,6 @@ type MatchedAddressRow = {
   ward: string | null;
   district: string | null;
   province: string | null;
-};
-
-type PurchaseStats = {
-  orders_count: number;
-  total_spent: number;
-  last_order_id: string | null;
-  last_order_name: string | null;
 };
 
 /** Giao các mảng id — dùng khi nhiều filter (q, repeat_only) cùng thu hẹp theo id */
@@ -313,8 +312,12 @@ export class CustomerService {
       this.prisma.customer.count({ where }),
     ]);
 
+    const live = await this.livePurchaseStats(rows.map((c) => c.id));
+
     return {
-      data: rows.map((c) => this.serialize(c)),
+      data: rows.map((c) =>
+        this.serialize(c, live.get(c.id.toString()) ?? emptyPurchaseStats),
+      ),
       total,
       page,
       limit,
@@ -323,12 +326,7 @@ export class CustomerService {
   }
 
   async findOne(id: bigint) {
-    const activeOrders = {
-      customerId: id,
-      status: { not: OrderStatus.cancelled },
-    } satisfies Prisma.OrderWhereInput;
-    // Lấy thông tin khách hàng, số đơn, đơn cuối cùng, và đơn có tiền thực chi.
-    const [c, ordersCount, last, moneyOrders] = await Promise.all([
+    const [c, orders] = await Promise.all([
       this.prisma.customer.findUnique({
         where: { id },
         include: {
@@ -336,31 +334,24 @@ export class CustomerService {
           groups: { include: { group: true } },
         },
       }),
-      this.prisma.order.count({ where: activeOrders }),
-      this.prisma.order.findFirst({
-        where: activeOrders,
-        orderBy: { createdOn: 'desc' },
-        select: { id: true, name: true },
-      }),
       this.prisma.order.findMany({
         where: { customerId: id },
-        select: {
-          totalReceived: true,
-          totalRefunded: true,
-          refunds: { select: { totalRefunded: true } },
-        },
+        select: purchaseOrderSelect,
       }),
     ]);
     if (!c) throw new NotFoundException('Không tìm thấy khách hàng');
+    // Lấy thông tin chi tiết về tổng số đơn và tổng chi tiêu của khách hàng
+    return { data: this.serialize(c, purchaseStatsFromOrders(orders)) };
+  }
 
-    return {
-      data: this.serialize(c, {
-        orders_count: ordersCount,
-        total_spent: netCustomerSpent(moneyOrders),
-        last_order_id: last?.id.toString() ?? null,
-        last_order_name: last?.name ?? null,
-      }),
-    };
+  /** Số mua hàng sống cho một trang khách — không tin cột cache Sapo. */
+  private async livePurchaseStats(ids: bigint[]) {
+    if (!ids.length) return new Map<string, PurchaseStats>();
+    const orders = await this.prisma.order.findMany({
+      where: { customerId: { in: ids } },
+      select: purchaseOrderSelect,
+    });
+    return purchaseStatsByCustomerId(orders);
   }
 
   /**
