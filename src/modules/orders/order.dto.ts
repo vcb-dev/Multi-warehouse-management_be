@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -661,6 +662,17 @@ export class RefundOrderReturnDto {
 export class CreateOrderReturnDto {
   @IsString()
   order_id!: string;
+
+  /**
+   * Mã phiếu tự đặt; bỏ trống thì hệ thống tự sinh. Phải bắt đầu bằng `RTN` vì
+   * chỉ phiếu mang mã `RTN…` mới được coi là phiếu lập trong app (nhận hàng, hoàn tiền).
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^RTN[A-Za-z0-9._-]{1,29}$/, {
+    message: 'Mã đơn trả hàng phải bắt đầu bằng RTN (chữ, số, . _ -, tối đa 32 ký tự)',
+  })
+  code?: string;
 
   @IsOptional()
   @IsString()

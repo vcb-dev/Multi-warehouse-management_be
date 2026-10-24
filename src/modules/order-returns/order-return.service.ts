@@ -237,7 +237,21 @@ export class OrderReturnService {
     const record = await this.prisma.$transaction(async (tx) => {
       // Cấp mã BÊN TRONG transaction: khoá advisory của `generateReturnCode` chỉ
       // giữ tới lúc commit nên gọi ở ngoài thì hai phiếu tạo đồng thời vẫn trùng mã.
-      const code = await generateReturnCode(tx);
+      const custom = dto.code?.trim();
+      if (custom) {
+        const dup = await tx.orderReturn.findUnique({
+          where: { code: custom },
+          select: { id: true },
+        });
+        if (dup) {
+          throw new BusinessException(
+            'DUPLICATE_CODE',
+            'Mã đơn trả hàng đã tồn tại',
+            409,
+          );
+        }
+      }
+      const code = custom || (await generateReturnCode(tx));
       const created = await tx.orderReturn.create({
         data: {
           code,
